@@ -1,0 +1,6 @@
+{
+  "name": "Solospace",
+  "description": "An advanced agent orchestration platform and workspace with high-fidelity canvas and conversational steering.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
