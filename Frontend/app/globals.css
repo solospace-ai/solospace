@@ -1,5 +1,65 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "@xyflow/react/dist/style.css";
+
+/* React Flow styling overrides */
+.react-flow__minimap {
+  background-color: rgba(13, 13, 13, 0.8) !important;
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 12px;
+}
+
+.react-flow__minimap-mask {
+  fill: rgba(0, 0, 0, 0.6) !important;
+}
+
+.react-flow__controls {
+  background: rgba(13, 13, 13, 0.8) !important;
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5) !important;
+}
+
+.react-flow__controls-button {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  color: #a3a3a3 !important;
+  fill: currentColor !important;
+  transition: all 0.15s !important;
+}
+
+.react-flow__controls-button:hover {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #ffffff !important;
+}
+
+.react-flow__handle {
+  width: 10px !important;
+  height: 10px !important;
+  background: #000000 !important;
+  border: 2px solid #06b6d4 !important;
+  box-shadow: 0 0 8px #06b6d4 !important;
+  transition: all 0.2s;
+}
+
+.react-flow__handle:hover {
+  transform: scale(1.25);
+  background: #06b6d4 !important;
+}
+
+.react-flow__edge-path {
+  stroke-dasharray: 5, 5;
+  animation: dash 2.5s linear infinite;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #ffffff !important;
+  stroke-width: 3px !important;
+  filter: drop-shadow(0 0 4px rgba(255,255,255,0.5));
+}
 
 /* Core design tokens */
 :root {

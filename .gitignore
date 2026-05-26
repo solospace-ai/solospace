@@ -37,3 +37,12 @@ Thumbs.db
 
 # TypeScript compilation info
 **/tsconfig.tsbuildinfo
+
+# Python/Backend patterns
+**/venv/
+**/.venv/
+**/__pycache__/
+*.pyc
+**/solospace.db
+**/memory_store.json
+
