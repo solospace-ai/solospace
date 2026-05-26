@@ -106,6 +106,12 @@ export interface WorkflowState {
   setModel: (model: string) => void;
   setProviderApiKey: (provider: string, key: string) => void;
   fetchAvailableProviders: () => Promise<void>;
+  fallbackProvider: string;
+  setFallbackProvider: (provider: string) => void;
+  providerBaseUrls: Record<string, string>;
+  setProviderBaseUrl: (provider: string, url: string) => void;
+  providerModels: Record<string, any[]>;
+  fetchProviderModels: (providerId: string) => Promise<void>;
   followUpSuggestions: string[];
   liveThoughts: string;
   abortController: AbortController | null;
@@ -206,6 +212,39 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       }
     } catch (e) {
       console.error("Failed to fetch available providers", e);
+    }
+  },
+  fallbackProvider: "",
+  setFallbackProvider: (provider) => set({ fallbackProvider: provider }),
+  providerBaseUrls: {},
+  setProviderBaseUrl: (provider, url) => set((state) => ({ providerBaseUrls: { ...state.providerBaseUrls, [provider]: url } })),
+  providerModels: {},
+  fetchProviderModels: async (providerId: string) => {
+    try {
+      const state = get();
+      const apiKey = state.apiKeys[providerId] || state.apiKey || "";
+      const baseUrl = state.providerBaseUrls[providerId] || "";
+      const resp = await fetch("/api/gemini/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: providerId,
+          api_key: apiKey,
+          api_keys: state.apiKeys,
+          base_url: baseUrl
+        })
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        set((state) => ({
+          providerModels: {
+            ...state.providerModels,
+            [providerId]: data.models || []
+          }
+        }));
+      }
+    } catch (e) {
+      console.error(`Failed to fetch models for provider ${providerId}`, e);
     }
   },
   followUpSuggestions: [],
@@ -628,10 +667,13 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
             .filter(m => m.id !== aiMsgId) // Exclude current empty prompt placeholder
             .map(m => ({ sender: m.sender, text: m.text })),
           api_key: get().apiKeys[get().provider] || get().apiKey || "",
+          api_keys: get().apiKeys,
           session_id: get().activeSessionId || "",
           execute_agents: execute,
           provider: get().provider,
-          model: get().model
+          model: get().model,
+          fallback_provider: get().fallbackProvider || null,
+          base_url: get().providerBaseUrls[get().provider] || null
         }),
         signal: controller.signal
       });
@@ -822,10 +864,13 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
             .filter(m => m.id !== aiMsgId)
             .map(m => ({ sender: m.sender, text: m.text })),
           api_key: get().apiKeys[get().provider] || get().apiKey || "",
+          api_keys: get().apiKeys,
           nodes: get().nodes,
           edges: get().edges,
           provider: get().provider,
-          model: get().model
+          model: get().model,
+          fallback_provider: get().fallbackProvider || null,
+          base_url: get().providerBaseUrls[get().provider] || null
         }),
         signal: controller.signal
       });

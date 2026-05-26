@@ -76,6 +76,12 @@ function SolospaceContent() {
   const setModel = useWorkflowStore((s) => s.setModel);
   const setProviderApiKey = useWorkflowStore((s) => s.setProviderApiKey);
   const fetchAvailableProviders = useWorkflowStore((s) => s.fetchAvailableProviders);
+  const fallbackProvider = useWorkflowStore((s) => s.fallbackProvider);
+  const providerBaseUrls = useWorkflowStore((s) => s.providerBaseUrls);
+  const providerModels = useWorkflowStore((s) => s.providerModels);
+  const setFallbackProvider = useWorkflowStore((s) => s.setFallbackProvider);
+  const setProviderBaseUrl = useWorkflowStore((s) => s.setProviderBaseUrl);
+  const fetchProviderModels = useWorkflowStore((s) => s.fetchProviderModels);
 
   const triggerSteerOrchestration = useWorkflowStore((s) => s.triggerSteerOrchestration);
   const setChatMessages = useWorkflowStore((s) => s.setChatMessages);
@@ -168,26 +174,36 @@ function SolospaceContent() {
   const [apiKeyInput, setApiKeyInput] = useState<string>("");
   const [selectedProvider, setSelectedProvider] = useState<string>("gemini");
   const [selectedModel, setSelectedModel] = useState<string>("");
+  const [baseUrlInput, setBaseUrlInput] = useState<string>("");
+  const [fallbackProviderInput, setFallbackProviderInput] = useState<string>("");
+  const [isFetchingModels, setIsFetchingModels] = useState<boolean>(false);
+  const [modelsFetchStatus, setModelsFetchStatus] = useState<string>("");
 
   useEffect(() => {
     if (isSecretOpen) {
       setSelectedProvider(provider);
       setSelectedModel(model);
       setApiKeyInput(apiKeys[provider] || apiKey || "");
+      setBaseUrlInput(providerBaseUrls[provider] || "");
+      setFallbackProviderInput(fallbackProvider || "");
+      setModelsFetchStatus("");
     }
-  }, [isSecretOpen, provider, model, apiKeys, apiKey]);
+  }, [isSecretOpen, provider, model, apiKeys, apiKey, providerBaseUrls, fallbackProvider]);
 
-  // When selectedProvider changes, set selectedModel to its default model, and load key
+  // When selectedProvider changes, set selectedModel to its default model, and load key and base url
   useEffect(() => {
     if (isSecretOpen && availableProviders[selectedProvider]) {
       const pConfig = availableProviders[selectedProvider];
-      const modelExists = pConfig.models?.some((m: any) => m.id === selectedModel);
+      const modelsList = providerModels[selectedProvider] || pConfig.models || [];
+      const modelExists = modelsList.some((m: any) => m.id === selectedModel);
       if (!modelExists) {
         setSelectedModel(pConfig.default_model);
       }
       setApiKeyInput(apiKeys[selectedProvider] || "");
+      setBaseUrlInput(providerBaseUrls[selectedProvider] || pConfig.base_url || "");
+      setModelsFetchStatus("");
     }
-  }, [selectedProvider, availableProviders]);
+  }, [selectedProvider, availableProviders, providerModels]);
 
   // Scroll helper
   const scrollToBottom = () => {
@@ -1374,27 +1390,70 @@ function SolospaceContent() {
                   </select>
                 </div>
 
+                {/* 1.5 Base URL Selector (conditionally displayed) */}
+                {availableProviders[selectedProvider]?.requires_base_url && (
+                  <div className="space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Base URL</label>
+                    <input
+                      type="text"
+                      placeholder={availableProviders[selectedProvider]?.is_local ? "http://localhost:11434/v1" : "https://YOUR_RESOURCE.openai.azure.com/openai/deployments"}
+                      value={baseUrlInput}
+                      onChange={(e) => setBaseUrlInput(e.target.value)}
+                      className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
+                    />
+                  </div>
+                )}
+
                 {/* 2. Model Selector */}
                 <div className="space-y-1.5">
-                  <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Model</label>
-                  {availableProviders[selectedProvider]?.models?.length > 0 ? (
+                  <div className="flex justify-between items-center">
+                    <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Model</label>
+                    {availableProviders[selectedProvider] && (
+                      <button
+                        onClick={async () => {
+                          setIsFetchingModels(true);
+                          setModelsFetchStatus("Connecting...");
+                          try {
+                            setProviderApiKey(selectedProvider, apiKeyInput.trim());
+                            setProviderBaseUrl(selectedProvider, baseUrlInput.trim());
+                            await fetchProviderModels(selectedProvider);
+                            setModelsFetchStatus("Models loaded successfully!");
+                          } catch (e) {
+                            setModelsFetchStatus("Failed to query models endpoint.");
+                          } finally {
+                            setIsFetchingModels(false);
+                          }
+                        }}
+                        disabled={isFetchingModels}
+                        className="text-[9px] text-cyan-400 hover:underline cursor-pointer disabled:opacity-50 font-mono"
+                      >
+                        {isFetchingModels ? "Fetching..." : "Fetch Models ↻"}
+                      </button>
+                    )}
+                  </div>
+                  {(providerModels[selectedProvider] || availableProviders[selectedProvider]?.models)?.length > 0 ? (
                     <select
                       value={selectedModel}
                       onChange={(e) => setSelectedModel(e.target.value)}
                       className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
                     >
-                      {availableProviders[selectedProvider].models.map((m: any) => (
-                        <option key={m.id} value={m.id}>{m.name} ({m.tier})</option>
+                      {(providerModels[selectedProvider] || availableProviders[selectedProvider].models).map((m: any) => (
+                        <option key={m.id} value={m.id}>{m.name || m.id} {m.tier ? `(${m.tier})` : ""}</option>
                       ))}
                     </select>
                   ) : (
                     <input
                       type="text"
-                      placeholder="e.g. llama3, qwen2.5, my-fine-tune"
+                      placeholder="e.g. gpt-4o, llama3, custom-deployment-id"
                       value={selectedModel}
                       onChange={(e) => setSelectedModel(e.target.value)}
                       className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
                     />
+                  )}
+                  {modelsFetchStatus && (
+                    <p className={`text-[8px] font-mono ${modelsFetchStatus.toLowerCase().includes("failed") ? "text-red-400" : "text-emerald-400"}`}>
+                      {modelsFetchStatus}
+                    </p>
                   )}
                 </div>
 
@@ -1432,6 +1491,23 @@ function SolospaceContent() {
                   </p>
                 </div>
 
+                {/* 3.5 Fallback Provider */}
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Fallback Provider (Optional)</label>
+                  <select
+                    value={fallbackProviderInput}
+                    onChange={(e) => setFallbackProviderInput(e.target.value)}
+                    className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
+                  >
+                    <option value="">None (Disabled)</option>
+                    {Object.entries(availableProviders)
+                      .filter(([pid]) => pid !== selectedProvider)
+                      .map(([pid, cfg]: [string, any]) => (
+                        <option key={pid} value={pid}>{cfg.name}</option>
+                      ))}
+                  </select>
+                </div>
+
                 {/* 4. Save and Cancel Buttons */}
                 <div className="pt-4 flex gap-3">
                   <button
@@ -1440,6 +1516,8 @@ function SolospaceContent() {
                       setProvider(selectedProvider);
                       setModel(selectedModel);
                       setProviderApiKey(selectedProvider, apiKeyInput.trim());
+                      setProviderBaseUrl(selectedProvider, baseUrlInput.trim());
+                      setFallbackProvider(fallbackProviderInput);
                       setIsSecretOpen(false);
                     }}
                     className="flex-1 py-2.5 bg-white hover:bg-neutral-100 text-black font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"

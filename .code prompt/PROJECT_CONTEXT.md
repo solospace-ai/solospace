@@ -1,11 +1,11 @@
 # Full Project Context
 
-> Generated: 2026-05-26T13:49:43.392Z
+> Generated: 2026-05-26T14:08:40.204Z
 > Mode: Full Project
-> Files: 32
-> Total Lines: 7,103
-> Total Size: 274.1 KB
-> Directories: 15
+> Files: 33
+> Total Lines: 7,739
+> Total Size: 300.5 KB
+> Directories: 16
 
 ---
 
@@ -28,6 +28,8 @@ SoloSpace/
 │   │   │       ├── approve/
 │   │   │       │   └── route.ts
 │   │   │       ├── execute_custom/
+│   │   │       │   └── route.ts
+│   │   │       ├── models/
 │   │   │       │   └── route.ts
 │   │   │       ├── orchestrate/
 │   │   │       │   └── route.ts
@@ -414,7 +416,7 @@ SoloSpace/
 
 ### File: `Backend/main.py`
 
-> 1456 lines | 58.8 KB
+> 1512 lines | 61.1 KB
 
 ```python
    1 | import os
@@ -444,1435 +446,1491 @@ SoloSpace/
   25 |     get_embedding,
   26 |     get_available_providers,
   27 |     resolve_api_key,
-  28 | )
-  29 | 
-  30 | 
-  31 | # Initialize database
-  32 | db.init_db()
-  33 | 
-  34 | app = FastAPI(title="Solospace Python Orchestrator API")
+  28 |     fetch_models_from_provider,
+  29 |     get_provider_config,
+  30 | )
+  31 | 
+  32 | 
+  33 | # Initialize database
+  34 | db.init_db()
   35 | 
-  36 | # Allow Next.js frontend to reach this API (critical on Windows / localhost dev)
-  37 | app.add_middleware(
-  38 |     CORSMiddleware,
-  39 |     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-  40 |     allow_credentials=True,
-  41 |     allow_methods=["*"],
-  42 |     allow_headers=["*"],
-  43 | )
-  44 | 
-  45 | # Track by IP for Rate Limiting
-  46 | ip_rate_limits = {}
-  47 | 
-  48 | @app.middleware("http")
-  49 | async def ip_rate_limit_middleware(request: Request, call_next):
-  50 |     if request.method == "OPTIONS":
-  51 |         return await call_next(request)
-  52 |         
-  53 |     client_ip = request.client.host if request.client else "unknown"
-  54 |     
-  55 |     if client_ip not in ip_rate_limits:
-  56 |         ip_rate_limits[client_ip] = {"count": 0, "window_start": time.time()}
-  57 |     
-  58 |     info = ip_rate_limits[client_ip]
-  59 |     now = time.time()
-  60 |     
-  61 |     # Reset window every 60 seconds
-  62 |     if now - info["window_start"] > 60:
-  63 |         info["count"] = 0
-  64 |         info["window_start"] = now
-  65 |     
-  66 |     info["count"] += 1
+  36 | app = FastAPI(title="Solospace Python Orchestrator API")
+  37 | 
+  38 | # Allow Next.js frontend to reach this API (critical on Windows / localhost dev)
+  39 | app.add_middleware(
+  40 |     CORSMiddleware,
+  41 |     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+  42 |     allow_credentials=True,
+  43 |     allow_methods=["*"],
+  44 |     allow_headers=["*"],
+  45 | )
+  46 | 
+  47 | # Track by IP for Rate Limiting
+  48 | ip_rate_limits = {}
+  49 | 
+  50 | @app.middleware("http")
+  51 | async def ip_rate_limit_middleware(request: Request, call_next):
+  52 |     if request.method == "OPTIONS":
+  53 |         return await call_next(request)
+  54 |         
+  55 |     client_ip = request.client.host if request.client else "unknown"
+  56 |     
+  57 |     if client_ip not in ip_rate_limits:
+  58 |         ip_rate_limits[client_ip] = {"count": 0, "window_start": time.time()}
+  59 |     
+  60 |     info = ip_rate_limits[client_ip]
+  61 |     now = time.time()
+  62 |     
+  63 |     # Reset window every 60 seconds
+  64 |     if now - info["window_start"] > 60:
+  65 |         info["count"] = 0
+  66 |         info["window_start"] = now
   67 |     
-  68 |     # Max 40 requests per minute per IP
-  69 |     if info["count"] > 40:
-  70 |         return JSONResponse(
-  71 |             status_code=429,
-  72 |             content={"detail": "Rate limit exceeded. Please wait before making more requests."}
-  73 |         )
-  74 |     
-  75 |     return await call_next(request)
-  76 | 
-  77 | # Global coordination states
-  78 | MEMORY_FILE = "memory_store.json"
-  79 | 
-  80 | class Message(BaseModel):
-  81 |     sender: str
-  82 |     text: str
-  83 | 
-  84 | class OrchestrateRequest(BaseModel):
-  85 |     prompt: str
-  86 |     history: Optional[List[Message]] = []
-  87 |     api_key: Optional[str] = None
-  88 |     session_id: Optional[str] = None
-  89 |     execute_agents: bool = True
-  90 |     provider: str = "gemini"
-  91 |     model: Optional[str] = None
-  92 | 
-  93 | class ApprovalRequest(BaseModel):
-  94 |     sessionId: str
-  95 |     nodeId: str
-  96 |     toolName: str
-  97 |     action: str  # "approve" or "deny"
-  98 | 
-  99 | class ExecuteCustomRequest(BaseModel):
- 100 |     session_id: str
- 101 |     api_key: str
- 102 |     nodes: List[Dict[str, Any]]
- 103 |     edges: List[Dict[str, Any]]
- 104 |     prompt: str
- 105 |     history: Optional[List[Message]] = []
- 106 |     provider: str = "gemini"
- 107 |     model: Optional[str] = None
- 108 | 
- 109 | # ─── VECTOR DB MEMORY STORE (Multi-Provider Embeddings + Local Cosine Similarity) ───
- 110 | 
- 111 | async def get_gemini_embedding(text: str, api_key: str) -> List[float]:
- 112 |     return await get_embedding("gemini", api_key, text)
- 113 | 
- 114 | def cosine_similarity(v1: List[float], v2: List[float]) -> float:
- 115 |     if not v1 or not v2 or len(v1) != len(v2):
- 116 |         return 0.0
- 117 |     dot = sum(a * b for a, b in zip(v1, v2))
- 118 |     norm1 = math.sqrt(sum(a * a for a in v1))
- 119 |     norm2 = math.sqrt(sum(b * b for b in v2))
- 120 |     if norm1 == 0.0 or norm2 == 0.0:
- 121 |         return 0.0
- 122 |     return dot / (norm1 * norm2)
- 123 | 
- 124 | # Bug 7: Thread-safe memory I/O lock
- 125 | memory_lock = threading.Lock()
- 126 | 
- 127 | def load_memories() -> List[Dict[str, Any]]:
- 128 |     with memory_lock:
- 129 |         if os.path.exists(MEMORY_FILE):
- 130 |             try:
- 131 |                 with open(MEMORY_FILE, "r") as f:
- 132 |                     return json.load(f)
- 133 |             except Exception:
- 134 |                 pass
- 135 |     return []
- 136 | 
- 137 | def save_memories(memories: List[Dict[str, Any]]):
- 138 |     with memory_lock:
- 139 |         try:
- 140 |             with open(MEMORY_FILE, "w") as f:
- 141 |                 json.dump(memories, f, indent=2)
- 142 |         except Exception as e:
- 143 |             print(f"[MEMORY ERROR] Saving file failed: {e}")
+  68 |     info["count"] += 1
+  69 |     
+  70 |     # Max 40 requests per minute per IP
+  71 |     if info["count"] > 40:
+  72 |         return JSONResponse(
+  73 |             status_code=429,
+  74 |             content={"detail": "Rate limit exceeded. Please wait before making more requests."}
+  75 |         )
+  76 |     
+  77 |     return await call_next(request)
+  78 | 
+  79 | # Global coordination states
+  80 | MEMORY_FILE = "memory_store.json"
+  81 | 
+  82 | class Message(BaseModel):
+  83 |     sender: str
+  84 |     text: str
+  85 | 
+  86 | class OrchestrateRequest(BaseModel):
+  87 |     prompt: str
+  88 |     history: Optional[List[Message]] = []
+  89 |     api_key: Optional[str] = None
+  90 |     session_id: Optional[str] = None
+  91 |     execute_agents: bool = True
+  92 |     provider: str = "gemini"
+  93 |     model: Optional[str] = None
+  94 |     fallback_provider: Optional[str] = None
+  95 |     api_keys: Optional[Dict[str, str]] = None
+  96 |     base_url: Optional[str] = None
+  97 | 
+  98 | class ApprovalRequest(BaseModel):
+  99 |     sessionId: str
+ 100 |     nodeId: str
+ 101 |     toolName: str
+ 102 |     action: str  # "approve" or "deny"
+ 103 | 
+ 104 | class ExecuteCustomRequest(BaseModel):
+ 105 |     session_id: str
+ 106 |     api_key: str
+ 107 |     nodes: List[Dict[str, Any]]
+ 108 |     edges: List[Dict[str, Any]]
+ 109 |     prompt: str
+ 110 |     history: Optional[List[Message]] = []
+ 111 |     provider: str = "gemini"
+ 112 |     model: Optional[str] = None
+ 113 |     fallback_provider: Optional[str] = None
+ 114 |     api_keys: Optional[Dict[str, str]] = None
+ 115 |     base_url: Optional[str] = None
+ 116 | 
+ 117 | # ─── VECTOR DB MEMORY STORE (Multi-Provider Embeddings + Local Cosine Similarity) ───
+ 118 | 
+ 119 | async def get_gemini_embedding(text: str, api_key: str) -> List[float]:
+ 120 |     return await get_embedding("gemini", api_key, text)
+ 121 | 
+ 122 | def cosine_similarity(v1: List[float], v2: List[float]) -> float:
+ 123 |     if not v1 or not v2 or len(v1) != len(v2):
+ 124 |         return 0.0
+ 125 |     dot = sum(a * b for a, b in zip(v1, v2))
+ 126 |     norm1 = math.sqrt(sum(a * a for a in v1))
+ 127 |     norm2 = math.sqrt(sum(b * b for b in v2))
+ 128 |     if norm1 == 0.0 or norm2 == 0.0:
+ 129 |         return 0.0
+ 130 |     return dot / (norm1 * norm2)
+ 131 | 
+ 132 | # Bug 7: Thread-safe memory I/O lock
+ 133 | memory_lock = threading.Lock()
+ 134 | 
+ 135 | def load_memories() -> List[Dict[str, Any]]:
+ 136 |     with memory_lock:
+ 137 |         if os.path.exists(MEMORY_FILE):
+ 138 |             try:
+ 139 |                 with open(MEMORY_FILE, "r") as f:
+ 140 |                     return json.load(f)
+ 141 |             except Exception:
+ 142 |                 pass
+ 143 |     return []
  144 | 
- 145 | MAX_MEMORIES = 200  # Bug 8: Cap total entries to prevent unbounded growth
- 146 | 
- 147 | async def store_memory(agent_id: str, text: str, api_key: str, session_id: str = None, provider: str = "gemini"):
- 148 |     embedding = await get_embedding(provider, api_key, text)
- 149 |     if not embedding:
- 150 |         return
- 151 |     memories = load_memories()
- 152 |     entry = {
- 153 |         "agent_id": agent_id,
- 154 |         "text": text,
- 155 |         "embedding": embedding,
- 156 |         "timestamp": datetime.datetime.now().isoformat()
- 157 |     }
- 158 |     if session_id:
- 159 |         entry["session_id"] = session_id
- 160 |     memories.append(entry)
- 161 | 
- 162 |     # Bug 8: Evict oldest entries if over limit
- 163 |     if len(memories) > MAX_MEMORIES:
- 164 |         memories = memories[-MAX_MEMORIES:]
- 165 | 
- 166 |     save_memories(memories)
- 167 | 
- 168 | async def query_memory(query: str, api_key: str, top_k=2, agent_id: Optional[str] = None, session_id: Optional[str] = None, provider: str = "gemini") -> List[str]:
- 169 |     embedding = await get_embedding(provider, api_key, query)
- 170 |     if not embedding:
- 171 |         return []
- 172 |     memories = load_memories()
- 173 |     scored = []
- 174 |     for m in memories:
- 175 |         if agent_id is not None:
- 176 |             # Match directly or by session prefix
- 177 |             if m.get("agent_id") != agent_id and not (agent_id.startswith("session_") and m.get("session_id") == agent_id[8:]):
- 178 |                 continue
- 179 |         if session_id is not None and m.get("session_id") != session_id:
- 180 |             continue
- 181 |         sim = cosine_similarity(embedding, m["embedding"])
- 182 |         scored.append((sim, m["text"]))
- 183 |     
- 184 |     scored.sort(key=lambda x: x[0], reverse=True)
- 185 |     return [text for sim, text in scored[:top_k] if sim > 0.45]
- 186 | 
- 187 | 
- 188 | # ─── REAL AGENT TOOLS ───
- 189 | 
- 190 | async def execute_web_search(query: str) -> str:
- 191 |     headers = {
- 192 |         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
- 193 |     }
- 194 |     url = f"https://html.duckduckgo.com/html/?q={query}"
- 195 |     async with httpx.AsyncClient() as client:
- 196 |         try:
- 197 |             r = await client.get(url, headers=headers, timeout=15.0)
- 198 |             if r.status_code == 200:
- 199 |                 soup = BeautifulSoup(r.text, "html.parser")
- 200 |                 snippets = []
- 201 |                 for div in soup.find_all("a", class_="result__snippet")[:3]:
- 202 |                     snippets.append(div.get_text().strip())
- 203 |                 if snippets:
- 204 |                     return "\n".join(snippets)
- 205 |         except Exception as e:
- 206 |             return f"Search failed: {str(e)}"
- 207 |     return f"No search results found for query: '{query}'."
- 208 | 
- 209 | async def execute_web_browse(url: str) -> str:
- 210 |     """Fetch and extract text content from a URL."""
- 211 |     headers = {
- 212 |         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
- 213 |     }
- 214 |     from urllib.parse import urlparse
- 215 |     import socket
- 216 |     BLOCKED_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1", "169.254.169.254"}
- 217 |     ALLOWED_SCHEMES = {"http", "https"}
- 218 |     try:
- 219 |         parsed = urlparse(url)
- 220 |         if parsed.scheme not in ALLOWED_SCHEMES:
- 221 |             return f"Error: Scheme '{parsed.scheme}' not allowed. Use http/https."
- 222 |         hostname = parsed.hostname
- 223 |         if not hostname:
- 224 |             return "Error: Invalid URL provided."
- 225 |         if hostname.lower() in BLOCKED_HOSTS:
- 226 |             return "Error: Access to internal/local addresses is blocked."
- 227 |         try:
- 228 |             ip_str = socket.gethostbyname(hostname)
- 229 |             # Bug 12: Use ipaddress module for complete private IP detection
- 230 |             ip_obj = ipaddress.ip_address(ip_str)
- 231 |             if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
- 232 |                 return "Error: Access to internal/local addresses is blocked."
- 233 |         except ValueError:
- 234 |             pass  # Not a valid IP string after DNS resolve, allow
- 235 |         except Exception:
- 236 |             pass
- 237 |     except Exception as e:
- 238 |         return f"Error: Invalid URL - {str(e)}"
- 239 | 
- 240 |     async with httpx.AsyncClient() as client:
- 241 |         try:
- 242 |             r = await client.get(url, headers=headers, timeout=15.0, follow_redirects=True)
- 243 |             if r.status_code == 200:
- 244 |                 soup = BeautifulSoup(r.text, "html.parser")
- 245 |                 for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
- 246 |                     tag.decompose()
- 247 |                 text = soup.get_text(separator="\n", strip=True)
- 248 |                 return text[:3000]
- 249 |             return f"Browse failed with status {r.status_code}"
- 250 |         except Exception as e:
- 251 |             return f"Browse error: {str(e)}"
- 252 | 
- 253 | async def execute_python_code(code: str) -> str:
- 254 |     import tempfile
- 255 |     
- 256 |     SANDBOX_HEADER = """
- 257 | import sys
- 258 | import os
- 259 | import tempfile
+ 145 | def save_memories(memories: List[Dict[str, Any]]):
+ 146 |     with memory_lock:
+ 147 |         try:
+ 148 |             with open(MEMORY_FILE, "w") as f:
+ 149 |                 json.dump(memories, f, indent=2)
+ 150 |         except Exception as e:
+ 151 |             print(f"[MEMORY ERROR] Saving file failed: {e}")
+ 152 | 
+ 153 | MAX_MEMORIES = 200  # Bug 8: Cap total entries to prevent unbounded growth
+ 154 | 
+ 155 | async def store_memory(agent_id: str, text: str, api_key: str, session_id: str = None, provider: str = "gemini"):
+ 156 |     embedding = await get_embedding(provider, api_key, text)
+ 157 |     if not embedding:
+ 158 |         return
+ 159 |     memories = load_memories()
+ 160 |     entry = {
+ 161 |         "agent_id": agent_id,
+ 162 |         "text": text,
+ 163 |         "embedding": embedding,
+ 164 |         "timestamp": datetime.datetime.now().isoformat()
+ 165 |     }
+ 166 |     if session_id:
+ 167 |         entry["session_id"] = session_id
+ 168 |     memories.append(entry)
+ 169 | 
+ 170 |     # Bug 8: Evict oldest entries if over limit
+ 171 |     if len(memories) > MAX_MEMORIES:
+ 172 |         memories = memories[-MAX_MEMORIES:]
+ 173 | 
+ 174 |     save_memories(memories)
+ 175 | 
+ 176 | async def query_memory(query: str, api_key: str, top_k=2, agent_id: Optional[str] = None, session_id: Optional[str] = None, provider: str = "gemini") -> List[str]:
+ 177 |     embedding = await get_embedding(provider, api_key, query)
+ 178 |     if not embedding:
+ 179 |         return []
+ 180 |     memories = load_memories()
+ 181 |     scored = []
+ 182 |     for m in memories:
+ 183 |         if agent_id is not None:
+ 184 |             # Match directly or by session prefix
+ 185 |             if m.get("agent_id") != agent_id and not (agent_id.startswith("session_") and m.get("session_id") == agent_id[8:]):
+ 186 |                 continue
+ 187 |         if session_id is not None and m.get("session_id") != session_id:
+ 188 |             continue
+ 189 |         sim = cosine_similarity(embedding, m["embedding"])
+ 190 |         scored.append((sim, m["text"]))
+ 191 |     
+ 192 |     scored.sort(key=lambda x: x[0], reverse=True)
+ 193 |     return [text for sim, text in scored[:top_k] if sim > 0.45]
+ 194 | 
+ 195 | 
+ 196 | # ─── REAL AGENT TOOLS ───
+ 197 | 
+ 198 | async def execute_web_search(query: str) -> str:
+ 199 |     headers = {
+ 200 |         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+ 201 |     }
+ 202 |     url = f"https://html.duckduckgo.com/html/?q={query}"
+ 203 |     async with httpx.AsyncClient() as client:
+ 204 |         try:
+ 205 |             r = await client.get(url, headers=headers, timeout=15.0)
+ 206 |             if r.status_code == 200:
+ 207 |                 soup = BeautifulSoup(r.text, "html.parser")
+ 208 |                 snippets = []
+ 209 |                 for div in soup.find_all("a", class_="result__snippet")[:3]:
+ 210 |                     snippets.append(div.get_text().strip())
+ 211 |                 if snippets:
+ 212 |                     return "\n".join(snippets)
+ 213 |         except Exception as e:
+ 214 |             return f"Search failed: {str(e)}"
+ 215 |     return f"No search results found for query: '{query}'."
+ 216 | 
+ 217 | async def execute_web_browse(url: str) -> str:
+ 218 |     """Fetch and extract text content from a URL."""
+ 219 |     headers = {
+ 220 |         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+ 221 |     }
+ 222 |     from urllib.parse import urlparse
+ 223 |     import socket
+ 224 |     BLOCKED_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1", "169.254.169.254"}
+ 225 |     ALLOWED_SCHEMES = {"http", "https"}
+ 226 |     try:
+ 227 |         parsed = urlparse(url)
+ 228 |         if parsed.scheme not in ALLOWED_SCHEMES:
+ 229 |             return f"Error: Scheme '{parsed.scheme}' not allowed. Use http/https."
+ 230 |         hostname = parsed.hostname
+ 231 |         if not hostname:
+ 232 |             return "Error: Invalid URL provided."
+ 233 |         if hostname.lower() in BLOCKED_HOSTS:
+ 234 |             return "Error: Access to internal/local addresses is blocked."
+ 235 |         try:
+ 236 |             ip_str = socket.gethostbyname(hostname)
+ 237 |             # Bug 12: Use ipaddress module for complete private IP detection
+ 238 |             ip_obj = ipaddress.ip_address(ip_str)
+ 239 |             if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
+ 240 |                 return "Error: Access to internal/local addresses is blocked."
+ 241 |         except ValueError:
+ 242 |             pass  # Not a valid IP string after DNS resolve, allow
+ 243 |         except Exception:
+ 244 |             pass
+ 245 |     except Exception as e:
+ 246 |         return f"Error: Invalid URL - {str(e)}"
+ 247 | 
+ 248 |     async with httpx.AsyncClient() as client:
+ 249 |         try:
+ 250 |             r = await client.get(url, headers=headers, timeout=15.0, follow_redirects=True)
+ 251 |             if r.status_code == 200:
+ 252 |                 soup = BeautifulSoup(r.text, "html.parser")
+ 253 |                 for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
+ 254 |                     tag.decompose()
+ 255 |                 text = soup.get_text(separator="\n", strip=True)
+ 256 |                 return text[:3000]
+ 257 |             return f"Browse failed with status {r.status_code}"
+ 258 |         except Exception as e:
+ 259 |             return f"Browse error: {str(e)}"
  260 | 
- 261 | # Block network access
- 262 | import socket
- 263 | socket.socket = lambda *a, **k: None
- 264 | 
- 265 | # Restrict file access to temp dir only
- 266 | _original_open = open
- 267 | def _restricted_open(name, *args, **kwargs):
- 268 |     temp_dir = os.path.abspath(tempfile.gettempdir())
- 269 |     resolved_path = os.path.abspath(str(name))
- 270 |     if not resolved_path.startswith(temp_dir):
- 271 |         raise PermissionError(f"Access denied: {name}")
- 272 |     return _original_open(name, *args, **kwargs)
- 273 | 
- 274 | # Keep restricted open and delete original dangerous builtins
- 275 | __builtins__.open = _restricted_open
- 276 | if 'eval' in __builtins__.__dict__:
- 277 |     del __builtins__.__dict__['eval']
- 278 | if 'exec' in __builtins__.__dict__:
- 279 |     del __builtins__.__dict__['exec']
- 280 | if 'compile' in __builtins__.__dict__:
- 281 |     del __builtins__.__dict__['compile']
- 282 | if '__import__' in __builtins__.__dict__:
- 283 |     del __builtins__.__dict__['__import__']
- 284 | """
- 285 | 
- 286 |     sandboxed_code = SANDBOX_HEADER + "\n" + code
- 287 | 
- 288 |     # Create a temp file to execute the code safely
- 289 |     with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
- 290 |         f.write(sandboxed_code)
- 291 |         temp_path = f.name
- 292 | 
- 293 |     try:
- 294 |         env = os.environ.copy()
- 295 |         env.pop('GEMINI_API_KEY', None)  # Never expose API key
- 296 |         env.pop('DATABASE_URL', None)
- 297 | 
- 298 |         p = subprocess.Popen(
- 299 |             [sys.executable, temp_path],
- 300 |             stdout=subprocess.PIPE,
- 301 |             stderr=subprocess.PIPE,
- 302 |             text=True,
- 303 |             cwd=tempfile.gettempdir(),
- 304 |             env=env
- 305 |         )
- 306 | 
- 307 |         try:
- 308 |             stdout, stderr = p.communicate(timeout=15.0)  # Reduced timeout
- 309 |         except subprocess.TimeoutExpired:
- 310 |             p.kill()
- 311 |             return "Error: Code execution timed out (15s limit)."
- 312 | 
- 313 |         output = ""
- 314 |         if stdout:
- 315 |             output += f"STDOUT:\n{stdout[:2000]}\n"  # Limit output size
- 316 |         if stderr:
- 317 |             output += f"STDERR:\n{stderr[:1000]}\n"
- 318 |         if not output:
- 319 |             output = "Code executed successfully with no output."
- 320 |         return output
- 321 |     except Exception as e:
- 322 |         return f"Execution error: {str(e)}"
- 323 |     finally:
- 324 |         try:
- 325 |             os.unlink(temp_path)
- 326 |         except Exception:
- 327 |             pass
- 328 | 
- 329 | async def execute_api_call(url: str, method: str = "GET", payload_json: Optional[str] = None) -> str:
- 330 |     from urllib.parse import urlparse
- 331 |     import socket
- 332 |     
- 333 |     BLOCKED_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1", "169.254.169.254"}
- 334 |     ALLOWED_SCHEMES = {"http", "https"}
- 335 |     
- 336 |     try:
- 337 |         parsed = urlparse(url)
- 338 |         if parsed.scheme not in ALLOWED_SCHEMES:
- 339 |             return f"Error: Scheme '{parsed.scheme}' not allowed. Use http/https."
- 340 |         hostname = parsed.hostname
- 341 |         if not hostname:
- 342 |             return "Error: Invalid URL provided."
- 343 |         
- 344 |         # Prevent SSRF
- 345 |         if hostname.lower() in BLOCKED_HOSTS:
- 346 |             return "Error: Access to internal/local addresses is blocked."
- 347 |             
- 348 |         try:
- 349 |             ip_str = socket.gethostbyname(hostname)
- 350 |             # Bug 12: Use ipaddress module for complete private IP detection
- 351 |             ip_obj = ipaddress.ip_address(ip_str)
- 352 |             if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
- 353 |                 return "Error: Access to internal/local addresses is blocked."
- 354 |         except ValueError:
- 355 |             pass  # Not a valid IP string, allow
- 356 |         except Exception:
- 357 |             pass
- 358 |     except Exception as e:
- 359 |         return f"Error: Invalid URL - {str(e)}"
- 360 | 
- 361 |     async with httpx.AsyncClient() as client:
- 362 |         try:
- 363 |             if method.upper() == "POST":
- 364 |                 data = json.loads(payload_json) if payload_json else {}
- 365 |                 r = await client.post(url, json=data, timeout=15.0)
- 366 |             else:
- 367 |                 r = await client.get(url, timeout=15.0)
- 368 |             return f"Status: {r.status_code}\nResponse: {r.text[:1500]}"
- 369 |         except Exception as e:
- 370 |             return f"API call failed: {str(e)}"
- 371 | 
- 372 | # ─── AGENT COORDINATOR DAG SORT ───
- 373 | 
- 374 | def sort_nodes_topologically(nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
- 375 |     """Sort nodes using both explicit dependencies AND visual edges."""
- 376 |     visited = set()
- 377 |     sorted_nodes = []
- 378 |     node_dict = {n["id"]: n for n in nodes}
- 379 |     
- 380 |     # Build dependency graph from both sources
- 381 |     dep_graph = {n["id"]: set(n["data"].get("dependencies", [])) for n in nodes}
- 382 |     
- 383 |     # Also add edges as dependencies
- 384 |     if edges:
- 385 |         for edge in edges:
- 386 |             target = edge.get("target")
- 387 |             source = edge.get("source")
- 388 |             if target in dep_graph and source in node_dict:
- 389 |                 dep_graph[target].add(source)
- 390 | 
- 391 |     def visit(node_id):
- 392 |         if node_id in visited:
- 393 |             return
- 394 |         visited.add(node_id)
- 395 |         for dep in dep_graph.get(node_id, set()):
- 396 |             if dep in node_dict:
- 397 |                 visit(dep)
- 398 |         if node_id in node_dict:
- 399 |             sorted_nodes.append(node_dict[node_id])
- 400 | 
- 401 |     for node in nodes:
- 402 |         visit(node["id"])
- 403 |     return sorted_nodes
- 404 | 
- 405 | # ─── ORCHESTRATION SYSTEM INSTRUCTIONS ───
- 406 | 
- 407 | ORCHESTRATOR_SYSTEM_INSTRUCTION = """
- 408 | You are Solospace, an elite workflow orchestrator. Your ONLY job is to analyze the user's request and output a JSON list of specialized agents.
- 409 | 
- 410 | CRITICAL RULES:
- 411 | - For ANY request that involves building, designing, integrating, or researching a non‑trivial system, you MUST output at least 2 agents.
- 412 | - For requests that mention multiple domains (e.g., frontend + backend + database), use 3‑6 agents.
- 413 | - Only output a SINGLE agent ("general") for extremely simple questions like "Hello", "What is AI?", or one‑line explanations.
- 414 | - Classify the complexity field in the JSON schema as "complex" if the user asks to build, design, integrate, or analyze a system with 2+ distinct components (frontend, backend, database, payments, auth, research). If in doubt, prefer "complex" over "simple".
- 415 | 
- 416 | AGENT CREATION:
- 417 | You can use any senderId, not only the built‑in list. Define custom agents freely.
- 418 | Every agent MUST have:
- 419 | - senderId: a unique short identifier (e.g., "frontend_ui", "payment_gateway", "data_analyst").
- 420 | - senderName: a human readable name.
- 421 | - senderIcon: "code", "science", or "trending_up".
- 422 | - text: what this agent will contribute.
- 423 | - objective: specific goal for this agent.
- 424 | - systemPrompt: detailed instructions for the agent.
- 425 | - rules: 2‑3 specific constraints.
- 426 | - dependencies: list of other agent ids this agent needs.
- 427 | - tools: choose from ["Web Search", "Memory", "Code Executor", "Browser", "API Connector"].
- 428 | 
- 429 | EXAMPLES:
- 430 | 1. User: "Build a full‑stack SaaS with Next.js, Stripe payments, and PostgreSQL"
- 431 |    → Output agents: frontend_ui, backend_api, database_admin, payment_integrator (4 agents).
- 432 | 
- 433 | 2. User: "Explain how JWT works"
- 434 |    → Output agents: general (1 agent).
- 435 | 
- 436 | 3. User: "Research AI trends and write a summary"
- 437 |    → Output agents: researcher, writer (2 agents).
- 438 | 
- 439 | Respond ONLY with a valid JSON object matching the provided schema.
- 440 | """
- 441 | 
- 442 | orchestration_schema = {
- 443 |     "type": "OBJECT",
- 444 |     "properties": {
- 445 |         "complexity": {
- 446 |             "type": "STRING",
- 447 |             "enum": ["simple", "medium", "complex"]
- 448 |         },
- 449 |         "capabilities": {
- 450 |             "type": "ARRAY",
- 451 |             "items": {"type": "STRING"}
- 452 |         },
- 453 |         "thinking_summary": {
- 454 |             "type": "STRING"
- 455 |         },
- 456 |         "follow_up_suggestions": {
- 457 |             "type": "ARRAY",
- 458 |             "items": {"type": "STRING"}
- 459 |         },
- 460 |         "agent_talk": {
- 461 |             "type": "ARRAY",
- 462 |             "items": {
- 463 |                 "type": "OBJECT",
- 464 |                 "properties": {
- 465 |                     "senderId": {"type": "STRING"},
- 466 |                     "senderName": {"type": "STRING"},
- 467 |                     "senderIcon": {"type": "STRING"},
- 468 |                     "text": {"type": "STRING"},
- 469 |                     "objective": {"type": "STRING"},
- 470 |                     "systemPrompt": {"type": "STRING"},
- 471 |                     "rules": {
- 472 |                         "type": "ARRAY",
- 473 |                         "items": {"type": "STRING"}
- 474 |                     },
- 475 |                     "dependencies": {
- 476 |                         "type": "ARRAY",
- 477 |                         "items": {"type": "STRING"}
- 478 |                     },
- 479 |                     "tools": {
+ 261 | async def execute_python_code(code: str) -> str:
+ 262 |     import tempfile
+ 263 |     
+ 264 |     SANDBOX_HEADER = """
+ 265 | import sys
+ 266 | import os
+ 267 | import tempfile
+ 268 | 
+ 269 | # Block network access
+ 270 | import socket
+ 271 | socket.socket = lambda *a, **k: None
+ 272 | 
+ 273 | # Restrict file access to temp dir only
+ 274 | _original_open = open
+ 275 | def _restricted_open(name, *args, **kwargs):
+ 276 |     temp_dir = os.path.abspath(tempfile.gettempdir())
+ 277 |     resolved_path = os.path.abspath(str(name))
+ 278 |     if not resolved_path.startswith(temp_dir):
+ 279 |         raise PermissionError(f"Access denied: {name}")
+ 280 |     return _original_open(name, *args, **kwargs)
+ 281 | 
+ 282 | # Keep restricted open and delete original dangerous builtins
+ 283 | __builtins__.open = _restricted_open
+ 284 | if 'eval' in __builtins__.__dict__:
+ 285 |     del __builtins__.__dict__['eval']
+ 286 | if 'exec' in __builtins__.__dict__:
+ 287 |     del __builtins__.__dict__['exec']
+ 288 | if 'compile' in __builtins__.__dict__:
+ 289 |     del __builtins__.__dict__['compile']
+ 290 | if '__import__' in __builtins__.__dict__:
+ 291 |     del __builtins__.__dict__['__import__']
+ 292 | """
+ 293 | 
+ 294 |     sandboxed_code = SANDBOX_HEADER + "\n" + code
+ 295 | 
+ 296 |     # Create a temp file to execute the code safely
+ 297 |     with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+ 298 |         f.write(sandboxed_code)
+ 299 |         temp_path = f.name
+ 300 | 
+ 301 |     try:
+ 302 |         env = os.environ.copy()
+ 303 |         env.pop('GEMINI_API_KEY', None)  # Never expose API key
+ 304 |         env.pop('DATABASE_URL', None)
+ 305 | 
+ 306 |         p = subprocess.Popen(
+ 307 |             [sys.executable, temp_path],
+ 308 |             stdout=subprocess.PIPE,
+ 309 |             stderr=subprocess.PIPE,
+ 310 |             text=True,
+ 311 |             cwd=tempfile.gettempdir(),
+ 312 |             env=env
+ 313 |         )
+ 314 | 
+ 315 |         try:
+ 316 |             stdout, stderr = p.communicate(timeout=15.0)  # Reduced timeout
+ 317 |         except subprocess.TimeoutExpired:
+ 318 |             p.kill()
+ 319 |             return "Error: Code execution timed out (15s limit)."
+ 320 | 
+ 321 |         output = ""
+ 322 |         if stdout:
+ 323 |             output += f"STDOUT:\n{stdout[:2000]}\n"  # Limit output size
+ 324 |         if stderr:
+ 325 |             output += f"STDERR:\n{stderr[:1000]}\n"
+ 326 |         if not output:
+ 327 |             output = "Code executed successfully with no output."
+ 328 |         return output
+ 329 |     except Exception as e:
+ 330 |         return f"Execution error: {str(e)}"
+ 331 |     finally:
+ 332 |         try:
+ 333 |             os.unlink(temp_path)
+ 334 |         except Exception:
+ 335 |             pass
+ 336 | 
+ 337 | async def execute_api_call(url: str, method: str = "GET", payload_json: Optional[str] = None) -> str:
+ 338 |     from urllib.parse import urlparse
+ 339 |     import socket
+ 340 |     
+ 341 |     BLOCKED_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1", "169.254.169.254"}
+ 342 |     ALLOWED_SCHEMES = {"http", "https"}
+ 343 |     
+ 344 |     try:
+ 345 |         parsed = urlparse(url)
+ 346 |         if parsed.scheme not in ALLOWED_SCHEMES:
+ 347 |             return f"Error: Scheme '{parsed.scheme}' not allowed. Use http/https."
+ 348 |         hostname = parsed.hostname
+ 349 |         if not hostname:
+ 350 |             return "Error: Invalid URL provided."
+ 351 |         
+ 352 |         # Prevent SSRF
+ 353 |         if hostname.lower() in BLOCKED_HOSTS:
+ 354 |             return "Error: Access to internal/local addresses is blocked."
+ 355 |             
+ 356 |         try:
+ 357 |             ip_str = socket.gethostbyname(hostname)
+ 358 |             # Bug 12: Use ipaddress module for complete private IP detection
+ 359 |             ip_obj = ipaddress.ip_address(ip_str)
+ 360 |             if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
+ 361 |                 return "Error: Access to internal/local addresses is blocked."
+ 362 |         except ValueError:
+ 363 |             pass  # Not a valid IP string, allow
+ 364 |         except Exception:
+ 365 |             pass
+ 366 |     except Exception as e:
+ 367 |         return f"Error: Invalid URL - {str(e)}"
+ 368 | 
+ 369 |     async with httpx.AsyncClient() as client:
+ 370 |         try:
+ 371 |             if method.upper() == "POST":
+ 372 |                 data = json.loads(payload_json) if payload_json else {}
+ 373 |                 r = await client.post(url, json=data, timeout=15.0)
+ 374 |             else:
+ 375 |                 r = await client.get(url, timeout=15.0)
+ 376 |             return f"Status: {r.status_code}\nResponse: {r.text[:1500]}"
+ 377 |         except Exception as e:
+ 378 |             return f"API call failed: {str(e)}"
+ 379 | 
+ 380 | # ─── AGENT COORDINATOR DAG SORT ───
+ 381 | 
+ 382 | def sort_nodes_topologically(nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+ 383 |     """Sort nodes using both explicit dependencies AND visual edges."""
+ 384 |     visited = set()
+ 385 |     sorted_nodes = []
+ 386 |     node_dict = {n["id"]: n for n in nodes}
+ 387 |     
+ 388 |     # Build dependency graph from both sources
+ 389 |     dep_graph = {n["id"]: set(n["data"].get("dependencies", [])) for n in nodes}
+ 390 |     
+ 391 |     # Also add edges as dependencies
+ 392 |     if edges:
+ 393 |         for edge in edges:
+ 394 |             target = edge.get("target")
+ 395 |             source = edge.get("source")
+ 396 |             if target in dep_graph and source in node_dict:
+ 397 |                 dep_graph[target].add(source)
+ 398 | 
+ 399 |     def visit(node_id):
+ 400 |         if node_id in visited:
+ 401 |             return
+ 402 |         visited.add(node_id)
+ 403 |         for dep in dep_graph.get(node_id, set()):
+ 404 |             if dep in node_dict:
+ 405 |                 visit(dep)
+ 406 |         if node_id in node_dict:
+ 407 |             sorted_nodes.append(node_dict[node_id])
+ 408 | 
+ 409 |     for node in nodes:
+ 410 |         visit(node["id"])
+ 411 |     return sorted_nodes
+ 412 | 
+ 413 | # ─── ORCHESTRATION SYSTEM INSTRUCTIONS ───
+ 414 | 
+ 415 | ORCHESTRATOR_SYSTEM_INSTRUCTION = """
+ 416 | You are Solospace, an elite workflow orchestrator. Your ONLY job is to analyze the user's request and output a JSON list of specialized agents.
+ 417 | 
+ 418 | CRITICAL RULES:
+ 419 | - For ANY request that involves building, designing, integrating, or researching a non‑trivial system, you MUST output at least 2 agents.
+ 420 | - For requests that mention multiple domains (e.g., frontend + backend + database), use 3‑6 agents.
+ 421 | - Only output a SINGLE agent ("general") for extremely simple questions like "Hello", "What is AI?", or one‑line explanations.
+ 422 | - Classify the complexity field in the JSON schema as "complex" if the user asks to build, design, integrate, or analyze a system with 2+ distinct components (frontend, backend, database, payments, auth, research). If in doubt, prefer "complex" over "simple".
+ 423 | 
+ 424 | AGENT CREATION:
+ 425 | You can use any senderId, not only the built‑in list. Define custom agents freely.
+ 426 | Every agent MUST have:
+ 427 | - senderId: a unique short identifier (e.g., "frontend_ui", "payment_gateway", "data_analyst").
+ 428 | - senderName: a human readable name.
+ 429 | - senderIcon: "code", "science", or "trending_up".
+ 430 | - text: what this agent will contribute.
+ 431 | - objective: specific goal for this agent.
+ 432 | - systemPrompt: detailed instructions for the agent.
+ 433 | - rules: 2‑3 specific constraints.
+ 434 | - dependencies: list of other agent ids this agent needs.
+ 435 | - tools: choose from ["Web Search", "Memory", "Code Executor", "Browser", "API Connector"].
+ 436 | 
+ 437 | EXAMPLES:
+ 438 | 1. User: "Build a full‑stack SaaS with Next.js, Stripe payments, and PostgreSQL"
+ 439 |    → Output agents: frontend_ui, backend_api, database_admin, payment_integrator (4 agents).
+ 440 | 
+ 441 | 2. User: "Explain how JWT works"
+ 442 |    → Output agents: general (1 agent).
+ 443 | 
+ 444 | 3. User: "Research AI trends and write a summary"
+ 445 |    → Output agents: researcher, writer (2 agents).
+ 446 | 
+ 447 | Respond ONLY with a valid JSON object matching the provided schema.
+ 448 | """
+ 449 | 
+ 450 | orchestration_schema = {
+ 451 |     "type": "OBJECT",
+ 452 |     "properties": {
+ 453 |         "complexity": {
+ 454 |             "type": "STRING",
+ 455 |             "enum": ["simple", "medium", "complex"]
+ 456 |         },
+ 457 |         "capabilities": {
+ 458 |             "type": "ARRAY",
+ 459 |             "items": {"type": "STRING"}
+ 460 |         },
+ 461 |         "thinking_summary": {
+ 462 |             "type": "STRING"
+ 463 |         },
+ 464 |         "follow_up_suggestions": {
+ 465 |             "type": "ARRAY",
+ 466 |             "items": {"type": "STRING"}
+ 467 |         },
+ 468 |         "agent_talk": {
+ 469 |             "type": "ARRAY",
+ 470 |             "items": {
+ 471 |                 "type": "OBJECT",
+ 472 |                 "properties": {
+ 473 |                     "senderId": {"type": "STRING"},
+ 474 |                     "senderName": {"type": "STRING"},
+ 475 |                     "senderIcon": {"type": "STRING"},
+ 476 |                     "text": {"type": "STRING"},
+ 477 |                     "objective": {"type": "STRING"},
+ 478 |                     "systemPrompt": {"type": "STRING"},
+ 479 |                     "rules": {
  480 |                         "type": "ARRAY",
  481 |                         "items": {"type": "STRING"}
  482 |                     },
- 483 |                     "custom_template": {
- 484 |                         "type": "OBJECT",
- 485 |                         "properties": {
- 486 |                             "name": {"type": "STRING"},
- 487 |                             "icon": {"type": "STRING"},
- 488 |                             "tag": {"type": "STRING"},
- 489 |                             "temp": {"type": "NUMBER"},
- 490 |                             "logic": {"type": "INTEGER"},
- 491 |                             "col": {"type": "INTEGER"}
- 492 |                         },
- 493 |                         "required": ["name", "icon", "tag", "temp", "logic", "col"]
- 494 |                     }
- 495 |                 },
- 496 |                 "required": ["senderId", "senderName", "senderIcon", "text", "objective", "systemPrompt", "rules", "dependencies", "tools"]
- 497 |             }
- 498 |         }
- 499 |     },
- 500 |     "required": ["complexity", "capabilities", "thinking_summary", "agent_talk", "follow_up_suggestions"]
- 501 | }
- 502 | 
- 503 | # Real-time ReAct loop action schema for agents
- 504 | agent_turn_schema = {
- 505 |     "type": "OBJECT",
- 506 |     "properties": {
- 507 |         "thought": {"type": "STRING"},
- 508 |         "action": {
- 509 |             "type": "STRING",
- 510 |             "enum": ["none", "web_search", "execute_code", "api_call", "query_memory", "store_memory", "send_message", "browse_web", "analyze_image", "read_file"]
- 511 |         },
- 512 |         "action_input": {"type": "STRING"},
- 513 |         "final_answer": {"type": "STRING"}
- 514 |     },
- 515 |     "required": ["thought", "action"]
- 516 | }
- 517 | 
- 518 | 
- 519 | RESPONSE_SYSTEM_INSTRUCTION = """
- 520 | You are Solospace, an elite assistant.
- 521 | Your job is to produce a clean, direct response to the user's prompt using the provided context.
- 522 | 
- 523 | STRICT RULES — NEVER VIOLATE:
- 524 | - Do NOT include any preamble, header, or status line such as "[Agent processing...]", "Synthesizing...", "From the agent team:", or similar.
- 525 | - Do NOT mention agents, sub-tasks, specialists, orchestration, or internal workflow mechanics.
- 526 | - Do NOT start your response with any markdown header that references processing steps.
- 527 | - Begin your response immediately and directly with the answer.
- 528 | - Use clean, well-structured markdown only when it genuinely helps the user.
- 529 | - For conversational messages (e.g. greetings), reply naturally and concisely without any structure.
- 530 | """
- 531 | 
- 532 | GEMINI_SAFETY_SETTINGS = [
- 533 |     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
- 534 |     {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
- 535 |     {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
- 536 |     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"}
- 537 | ]
- 538 | 
- 539 | def check_guardrails(prompt: str) -> Optional[str]:
- 540 |     jailbreak_keywords = [
- 541 |         "ignore previous instructions", "ignore all instructions", "override system prompt",
- 542 |         "you are now developer mode", "jailbreak"
- 543 |     ]
- 544 |     for keyword in jailbreak_keywords:
- 545 |         if keyword in prompt.lower():
- 546 |             return "Safety Alert: Input contains potential prompt injection or system instruction bypass."
- 547 |     return None
- 548 | 
- 549 | MAX_TOKENS = 100000.0
- 550 | REFILL_RATE = 100.0
- 551 | 
- 552 | def check_rate_limit(session_id: str, prompt_len: int) -> bool:
- 553 |     limit_info = db.get_rate_limit(session_id)
- 554 |     now = datetime.datetime.now()
- 555 |     
- 556 |     if not limit_info:
- 557 |         tokens = MAX_TOKENS
- 558 |     else:
- 559 |         try:
- 560 |             last_updated = datetime.datetime.fromisoformat(limit_info["last_updated"])
- 561 |             elapsed = (now - last_updated).total_seconds()
- 562 |             tokens = min(MAX_TOKENS, limit_info["tokens_remaining"] + elapsed * REFILL_RATE)
- 563 |         except Exception:
- 564 |             tokens = MAX_TOKENS
- 565 |     
- 566 |     estimated_tokens = prompt_len / 3.0
- 567 |     
- 568 |     if tokens < estimated_tokens:
- 569 |         return False
- 570 |         
- 571 |     tokens -= estimated_tokens
- 572 |     db.update_rate_limit(session_id, tokens)
- 573 |     return True
- 574 | 
- 575 | @app.post("/approve")
- 576 | async def approve_tool(req: ApprovalRequest):
- 577 |     status = "approved" if req.action == "approve" else "denied"
- 578 |     
- 579 |     # Update SQLite database tool approvals
- 580 |     db.update_tool_approval(req.sessionId, req.nodeId, req.toolName, "pending", status)
- 581 |     # Database is the single source of truth; no in-memory fallback needed
- 582 |     # Perform wildcard updates in database (if specific logId is not provided)
- 583 |     conn = db.get_db_connection()
- 584 |     cursor = conn.cursor()
- 585 |     cursor.execute(
- 586 |         "UPDATE tool_approvals SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE session_id = ? AND node_id = ? AND tool_name = ? AND status = 'pending'",
- 587 |         (status, req.sessionId, req.nodeId, req.toolName)
- 588 |     )
- 589 |     conn.commit()
- 590 |     conn.close()
- 591 |     
- 592 |     return {"status": "success", "state": status}
- 593 | 
- 594 | async def run_cached_flow(cached_data: Dict[str, Any]):
- 595 |     metadata = cached_data.get("metadata")
- 596 |     if metadata:
- 597 |         yield f"event: metadata\ndata: {json.dumps(metadata)}\n\n"
- 598 |     
- 599 |     text = cached_data.get("text", "")
- 600 |     chunk_size = 15
- 601 |     for i in range(0, len(text), chunk_size):
- 602 |         chunk = text[i:i+chunk_size]
- 603 |         yield f"event: text\ndata: {json.dumps(chunk)}\n\n"
- 604 |         await asyncio.sleep(0.02)
- 605 |     yield "event: done\ndata: {}\n\n"
- 606 | 
- 607 | def compute_agent_layout(active_agents):
- 608 |     """Compute non-overlapping positions for agent nodes using a proper grid layout."""
- 609 |     col_groups = {1: [], 2: [], 3: []}
- 610 |     for uid, agent, tpl in active_agents:
- 611 |         col = tpl.get("col", 2)
- 612 |         col_groups[col].append((uid, agent, tpl))
- 613 | 
- 614 |     COL_X = {1: 80, 2: 380, 3: 680}
- 615 |     NODE_HEIGHT = 220
- 616 |     VERTICAL_GAP = 40
- 617 |     START_Y = 50
- 618 | 
- 619 |     positions = {}
- 620 |     for col, agents_in_col in col_groups.items():
- 621 |         x = COL_X[col]
- 622 |         for idx, (uid, agent, tpl) in enumerate(agents_in_col):
- 623 |             y = START_Y + idx * (NODE_HEIGHT + VERTICAL_GAP)
- 624 |             positions[uid] = {"x": x, "y": y}
- 625 | 
- 626 |     return positions
- 627 | 
- 628 | @app.post("/orchestrate")
- 629 | async def orchestrate(req: OrchestrateRequest):
- 630 |     api_key = resolve_api_key(req.provider, req.api_key)
- 631 |     if not api_key:
- 632 |         raise HTTPException(
- 633 |             status_code=400,
- 634 |             detail=f"API Key for provider '{req.provider}' is missing. Please configure BYOK in Settings or set the appropriate environment variable."
- 635 |         )
- 636 | 
- 637 |     # 1. Guardrails check
- 638 |     guardrail_err = check_guardrails(req.prompt)
- 639 |     if guardrail_err:
- 640 |         async def stream_guardrail_err():
- 641 |             yield f"event: text\ndata: {json.dumps(guardrail_err)}\n\n"
- 642 |             yield "event: done\ndata: {}\n\n"
- 643 |         return StreamingResponse(stream_guardrail_err(), media_type="text/event-stream")
- 644 | 
- 645 |     # In-memory and persistent session id
- 646 |     session_id = req.session_id or str(int(datetime.datetime.now().timestamp()))
- 647 | 
- 648 |     # 2. Rate limiting check
- 649 |     if not check_rate_limit(session_id, len(req.prompt)):
- 650 |         async def stream_rate_limit_err():
- 651 |             yield f"event: text\ndata: {json.dumps('**Rate Limit Exceeded**: Please wait a minute before making more requests.')}\n\n"
- 652 |             yield "event: done\ndata: {}\n\n"
- 653 |         return StreamingResponse(stream_rate_limit_err(), media_type="text/event-stream")
- 654 | 
- 655 |     # 3. Semantic caching
- 656 |     prompt_hash_overall = hashlib.sha256(req.prompt.encode('utf-8')).hexdigest()
- 657 |     prompt_embedding = await get_embedding(req.provider, api_key, req.prompt)
- 658 |     if prompt_embedding:
- 659 |         all_caches = db.load_all_cached_embeddings()
- 660 |         for cache in all_caches:
- 661 |             sim = cosine_similarity(prompt_embedding, cache["embedding"])
- 662 |             if sim > 0.95:
- 663 |                 print(f"[SEMANTIC CACHE] Cache hit for overall response. Similarity: {sim:.4f}")
- 664 |                 return StreamingResponse(run_cached_flow(cache["response"]), media_type="text/event-stream")
- 665 | 
- 666 |     # 4. Map history and call planner
- 667 |     contents = []
- 668 |     if req.history:
- 669 |         for msg in req.history:
- 670 |             role = "user" if msg.sender == "user" else "assistant"
- 671 |             contents.append({
- 672 |                 "role": role,
- 673 |                 "content": msg.text
- 674 |             })
- 675 |     
- 676 |     contents.append({
- 677 |         "role": "user",
- 678 |         "content": req.prompt
- 679 |     })
- 680 | 
- 681 |     plan = {
- 682 |         "complexity": "simple",
- 683 |         "capabilities": [],
- 684 |         "thinking_summary": "System defaulted to general mode.",
- 685 |         "agent_talk": [{
- 686 |             "senderId": "general",
- 687 |             "senderName": "General Assistant",
- 688 |             "senderIcon": "bot",
- 689 |             "text": "Standing by to process your request.",
- 690 |             "objective": "Process user requests with precise analysis.",
- 691 |             "systemPrompt": "You are Solospace core.",
- 692 |             "rules": ["Be descriptive"],
- 693 |             "dependencies": []
- 694 |         }],
- 695 |         "follow_up_suggestions": ["Can you elaborate?", "Show me a detailed implementation example."]
- 696 |     }
- 697 | 
- 698 |     try:
- 699 |         plan = await call_provider_json(
- 700 |             provider=req.provider,
- 701 |             model=req.model,
- 702 |             api_key=api_key,
- 703 |             messages=contents,
- 704 |             system_prompt=ORCHESTRATOR_SYSTEM_INSTRUCTION,
- 705 |             temperature=0.2,
- 706 |             json_schema=orchestration_schema,
- 707 |             timeout=30.0
- 708 |         )
- 709 |     except Exception as e:
- 710 |         print(f"[ORCHESTRATION WARNING] Planning failed: {str(e)}")
- 711 | 
- 712 |     nodes = []
- 713 |     edges = []
- 714 |     complexity = plan.get("complexity", "simple")
- 715 |     
- 716 |     # Enforce minimum agents for non-simple tasks
- 717 |     if complexity != "simple" and len(plan.get("agent_talk", [])) < 2:
- 718 |         print("[WARN] Too few agents for complex/medium task, adding a default assistant agent.")
- 719 |         plan.setdefault("agent_talk", []).append({
- 720 |             "senderId": "assistant",
- 721 |             "senderName": "General Assistant",
- 722 |             "senderIcon": "code",
- 723 |             "text": "Supports the primary agents with general assistance.",
- 724 |             "objective": "Provide supplementary help and context.",
- 725 |             "systemPrompt": "You are a helpful assistant that supports other agents.",
- 726 |             "rules": ["Be concise", "Do not duplicate work"],
- 727 |             "dependencies": [],
- 728 |             "tools": ["Web Search", "Memory"]
- 729 |         })
- 730 | 
- 731 |     if complexity == "simple":
- 732 |         nodes.append({
- 733 |             "id": "general",
- 734 |             "type": "custom",
- 735 |             "position": {"x": 0, "y": 0},  # Bug 3: dagre handles layout, backend sends zeros
- 736 |             "data": {
- 737 |                 "name": "General Assistant",
- 738 |                 "tag": "GENERAL_CORE",
- 739 |                 "status": "ACTIVE",
- 740 |                 "metricLabel": "Logic Level",
- 741 |                 "metricVal": "90%",
- 742 |                 "icon": "bot",
- 743 |                 "objective": "Address the user request with natural, accurate, and comprehensive insights.",
- 744 |                 "personality": "Helpful, expert, clear-headed",
- 745 |                 "systemPrompt": "You are Solospace, an elite assistant.",
- 746 |                 "rules": ["Be helpful and concise", "Use rich markdown"],
- 747 |                 "tools": ["Web Search", "Memory"],
- 748 |                 "temp": 0.7,
- 749 |                 "logic": 90,
- 750 |                 "empathy": 80,
- 751 |                 "context": "128k",
- 752 |                 "enabled": True,
- 753 |                 "priority": 5,
- 754 |                 "toolPermissions": {"Web Search": "ALLOWED", "Memory": "ALLOWED"},
- 755 |                 "toolLogs": [],
- 756 |                 "dependencies": []
- 757 |             }
- 758 |         })
- 759 |     else:
- 760 |         col_mapping = {
- 761 |             "research": 1,
- 762 |             "auth": 2,
- 763 |             "database": 2,
- 764 |             "frontend": 2,
- 765 |             "backend": 3,
- 766 |             "payments": 3
- 767 |         }
- 768 | 
- 769 |         # Built-in templates: provide defaults but agent can override tools via agent_talk
- 770 |         AGENT_TEMPLATES = {
- 771 |             "research": {"name": "Market Researcher", "tag": "RESEARCH_LEAD_01", "icon": "science", "default_tools": ["Web Search"], "temp": 0.3, "logic": 85, "empathy": 40, "priority": 5, "col": 1},
- 772 |             "auth": {"name": "Security Architect", "tag": "AUTH_AUDIT_02", "icon": "science", "default_tools": ["Memory"], "temp": 0.1, "logic": 99, "empathy": 10, "priority": 8, "col": 2},
- 773 |             "database": {"name": "Database Admin", "tag": "DB_SCHEMA_03", "icon": "science", "default_tools": ["Memory"], "temp": 0.2, "logic": 95, "empathy": 20, "priority": 7, "col": 2},
- 774 |             "frontend": {"name": "UI Specialist", "tag": "UI_DESIGN_04", "icon": "code", "default_tools": ["Browser"], "temp": 0.7, "logic": 75, "empathy": 75, "priority": 6, "col": 2},
- 775 |             "backend": {"name": "API Architect", "tag": "API_ENGINE_05", "icon": "code", "default_tools": ["Code Executor"], "temp": 0.2, "logic": 92, "empathy": 25, "priority": 8, "col": 3},
- 776 |             "payments": {"name": "Stripe Integrator", "tag": "STRIPE_BILL_06", "icon": "trending_up", "default_tools": ["API Connector"], "temp": 0.4, "logic": 90, "empathy": 40, "priority": 7, "col": 3}
- 777 |         }
- 778 | 
- 779 |         active_agents = []
- 780 |         seen_ids = set()
- 781 |         for agent in plan.get("agent_talk", []):
- 782 |             cap = agent.get("senderId", "")
- 783 |             # Deduplicate by senderId — if Gemini sends duplicate, suffix with index
- 784 |             unique_id = cap
- 785 |             if unique_id in seen_ids:
- 786 |                 unique_id = f"{cap}_{len(seen_ids)}"
- 787 |             seen_ids.add(unique_id)
- 788 |             if cap in AGENT_TEMPLATES:
- 789 |                 active_agents.append((unique_id, agent, AGENT_TEMPLATES[cap]))
- 790 |             elif cap == "other" or cap not in AGENT_TEMPLATES:
- 791 |                 # Dynamic / custom agent
- 792 |                 ct = agent.get("custom_template", {})
- 793 |                 dynamic_tpl = {
- 794 |                     "name": ct.get("name", agent.get("senderName", "Custom Agent")),
- 795 |                     "tag": ct.get("tag", f"CUSTOM_{unique_id.upper()[:8]}"),
- 796 |                     "icon": ct.get("icon", agent.get("senderIcon", "science")),
- 797 |                     "default_tools": ["Web Search", "Memory"],
- 798 |                     "temp": ct.get("temp", 0.5),
- 799 |                     "logic": ct.get("logic", 80),
- 800 |                     "empathy": 50,
- 801 |                     "priority": 5,
- 802 |                     "col": ct.get("col", 2)
- 803 |                 }
- 804 |                 active_agents.append((unique_id, agent, dynamic_tpl))
- 805 | 
- 806 |         positions = compute_agent_layout(active_agents)
- 807 |         for uid, agent, tpl in active_agents:
- 808 |             pos = positions[uid]
- 809 |             x = pos["x"]
- 810 |             y = pos["y"]
- 811 | 
- 812 |             # Agent-defined tools override template defaults
- 813 |             agent_tools = agent.get("tools", [])
- 814 |             resolved_tools = agent_tools if agent_tools else tpl["default_tools"]
- 815 |             # Filter to known tool names for safety
- 816 |             valid_tools = {"Web Search", "Memory", "Code Executor", "Browser", "API Connector", "Vision", "Voice", "File Upload"}
- 817 |             resolved_tools = [t for t in resolved_tools if t in valid_tools] or tpl["default_tools"]
- 818 | 
- 819 |             default_metrics = {
- 820 |                 "research": ("Sources Scanned", "24 Pages"),
- 821 |                 "auth": ("Audit Score", "99%"),
- 822 |                 "database": ("Schema Status", "Normalized"),
- 823 |                 "frontend": ("UI Score", "95%"),
- 824 |                 "backend": ("Execution Rate", "98%"),
- 825 |                 "payments": ("Stripe API Status", "Online")
- 826 |             }.get(agent.get("senderId", ""), ("Logic Level", "90%"))
- 827 | 
- 828 |             nodes.append({
- 829 |                 "id": uid,
- 830 |                 "type": "custom",
- 831 |                 "position": {"x": 0, "y": 0},  # Bug 3: dagre handles layout, backend sends zeros
- 832 |                 "data": {
- 833 |                     "name": agent.get("senderName", tpl["name"]),
- 834 |                     "tag": tpl["tag"],
- 835 |                     "status": "IDLE",
- 836 |                     "metricLabel": default_metrics[0],
- 837 |                     "metricVal": default_metrics[1],
- 838 |                     "icon": agent.get("senderIcon", tpl["icon"]),
- 839 |                     "objective": agent.get("objective", ""),
- 840 |                     "personality": "Collaborative Specialist",
- 841 |                     "systemPrompt": agent.get("systemPrompt", ""),
- 842 |                     "rules": agent.get("rules", []),
- 843 |                     "tools": resolved_tools,
- 844 |                     "temp": tpl["temp"],
- 845 |                     "logic": tpl["logic"],
- 846 |                     "empathy": tpl["empathy"],
- 847 |                     "context": "128k",
- 848 |                     "enabled": True,
- 849 |                     "priority": tpl["priority"],
- 850 |                     "toolPermissions": {t: "ASK" if t in ["Code Executor", "API Connector"] else "ALLOWED" for t in resolved_tools},
- 851 |                     "toolLogs": [],
- 852 |                     "dependencies": agent.get("dependencies", [])
- 853 |                 }
- 854 |             })
- 855 | 
- 856 |         for node in nodes:
- 857 |             for dep in node["data"].get("dependencies", []):
- 858 |                 edges.append({
- 859 |                     "id": f"e-{dep}-{node['id']}",
- 860 |                     "source": dep,
- 861 |                     "target": node["id"],
- 862 |                     "animated": True,
- 863 |                     "type": "custom",
- 864 |                     "style": {"stroke": "#60a5fa", "strokeWidth": 2}
- 865 |                 })
- 866 | 
- 867 |     # Decide whether to run full agent flow
- 868 |     if not req.execute_agents:
- 869 |         # Only planning mode: save session in DB with paused state and return planning metadata
- 870 |         db.save_session(
- 871 |             session_id=session_id,
- 872 |             title=req.prompt[:40] + "..." if len(req.prompt) > 40 else req.prompt,
- 873 |             prompt=req.prompt,
- 874 |             mode=complexity,
- 875 |             nodes=nodes,
- 876 |             edges=edges,
- 877 |             chat_messages=[
- 878 |                 {"id": "user-prompt", "sender": "user", "text": req.prompt, "timestamp": datetime.datetime.now().strftime("%I:%M:%S %p")}
- 879 |             ],
- 880 |             agent_talk_logs=[],
- 881 |             execution_state="paused",
- 882 |             status_message="Agent team generated. Customize and proceed.",
- 883 |             follow_up_suggestions=plan.get("follow_up_suggestions", [])
- 884 |         )
- 885 |         
- 886 |         async def planning_only_flow():
- 887 |             setup_metadata = {
- 888 |                 "complexity": complexity,
- 889 |                 "capabilities": plan.get("capabilities", []),
- 890 |                 "thinking_summary": plan.get("thinking_summary", ""),
- 891 |                 "nodes": nodes,
- 892 |                 "edges": edges,
- 893 |                 "agent_talk": [],
- 894 |                 "follow_up_suggestions": plan.get("follow_up_suggestions", [])
- 895 |             }
- 896 |             yield f"event: metadata\ndata: {json.dumps(setup_metadata)}\n\n"
- 897 |             yield f"event: text\ndata: {json.dumps('✅ Agent team generated. Go to the **Flow** tab to customize agents and click **Proceed** to run them.')}\n\n"
- 898 |             yield "event: done\ndata: {}\n\n"
- 899 |             
- 900 |         return StreamingResponse(planning_only_flow(), media_type="text/event-stream")
- 901 |     else:
- 902 |         # Existing full execution flow
- 903 |         return StreamingResponse(
- 904 |             run_agent_execution_loop(
- 905 |                 session_id=session_id,
- 906 |                 prompt=req.prompt,
- 907 |                 history=req.history or [],
- 908 |                 api_key=api_key,
- 909 |                 nodes=nodes,
- 910 |                 edges=edges,
- 911 |                 complexity=complexity,
- 912 |                 capabilities=plan.get("capabilities", []),
- 913 |                 thinking_summary=plan.get("thinking_summary", ""),
- 914 |                 follow_up_suggestions=plan.get("follow_up_suggestions", [])
- 915 |             ),
- 916 |             media_type="text/event-stream"
- 917 |         )
- 918 | 
- 919 | @app.get("/providers")
- 920 | async def get_providers():
- 921 |     return get_available_providers()
- 922 | 
- 923 | # Session persistence APIs
- 924 | @app.get("/sessions")
- 925 | async def get_sessions():
- 926 |     return db.load_sessions()
- 927 | 
- 928 | @app.get("/sessions/{session_id}")
- 929 | async def get_session(session_id: str):
- 930 |     session = db.load_session(session_id)
- 931 |     if not session:
- 932 |         raise HTTPException(status_code=404, detail="Session not found")
- 933 |     return session
- 934 | 
- 935 | @app.delete("/sessions/{session_id}")
- 936 | async def delete_session(session_id: str):
- 937 |     db.delete_session(session_id)
- 938 |     return {"status": "success"}
+ 483 |                     "dependencies": {
+ 484 |                         "type": "ARRAY",
+ 485 |                         "items": {"type": "STRING"}
+ 486 |                     },
+ 487 |                     "tools": {
+ 488 |                         "type": "ARRAY",
+ 489 |                         "items": {"type": "STRING"}
+ 490 |                     },
+ 491 |                     "custom_template": {
+ 492 |                         "type": "OBJECT",
+ 493 |                         "properties": {
+ 494 |                             "name": {"type": "STRING"},
+ 495 |                             "icon": {"type": "STRING"},
+ 496 |                             "tag": {"type": "STRING"},
+ 497 |                             "temp": {"type": "NUMBER"},
+ 498 |                             "logic": {"type": "INTEGER"},
+ 499 |                             "col": {"type": "INTEGER"}
+ 500 |                         },
+ 501 |                         "required": ["name", "icon", "tag", "temp", "logic", "col"]
+ 502 |                     }
+ 503 |                 },
+ 504 |                 "required": ["senderId", "senderName", "senderIcon", "text", "objective", "systemPrompt", "rules", "dependencies", "tools"]
+ 505 |             }
+ 506 |         }
+ 507 |     },
+ 508 |     "required": ["complexity", "capabilities", "thinking_summary", "agent_talk", "follow_up_suggestions"]
+ 509 | }
+ 510 | 
+ 511 | # Real-time ReAct loop action schema for agents
+ 512 | agent_turn_schema = {
+ 513 |     "type": "OBJECT",
+ 514 |     "properties": {
+ 515 |         "thought": {"type": "STRING"},
+ 516 |         "action": {
+ 517 |             "type": "STRING",
+ 518 |             "enum": ["none", "web_search", "execute_code", "api_call", "query_memory", "store_memory", "send_message", "browse_web", "analyze_image", "read_file"]
+ 519 |         },
+ 520 |         "action_input": {"type": "STRING"},
+ 521 |         "final_answer": {"type": "STRING"}
+ 522 |     },
+ 523 |     "required": ["thought", "action"]
+ 524 | }
+ 525 | 
+ 526 | 
+ 527 | RESPONSE_SYSTEM_INSTRUCTION = """
+ 528 | You are Solospace, an elite assistant.
+ 529 | Your job is to produce a clean, direct response to the user's prompt using the provided context.
+ 530 | 
+ 531 | STRICT RULES — NEVER VIOLATE:
+ 532 | - Do NOT include any preamble, header, or status line such as "[Agent processing...]", "Synthesizing...", "From the agent team:", or similar.
+ 533 | - Do NOT mention agents, sub-tasks, specialists, orchestration, or internal workflow mechanics.
+ 534 | - Do NOT start your response with any markdown header that references processing steps.
+ 535 | - Begin your response immediately and directly with the answer.
+ 536 | - Use clean, well-structured markdown only when it genuinely helps the user.
+ 537 | - For conversational messages (e.g. greetings), reply naturally and concisely without any structure.
+ 538 | """
+ 539 | 
+ 540 | GEMINI_SAFETY_SETTINGS = [
+ 541 |     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+ 542 |     {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+ 543 |     {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+ 544 |     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"}
+ 545 | ]
+ 546 | 
+ 547 | def check_guardrails(prompt: str) -> Optional[str]:
+ 548 |     jailbreak_keywords = [
+ 549 |         "ignore previous instructions", "ignore all instructions", "override system prompt",
+ 550 |         "you are now developer mode", "jailbreak"
+ 551 |     ]
+ 552 |     for keyword in jailbreak_keywords:
+ 553 |         if keyword in prompt.lower():
+ 554 |             return "Safety Alert: Input contains potential prompt injection or system instruction bypass."
+ 555 |     return None
+ 556 | 
+ 557 | MAX_TOKENS = 100000.0
+ 558 | REFILL_RATE = 100.0
+ 559 | 
+ 560 | def check_rate_limit(session_id: str, prompt_len: int) -> bool:
+ 561 |     limit_info = db.get_rate_limit(session_id)
+ 562 |     now = datetime.datetime.now()
+ 563 |     
+ 564 |     if not limit_info:
+ 565 |         tokens = MAX_TOKENS
+ 566 |     else:
+ 567 |         try:
+ 568 |             last_updated = datetime.datetime.fromisoformat(limit_info["last_updated"])
+ 569 |             elapsed = (now - last_updated).total_seconds()
+ 570 |             tokens = min(MAX_TOKENS, limit_info["tokens_remaining"] + elapsed * REFILL_RATE)
+ 571 |         except Exception:
+ 572 |             tokens = MAX_TOKENS
+ 573 |     
+ 574 |     estimated_tokens = prompt_len / 3.0
+ 575 |     
+ 576 |     if tokens < estimated_tokens:
+ 577 |         return False
+ 578 |         
+ 579 |     tokens -= estimated_tokens
+ 580 |     db.update_rate_limit(session_id, tokens)
+ 581 |     return True
+ 582 | 
+ 583 | @app.post("/approve")
+ 584 | async def approve_tool(req: ApprovalRequest):
+ 585 |     status = "approved" if req.action == "approve" else "denied"
+ 586 |     
+ 587 |     # Update SQLite database tool approvals
+ 588 |     db.update_tool_approval(req.sessionId, req.nodeId, req.toolName, "pending", status)
+ 589 |     # Database is the single source of truth; no in-memory fallback needed
+ 590 |     # Perform wildcard updates in database (if specific logId is not provided)
+ 591 |     conn = db.get_db_connection()
+ 592 |     cursor = conn.cursor()
+ 593 |     cursor.execute(
+ 594 |         "UPDATE tool_approvals SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE session_id = ? AND node_id = ? AND tool_name = ? AND status = 'pending'",
+ 595 |         (status, req.sessionId, req.nodeId, req.toolName)
+ 596 |     )
+ 597 |     conn.commit()
+ 598 |     conn.close()
+ 599 |     
+ 600 |     return {"status": "success", "state": status}
+ 601 | 
+ 602 | async def run_cached_flow(cached_data: Dict[str, Any]):
+ 603 |     metadata = cached_data.get("metadata")
+ 604 |     if metadata:
+ 605 |         yield f"event: metadata\ndata: {json.dumps(metadata)}\n\n"
+ 606 |     
+ 607 |     text = cached_data.get("text", "")
+ 608 |     chunk_size = 15
+ 609 |     for i in range(0, len(text), chunk_size):
+ 610 |         chunk = text[i:i+chunk_size]
+ 611 |         yield f"event: text\ndata: {json.dumps(chunk)}\n\n"
+ 612 |         await asyncio.sleep(0.02)
+ 613 |     yield "event: done\ndata: {}\n\n"
+ 614 | 
+ 615 | def compute_agent_layout(active_agents):
+ 616 |     """Compute non-overlapping positions for agent nodes using a proper grid layout."""
+ 617 |     col_groups = {1: [], 2: [], 3: []}
+ 618 |     for uid, agent, tpl in active_agents:
+ 619 |         col = tpl.get("col", 2)
+ 620 |         col_groups[col].append((uid, agent, tpl))
+ 621 | 
+ 622 |     COL_X = {1: 80, 2: 380, 3: 680}
+ 623 |     NODE_HEIGHT = 220
+ 624 |     VERTICAL_GAP = 40
+ 625 |     START_Y = 50
+ 626 | 
+ 627 |     positions = {}
+ 628 |     for col, agents_in_col in col_groups.items():
+ 629 |         x = COL_X[col]
+ 630 |         for idx, (uid, agent, tpl) in enumerate(agents_in_col):
+ 631 |             y = START_Y + idx * (NODE_HEIGHT + VERTICAL_GAP)
+ 632 |             positions[uid] = {"x": x, "y": y}
+ 633 | 
+ 634 |     return positions
+ 635 | 
+ 636 | @app.post("/orchestrate")
+ 637 | async def orchestrate(req: OrchestrateRequest):
+ 638 |     provider_config = get_provider_config(req.provider)
+ 639 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
+ 640 |     if not api_key and not provider_config.get("is_local", False):
+ 641 |         raise HTTPException(
+ 642 |             status_code=400,
+ 643 |             detail=f"API Key for provider '{req.provider}' is missing. Please configure BYOK in Settings or set the appropriate environment variable."
+ 644 |         )
+ 645 | 
+ 646 |     # 1. Guardrails check
+ 647 |     guardrail_err = check_guardrails(req.prompt)
+ 648 |     if guardrail_err:
+ 649 |         async def stream_guardrail_err():
+ 650 |             yield f"event: text\ndata: {json.dumps(guardrail_err)}\n\n"
+ 651 |             yield "event: done\ndata: {}\n\n"
+ 652 |         return StreamingResponse(stream_guardrail_err(), media_type="text/event-stream")
+ 653 | 
+ 654 |     # In-memory and persistent session id
+ 655 |     session_id = req.session_id or str(int(datetime.datetime.now().timestamp()))
+ 656 | 
+ 657 |     # 2. Rate limiting check
+ 658 |     if not check_rate_limit(session_id, len(req.prompt)):
+ 659 |         async def stream_rate_limit_err():
+ 660 |             yield f"event: text\ndata: {json.dumps('**Rate Limit Exceeded**: Please wait a minute before making more requests.')}\n\n"
+ 661 |             yield "event: done\ndata: {}\n\n"
+ 662 |         return StreamingResponse(stream_rate_limit_err(), media_type="text/event-stream")
+ 663 | 
+ 664 |     # 3. Semantic caching
+ 665 |     prompt_hash_overall = hashlib.sha256(req.prompt.encode('utf-8')).hexdigest()
+ 666 |     prompt_embedding = await get_embedding(req.provider, api_key, req.prompt, api_keys=req.api_keys)
+ 667 |     if prompt_embedding:
+ 668 |         all_caches = db.load_all_cached_embeddings()
+ 669 |         for cache in all_caches:
+ 670 |             sim = cosine_similarity(prompt_embedding, cache["embedding"])
+ 671 |             if sim > 0.95:
+ 672 |                 print(f"[SEMANTIC CACHE] Cache hit for overall response. Similarity: {sim:.4f}")
+ 673 |                 return StreamingResponse(run_cached_flow(cache["response"]), media_type="text/event-stream")
+ 674 | 
+ 675 |     # 4. Map history and call planner
+ 676 |     contents = []
+ 677 |     if req.history:
+ 678 |         for msg in req.history:
+ 679 |             role = "user" if msg.sender == "user" else "assistant"
+ 680 |             contents.append({
+ 681 |                 "role": role,
+ 682 |                 "content": msg.text
+ 683 |             })
+ 684 |     
+ 685 |     contents.append({
+ 686 |         "role": "user",
+ 687 |         "content": req.prompt
+ 688 |     })
+ 689 | 
+ 690 |     plan = {
+ 691 |         "complexity": "simple",
+ 692 |         "capabilities": [],
+ 693 |         "thinking_summary": "System defaulted to general mode.",
+ 694 |         "agent_talk": [{
+ 695 |             "senderId": "general",
+ 696 |             "senderName": "General Assistant",
+ 697 |             "senderIcon": "bot",
+ 698 |             "text": "Standing by to process your request.",
+ 699 |             "objective": "Process user requests with precise analysis.",
+ 700 |             "systemPrompt": "You are Solospace core.",
+ 701 |             "rules": ["Be descriptive"],
+ 702 |             "dependencies": []
+ 703 |         }],
+ 704 |         "follow_up_suggestions": ["Can you elaborate?", "Show me a detailed implementation example."]
+ 705 |     }
+ 706 | 
+ 707 |     try:
+ 708 |         plan = await call_provider_json(
+ 709 |             provider=req.provider,
+ 710 |             model=req.model,
+ 711 |             api_key=api_key,
+ 712 |             messages=contents,
+ 713 |             system_prompt=ORCHESTRATOR_SYSTEM_INSTRUCTION,
+ 714 |             temperature=0.2,
+ 715 |             json_schema=orchestration_schema,
+ 716 |             timeout=30.0,
+ 717 |             fallback_provider=req.fallback_provider,
+ 718 |             api_keys=req.api_keys,
+ 719 |             base_url=req.base_url
+ 720 |         )
+ 721 |     except Exception as e:
+ 722 |         print(f"[ORCHESTRATION WARNING] Planning failed: {str(e)}")
+ 723 | 
+ 724 |     nodes = []
+ 725 |     edges = []
+ 726 |     complexity = plan.get("complexity", "simple")
+ 727 |     
+ 728 |     # Enforce minimum agents for non-simple tasks
+ 729 |     if complexity != "simple" and len(plan.get("agent_talk", [])) < 2:
+ 730 |         print("[WARN] Too few agents for complex/medium task, adding a default assistant agent.")
+ 731 |         plan.setdefault("agent_talk", []).append({
+ 732 |             "senderId": "assistant",
+ 733 |             "senderName": "General Assistant",
+ 734 |             "senderIcon": "code",
+ 735 |             "text": "Supports the primary agents with general assistance.",
+ 736 |             "objective": "Provide supplementary help and context.",
+ 737 |             "systemPrompt": "You are a helpful assistant that supports other agents.",
+ 738 |             "rules": ["Be concise", "Do not duplicate work"],
+ 739 |             "dependencies": [],
+ 740 |             "tools": ["Web Search", "Memory"]
+ 741 |         })
+ 742 | 
+ 743 |     if complexity == "simple":
+ 744 |         nodes.append({
+ 745 |             "id": "general",
+ 746 |             "type": "custom",
+ 747 |             "position": {"x": 0, "y": 0},  # Bug 3: dagre handles layout, backend sends zeros
+ 748 |             "data": {
+ 749 |                 "name": "General Assistant",
+ 750 |                 "tag": "GENERAL_CORE",
+ 751 |                 "status": "ACTIVE",
+ 752 |                 "metricLabel": "Logic Level",
+ 753 |                 "metricVal": "90%",
+ 754 |                 "icon": "bot",
+ 755 |                 "objective": "Address the user request with natural, accurate, and comprehensive insights.",
+ 756 |                 "personality": "Helpful, expert, clear-headed",
+ 757 |                 "systemPrompt": "You are Solospace, an elite assistant.",
+ 758 |                 "rules": ["Be helpful and concise", "Use rich markdown"],
+ 759 |                 "tools": ["Web Search", "Memory"],
+ 760 |                 "temp": 0.7,
+ 761 |                 "logic": 90,
+ 762 |                 "empathy": 80,
+ 763 |                 "context": "128k",
+ 764 |                 "enabled": True,
+ 765 |                 "priority": 5,
+ 766 |                 "toolPermissions": {"Web Search": "ALLOWED", "Memory": "ALLOWED"},
+ 767 |                 "toolLogs": [],
+ 768 |                 "dependencies": []
+ 769 |             }
+ 770 |         })
+ 771 |     else:
+ 772 |         col_mapping = {
+ 773 |             "research": 1,
+ 774 |             "auth": 2,
+ 775 |             "database": 2,
+ 776 |             "frontend": 2,
+ 777 |             "backend": 3,
+ 778 |             "payments": 3
+ 779 |         }
+ 780 | 
+ 781 |         # Built-in templates: provide defaults but agent can override tools via agent_talk
+ 782 |         AGENT_TEMPLATES = {
+ 783 |             "research": {"name": "Market Researcher", "tag": "RESEARCH_LEAD_01", "icon": "science", "default_tools": ["Web Search"], "temp": 0.3, "logic": 85, "empathy": 40, "priority": 5, "col": 1},
+ 784 |             "auth": {"name": "Security Architect", "tag": "AUTH_AUDIT_02", "icon": "science", "default_tools": ["Memory"], "temp": 0.1, "logic": 99, "empathy": 10, "priority": 8, "col": 2},
+ 785 |             "database": {"name": "Database Admin", "tag": "DB_SCHEMA_03", "icon": "science", "default_tools": ["Memory"], "temp": 0.2, "logic": 95, "empathy": 20, "priority": 7, "col": 2},
+ 786 |             "frontend": {"name": "UI Specialist", "tag": "UI_DESIGN_04", "icon": "code", "default_tools": ["Browser"], "temp": 0.7, "logic": 75, "empathy": 75, "priority": 6, "col": 2},
+ 787 |             "backend": {"name": "API Architect", "tag": "API_ENGINE_05", "icon": "code", "default_tools": ["Code Executor"], "temp": 0.2, "logic": 92, "empathy": 25, "priority": 8, "col": 3},
+ 788 |             "payments": {"name": "Stripe Integrator", "tag": "STRIPE_BILL_06", "icon": "trending_up", "default_tools": ["API Connector"], "temp": 0.4, "logic": 90, "empathy": 40, "priority": 7, "col": 3}
+ 789 |         }
+ 790 | 
+ 791 |         active_agents = []
+ 792 |         seen_ids = set()
+ 793 |         for agent in plan.get("agent_talk", []):
+ 794 |             cap = agent.get("senderId", "")
+ 795 |             # Deduplicate by senderId — if Gemini sends duplicate, suffix with index
+ 796 |             unique_id = cap
+ 797 |             if unique_id in seen_ids:
+ 798 |                 unique_id = f"{cap}_{len(seen_ids)}"
+ 799 |             seen_ids.add(unique_id)
+ 800 |             if cap in AGENT_TEMPLATES:
+ 801 |                 active_agents.append((unique_id, agent, AGENT_TEMPLATES[cap]))
+ 802 |             elif cap == "other" or cap not in AGENT_TEMPLATES:
+ 803 |                 # Dynamic / custom agent
+ 804 |                 ct = agent.get("custom_template", {})
+ 805 |                 dynamic_tpl = {
+ 806 |                     "name": ct.get("name", agent.get("senderName", "Custom Agent")),
+ 807 |                     "tag": ct.get("tag", f"CUSTOM_{unique_id.upper()[:8]}"),
+ 808 |                     "icon": ct.get("icon", agent.get("senderIcon", "science")),
+ 809 |                     "default_tools": ["Web Search", "Memory"],
+ 810 |                     "temp": ct.get("temp", 0.5),
+ 811 |                     "logic": ct.get("logic", 80),
+ 812 |                     "empathy": 50,
+ 813 |                     "priority": 5,
+ 814 |                     "col": ct.get("col", 2)
+ 815 |                 }
+ 816 |                 active_agents.append((unique_id, agent, dynamic_tpl))
+ 817 | 
+ 818 |         positions = compute_agent_layout(active_agents)
+ 819 |         for uid, agent, tpl in active_agents:
+ 820 |             pos = positions[uid]
+ 821 |             x = pos["x"]
+ 822 |             y = pos["y"]
+ 823 | 
+ 824 |             # Agent-defined tools override template defaults
+ 825 |             agent_tools = agent.get("tools", [])
+ 826 |             resolved_tools = agent_tools if agent_tools else tpl["default_tools"]
+ 827 |             # Filter to known tool names for safety
+ 828 |             valid_tools = {"Web Search", "Memory", "Code Executor", "Browser", "API Connector", "Vision", "Voice", "File Upload"}
+ 829 |             resolved_tools = [t for t in resolved_tools if t in valid_tools] or tpl["default_tools"]
+ 830 | 
+ 831 |             default_metrics = {
+ 832 |                 "research": ("Sources Scanned", "24 Pages"),
+ 833 |                 "auth": ("Audit Score", "99%"),
+ 834 |                 "database": ("Schema Status", "Normalized"),
+ 835 |                 "frontend": ("UI Score", "95%"),
+ 836 |                 "backend": ("Execution Rate", "98%"),
+ 837 |                 "payments": ("Stripe API Status", "Online")
+ 838 |             }.get(agent.get("senderId", ""), ("Logic Level", "90%"))
+ 839 | 
+ 840 |             nodes.append({
+ 841 |                 "id": uid,
+ 842 |                 "type": "custom",
+ 843 |                 "position": {"x": 0, "y": 0},  # Bug 3: dagre handles layout, backend sends zeros
+ 844 |                 "data": {
+ 845 |                     "name": agent.get("senderName", tpl["name"]),
+ 846 |                     "tag": tpl["tag"],
+ 847 |                     "status": "IDLE",
+ 848 |                     "metricLabel": default_metrics[0],
+ 849 |                     "metricVal": default_metrics[1],
+ 850 |                     "icon": agent.get("senderIcon", tpl["icon"]),
+ 851 |                     "objective": agent.get("objective", ""),
+ 852 |                     "personality": "Collaborative Specialist",
+ 853 |                     "systemPrompt": agent.get("systemPrompt", ""),
+ 854 |                     "rules": agent.get("rules", []),
+ 855 |                     "tools": resolved_tools,
+ 856 |                     "temp": tpl["temp"],
+ 857 |                     "logic": tpl["logic"],
+ 858 |                     "empathy": tpl["empathy"],
+ 859 |                     "context": "128k",
+ 860 |                     "enabled": True,
+ 861 |                     "priority": tpl["priority"],
+ 862 |                     "toolPermissions": {t: "ASK" if t in ["Code Executor", "API Connector"] else "ALLOWED" for t in resolved_tools},
+ 863 |                     "toolLogs": [],
+ 864 |                     "dependencies": agent.get("dependencies", [])
+ 865 |                 }
+ 866 |             })
+ 867 | 
+ 868 |         for node in nodes:
+ 869 |             for dep in node["data"].get("dependencies", []):
+ 870 |                 edges.append({
+ 871 |                     "id": f"e-{dep}-{node['id']}",
+ 872 |                     "source": dep,
+ 873 |                     "target": node["id"],
+ 874 |                     "animated": True,
+ 875 |                     "type": "custom",
+ 876 |                     "style": {"stroke": "#60a5fa", "strokeWidth": 2}
+ 877 |                 })
+ 878 | 
+ 879 |     # Decide whether to run full agent flow
+ 880 |     if not req.execute_agents:
+ 881 |         # Only planning mode: save session in DB with paused state and return planning metadata
+ 882 |         db.save_session(
+ 883 |             session_id=session_id,
+ 884 |             title=req.prompt[:40] + "..." if len(req.prompt) > 40 else req.prompt,
+ 885 |             prompt=req.prompt,
+ 886 |             mode=complexity,
+ 887 |             nodes=nodes,
+ 888 |             edges=edges,
+ 889 |             chat_messages=[
+ 890 |                 {"id": "user-prompt", "sender": "user", "text": req.prompt, "timestamp": datetime.datetime.now().strftime("%I:%M:%S %p")}
+ 891 |             ],
+ 892 |             agent_talk_logs=[],
+ 893 |             execution_state="paused",
+ 894 |             status_message="Agent team generated. Customize and proceed.",
+ 895 |             follow_up_suggestions=plan.get("follow_up_suggestions", [])
+ 896 |         )
+ 897 |         
+ 898 |         async def planning_only_flow():
+ 899 |             setup_metadata = {
+ 900 |                 "complexity": complexity,
+ 901 |                 "capabilities": plan.get("capabilities", []),
+ 902 |                 "thinking_summary": plan.get("thinking_summary", ""),
+ 903 |                 "nodes": nodes,
+ 904 |                 "edges": edges,
+ 905 |                 "agent_talk": [],
+ 906 |                 "follow_up_suggestions": plan.get("follow_up_suggestions", [])
+ 907 |             }
+ 908 |             yield f"event: metadata\ndata: {json.dumps(setup_metadata)}\n\n"
+ 909 |             yield f"event: text\ndata: {json.dumps('✅ Agent team generated. Go to the **Flow** tab to customize agents and click **Proceed** to run them.')}\n\n"
+ 910 |             yield "event: done\ndata: {}\n\n"
+ 911 |             
+ 912 |         return StreamingResponse(planning_only_flow(), media_type="text/event-stream")
+ 913 |     else:
+ 914 |         # Existing full execution flow
+ 915 |         return StreamingResponse(
+ 916 |             run_agent_execution_loop(
+ 917 |                 session_id=session_id,
+ 918 |                 prompt=req.prompt,
+ 919 |                 history=req.history or [],
+ 920 |                 api_key=api_key,
+ 921 |                 nodes=nodes,
+ 922 |                 edges=edges,
+ 923 |                 complexity=complexity,
+ 924 |                 capabilities=plan.get("capabilities", []),
+ 925 |                 thinking_summary=plan.get("thinking_summary", ""),
+ 926 |                 follow_up_suggestions=plan.get("follow_up_suggestions", []),
+ 927 |                 provider=req.provider,
+ 928 |                 model=req.model,
+ 929 |                 fallback_provider=req.fallback_provider,
+ 930 |                 api_keys=req.api_keys,
+ 931 |                 base_url=req.base_url
+ 932 |             ),
+ 933 |             media_type="text/event-stream"
+ 934 |         )
+ 935 | 
+ 936 | @app.get("/providers")
+ 937 | async def get_providers():
+ 938 |     return get_available_providers()
  939 | 
- 940 | def convert_gemini_history_to_standard(history: List[Dict[str, Any]]) -> List[Dict[str, str]]:
- 941 |     res = []
- 942 |     for msg in history:
- 943 |         parts = msg.get("parts", [])
- 944 |         text = ""
- 945 |         if parts:
- 946 |             text = parts[0].get("text", "")
- 947 |         role = "assistant" if msg.get("role") in ["model", "assistant"] else "user"
- 948 |         res.append({"role": role, "content": text})
- 949 |     return res
- 950 | 
- 951 | async def run_agent_execution_loop(
- 952 |     session_id: str,
- 953 |     prompt: str,
- 954 |     history: List[Message],
- 955 |     api_key: str,
- 956 |     nodes: List[Dict[str, Any]],
- 957 |     edges: List[Dict[str, Any]],
- 958 |     complexity: str,
- 959 |     capabilities: List[str],
- 960 |     thinking_summary: str,
- 961 |     follow_up_suggestions: List[str],
- 962 |     provider: str = "gemini",
- 963 |     model: Optional[str] = None
- 964 | ):
- 965 |     now_str = lambda: datetime.datetime.now().strftime("%I:%M:%S %p")
- 966 |     agent_results: Dict[str, str] = {}
- 967 |     setup_metadata = {
- 968 |         "complexity": complexity,
- 969 |         "capabilities": capabilities,
- 970 |         "thinking_summary": thinking_summary,
- 971 |         "nodes": nodes,
- 972 |         "edges": edges,
- 973 |         "agent_talk": [],
- 974 |         "follow_up_suggestions": follow_up_suggestions
- 975 |     }
- 976 |     
- 977 |     # 1. Dependency Existence Check
- 978 |     all_ids = {n["id"] for n in nodes}
- 979 |     for node in nodes:
- 980 |         if not node.get("data", {}).get("enabled", True):
- 981 |             continue
- 982 |         for dep in node.get("data", {}).get("dependencies", []):
- 983 |             if dep not in all_ids:
- 984 |                 error_msg = f"Agent {node['id']} depends on missing agent {dep}"
- 985 |                 yield f"event: text\ndata: {json.dumps('**Validation Error**: ' + error_msg)}\n\n"
- 986 |                 yield "event: done\ndata: {}\n\n"
- 987 |                 return
- 988 | 
- 989 |     # 2. Cycle Detection Check
- 990 |     def has_cycle(graph, current_node, visited, rec_stack):
- 991 |         visited[current_node] = True
- 992 |         rec_stack[current_node] = True
- 993 |         for neighbor in graph.get(current_node, []):
- 994 |             if not visited.get(neighbor, False):
- 995 |                 if has_cycle(graph, neighbor, visited, rec_stack):
- 996 |                     return True
- 997 |             elif rec_stack.get(neighbor, False):
- 998 |                 return True
- 999 |         rec_stack[current_node] = False
-1000 |         return False
-1001 | 
-1002 |     graph = {node["id"]: [d for d in node.get("data", {}).get("dependencies", []) if d in all_ids] for node in nodes}
-1003 |     if edges:
-1004 |         for edge in edges:
-1005 |             target = edge.get("target")
-1006 |             source = edge.get("source")
-1007 |             if target in graph and source in all_ids:
-1008 |                 graph[target].append(source)
-1009 | 
-1010 |     visited_nodes = {node["id"]: False for node in nodes}
-1011 |     for node_id in graph:
-1012 |         if not visited_nodes[node_id]:
-1013 |             if has_cycle(graph, node_id, visited_nodes, {}):
-1014 |                 error_msg = "Circular dependency detected in agent workflow."
-1015 |                 yield f"event: text\ndata: {json.dumps('**Validation Error**: ' + error_msg)}\n\n"
-1016 |                 yield "event: done\ndata: {}\n\n"
-1017 |                 return
-1018 | 
-1019 |     # Save initial session in DB
-1020 |     db.save_session(
-1021 |         session_id=session_id,
-1022 |         title=prompt[:40] + "..." if len(prompt) > 40 else prompt,
-1023 |         prompt=prompt,
-1024 |         mode=complexity,
-1025 |         nodes=nodes,
-1026 |         edges=edges,
-1027 |         chat_messages=[],
-1028 |         agent_talk_logs=[],
-1029 |         execution_state="running",
-1030 |         status_message="Running orchestration loop",
-1031 |         follow_up_suggestions=follow_up_suggestions
-1032 |     )
-1033 |     
-1034 |     yield f"event: metadata\ndata: {json.dumps(setup_metadata)}\n\n"
-1035 | 
-1036 |     execution_order = sort_nodes_topologically(nodes, edges)
-1037 |     
-1038 |     for agent_node in execution_order:
-1039 |         node_id = agent_node["id"]
-1040 |         agent_data = agent_node["data"]
-1041 |         agent_name = agent_data["name"]
-1042 |         
-1043 |         if not agent_data.get("enabled", True):
-1044 |             continue
-1045 | 
-1046 |         try:
-1047 |             # Checkpoint loading
-1048 |             checkpoint_state = db.load_checkpoint(session_id, node_id)
-1049 |             if checkpoint_state:
-1050 |                 agent_results[node_id] = checkpoint_state.get("final_answer", "Completed.")
-1051 |                 setup_metadata["agent_talk"].append({
-1052 |                     "id": f"agent-log-{node_id}-{now_str()}",
-1053 |                     "senderId": node_id,
-1054 |                     "senderName": agent_name,
-1055 |                     "senderIcon": agent_data["icon"],
-1056 |                     "text": checkpoint_state.get("final_answer", "Completed.")[:180],
-1057 |                     "timestamp": now_str()
-1058 |                 })
-1059 |                 continue
-1060 | 
-1061 |             for n in nodes:
-1062 |                 if n["id"] == node_id:
-1063 |                     n["data"]["status"] = "ACTIVE"
-1064 |             yield f"event: metadata\ndata: {json.dumps(setup_metadata)}\n\n"
-1065 |             
-1066 |             yield f"event: status\ndata: {json.dumps(f'[{agent_name}] processing...')}\n\n"
-1067 |             await asyncio.sleep(0.5)
-1068 | 
-1069 |             dep_outputs = ""
-1070 |             for dep_id in agent_data.get("dependencies", []):
-1071 |                 if dep_id in agent_results:
-1072 |                     dep_outputs += f"### Input from {dep_id.upper()}:\n{agent_results[dep_id]}\n"
-1073 | 
-1074 |             memories_context = ""
-1075 |             try:
-1076 |                 matched_memories = await query_memory(agent_data["objective"], api_key, session_id=session_id, provider=provider)
-1077 |                 if matched_memories:
-1078 |                     memories_context = "### Relevant Historical Memories:\n" + "\n".join(f"- {m}" for m in matched_memories)
-1079 |             except Exception:
-1080 |                 pass
-1081 | 
-1082 |             # Get messages addressed to this agent
-1083 |             incoming_msgs = get_messages_for_agent(session_id, node_id)
-1084 |             msg_block = ""
-1085 |             if incoming_msgs:
-1086 |                 msg_block = "### Messages from other agents:\n"
-1087 |                 for msg in incoming_msgs:
-1088 |                     msg_block += f"- From {msg['from']}: {msg['content']}\n"
-1089 |                 # Clear after reading
-1090 |                 clear_messages(session_id, node_id)
-1091 | 
-1092 |             resolved_tools_str = ", ".join(agent_data.get("tools", []))
-1093 |             tools_instruction = f"Available tools: {resolved_tools_str}. To use a tool, specify the tool name in 'action' and input in 'action_input'. If you have enough information, set 'action' to 'none' and provide 'final_answer'."
-1094 | 
-1095 |             agent_history = [{
-1096 |                 "role": "user",
-1097 |                 "parts": [{"text": f"{tools_instruction}\n\nUser Request: {prompt}\n\n{dep_outputs}\n{memories_context}\n{msg_block}\n\nYour specific objective: {agent_data['objective']}\nPersonality: {agent_data.get('personality', 'Collaborative Specialist')}\nRules: {agent_data['rules']}"}]
-1098 |             }]
-1099 | 
-1100 |             agent_final_answer = "Sub-task completed."
-1101 |             action_execution_history = []
-1102 |             max_turns = 6 if complexity != "simple" else 3
+ 940 | @app.get("/health")
+ 941 | async def health_check():
+ 942 |     """Health check for the orchestrator and provider connectivity."""
+ 943 |     import datetime
+ 944 |     return {"status": "ok", "timestamp": datetime.datetime.now().isoformat()}
+ 945 | 
+ 946 | class ModelsRequest(BaseModel):
+ 947 |     provider: str
+ 948 |     api_key: Optional[str] = None
+ 949 |     api_keys: Optional[Dict[str, str]] = None
+ 950 |     base_url: Optional[str] = None
+ 951 | 
+ 952 | @app.post("/models")
+ 953 | async def get_models(req: ModelsRequest):
+ 954 |     """Fetch available models for a provider dynamically."""
+ 955 |     models = await fetch_models_from_provider(
+ 956 |         provider=req.provider,
+ 957 |         api_key=req.api_key,
+ 958 |         api_keys=req.api_keys,
+ 959 |         base_url=req.base_url
+ 960 |     )
+ 961 |     return {"provider": req.provider, "models": models}
+ 962 | 
+ 963 | # Session persistence APIs
+ 964 | @app.get("/sessions")
+ 965 | async def get_sessions():
+ 966 |     return db.load_sessions()
+ 967 | 
+ 968 | @app.get("/sessions/{session_id}")
+ 969 | async def get_session(session_id: str):
+ 970 |     session = db.load_session(session_id)
+ 971 |     if not session:
+ 972 |         raise HTTPException(status_code=404, detail="Session not found")
+ 973 |     return session
+ 974 | 
+ 975 | @app.delete("/sessions/{session_id}")
+ 976 | async def delete_session(session_id: str):
+ 977 |     db.delete_session(session_id)
+ 978 |     return {"status": "success"}
+ 979 | 
+ 980 | def convert_gemini_history_to_standard(history: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+ 981 |     res = []
+ 982 |     for msg in history:
+ 983 |         parts = msg.get("parts", [])
+ 984 |         text = ""
+ 985 |         if parts:
+ 986 |             text = parts[0].get("text", "")
+ 987 |         role = "assistant" if msg.get("role") in ["model", "assistant"] else "user"
+ 988 |         res.append({"role": role, "content": text})
+ 989 |     return res
+ 990 | 
+ 991 | async def run_agent_execution_loop(
+ 992 |     session_id: str,
+ 993 |     prompt: str,
+ 994 |     history: List[Message],
+ 995 |     api_key: str,
+ 996 |     nodes: List[Dict[str, Any]],
+ 997 |     edges: List[Dict[str, Any]],
+ 998 |     complexity: str,
+ 999 |     capabilities: List[str],
+1000 |     thinking_summary: str,
+1001 |     follow_up_suggestions: List[str],
+1002 |     provider: str = "gemini",
+1003 |     model: Optional[str] = None,
+1004 |     fallback_provider: Optional[str] = None,
+1005 |     api_keys: Optional[Dict[str, str]] = None,
+1006 |     base_url: Optional[str] = None
+1007 | ):
+1008 |     now_str = lambda: datetime.datetime.now().strftime("%I:%M:%S %p")
+1009 |     agent_results: Dict[str, str] = {}
+1010 |     setup_metadata = {
+1011 |         "complexity": complexity,
+1012 |         "capabilities": capabilities,
+1013 |         "thinking_summary": thinking_summary,
+1014 |         "nodes": nodes,
+1015 |         "edges": edges,
+1016 |         "agent_talk": [],
+1017 |         "follow_up_suggestions": follow_up_suggestions
+1018 |     }
+1019 |     
+1020 |     # 1. Dependency Existence Check
+1021 |     all_ids = {n["id"] for n in nodes}
+1022 |     for node in nodes:
+1023 |         if not node.get("data", {}).get("enabled", True):
+1024 |             continue
+1025 |         for dep in node.get("data", {}).get("dependencies", []):
+1026 |             if dep not in all_ids:
+1027 |                 error_msg = f"Agent {node['id']} depends on missing agent {dep}"
+1028 |                 yield f"event: text\ndata: {json.dumps('**Validation Error**: ' + error_msg)}\n\n"
+1029 |                 yield "event: done\ndata: {}\n\n"
+1030 |                 return
+1031 | 
+1032 |     # 2. Cycle Detection Check
+1033 |     def has_cycle(graph, current_node, visited, rec_stack):
+1034 |         visited[current_node] = True
+1035 |         rec_stack[current_node] = True
+1036 |         for neighbor in graph.get(current_node, []):
+1037 |             if not visited.get(neighbor, False):
+1038 |                 if has_cycle(graph, neighbor, visited, rec_stack):
+1039 |                     return True
+1040 |             elif rec_stack.get(neighbor, False):
+1041 |                 return True
+1042 |         rec_stack[current_node] = False
+1043 |         return False
+1044 | 
+1045 |     graph = {node["id"]: [d for d in node.get("data", {}).get("dependencies", []) if d in all_ids] for node in nodes}
+1046 |     if edges:
+1047 |         for edge in edges:
+1048 |             target = edge.get("target")
+1049 |             source = edge.get("source")
+1050 |             if target in graph and source in all_ids:
+1051 |                 graph[target].append(source)
+1052 | 
+1053 |     visited_nodes = {node["id"]: False for node in nodes}
+1054 |     for node_id in graph:
+1055 |         if not visited_nodes[node_id]:
+1056 |             if has_cycle(graph, node_id, visited_nodes, {}):
+1057 |                 error_msg = "Circular dependency detected in agent workflow."
+1058 |                 yield f"event: text\ndata: {json.dumps('**Validation Error**: ' + error_msg)}\n\n"
+1059 |                 yield "event: done\ndata: {}\n\n"
+1060 |                 return
+1061 | 
+1062 |     # Save initial session in DB
+1063 |     db.save_session(
+1064 |         session_id=session_id,
+1065 |         title=prompt[:40] + "..." if len(prompt) > 40 else prompt,
+1066 |         prompt=prompt,
+1067 |         mode=complexity,
+1068 |         nodes=nodes,
+1069 |         edges=edges,
+1070 |         chat_messages=[],
+1071 |         agent_talk_logs=[],
+1072 |         execution_state="running",
+1073 |         status_message="Running orchestration loop",
+1074 |         follow_up_suggestions=follow_up_suggestions
+1075 |     )
+1076 |     
+1077 |     yield f"event: metadata\ndata: {json.dumps(setup_metadata)}\n\n"
+1078 | 
+1079 |     execution_order = sort_nodes_topologically(nodes, edges)
+1080 |     
+1081 |     for agent_node in execution_order:
+1082 |         node_id = agent_node["id"]
+1083 |         agent_data = agent_node["data"]
+1084 |         agent_name = agent_data["name"]
+1085 |         
+1086 |         if not agent_data.get("enabled", True):
+1087 |             continue
+1088 | 
+1089 |         try:
+1090 |             # Checkpoint loading
+1091 |             checkpoint_state = db.load_checkpoint(session_id, node_id)
+1092 |             if checkpoint_state:
+1093 |                 agent_results[node_id] = checkpoint_state.get("final_answer", "Completed.")
+1094 |                 setup_metadata["agent_talk"].append({
+1095 |                     "id": f"agent-log-{node_id}-{now_str()}",
+1096 |                     "senderId": node_id,
+1097 |                     "senderName": agent_name,
+1098 |                     "senderIcon": agent_data["icon"],
+1099 |                     "text": checkpoint_state.get("final_answer", "Completed.")[:180],
+1100 |                     "timestamp": now_str()
+1101 |                 })
+1102 |                 continue
 1103 | 
-1104 |             for turn in range(max_turns):
-1105 |                 turn_data = {}
-1106 |                 action = "none"
-1107 |                 observation = ""
-1108 |                 try:
-1109 |                     standard_history = convert_gemini_history_to_standard(agent_history)
-1110 |                     turn_data = await call_provider_json(
-1111 |                         provider=provider,
-1112 |                         model=model,
-1113 |                         api_key=api_key,
-1114 |                         messages=standard_history,
-1115 |                         system_prompt=agent_data["systemPrompt"],
-1116 |                         temperature=0.2,
-1117 |                         json_schema=agent_turn_schema,
-1118 |                         timeout=30.0
-1119 |                     )
-1120 |                     
-1121 |                     thought = turn_data.get("thought", "")
-1122 |                     action = turn_data.get("action", "none")
-1123 |                     action_input = turn_data.get("action_input", "")
-1124 |                     agent_final_answer = turn_data.get("final_answer", "")
-1125 |                     
-1126 |                     if thought:
-1127 |                         yield f"event: thinking\ndata: {json.dumps(f'[{agent_name}]: {thought}\\n')}\n\n"
-1128 |                 except Exception as e:
-1129 |                     print(f"ReAct Turn fail: {e}")
-1130 |                     break
-1131 | 
-1132 |                 if action == "none" or agent_final_answer:
-1133 |                     break
+1104 |             for n in nodes:
+1105 |                 if n["id"] == node_id:
+1106 |                     n["data"]["status"] = "ACTIVE"
+1107 |             yield f"event: metadata\ndata: {json.dumps(setup_metadata)}\n\n"
+1108 |             
+1109 |             yield f"event: status\ndata: {json.dumps(f'[{agent_name}] processing...')}\n\n"
+1110 |             await asyncio.sleep(0.5)
+1111 | 
+1112 |             dep_outputs = ""
+1113 |             for dep_id in agent_data.get("dependencies", []):
+1114 |                 if dep_id in agent_results:
+1115 |                     dep_outputs += f"### Input from {dep_id.upper()}:\n{agent_results[dep_id]}\n"
+1116 | 
+1117 |             memories_context = ""
+1118 |             try:
+1119 |                 matched_memories = await query_memory(agent_data["objective"], api_key, session_id=session_id, provider=provider)
+1120 |                 if matched_memories:
+1121 |                     memories_context = "### Relevant Historical Memories:\n" + "\n".join(f"- {m}" for m in matched_memories)
+1122 |             except Exception:
+1123 |                 pass
+1124 | 
+1125 |             # Get messages addressed to this agent
+1126 |             incoming_msgs = get_messages_for_agent(session_id, node_id)
+1127 |             msg_block = ""
+1128 |             if incoming_msgs:
+1129 |                 msg_block = "### Messages from other agents:\n"
+1130 |                 for msg in incoming_msgs:
+1131 |                     msg_block += f"- From {msg['from']}: {msg['content']}\n"
+1132 |                 # Clear after reading
+1133 |                 clear_messages(session_id, node_id)
 1134 | 
-1135 |                 # Circuit Breaker Check
-1136 |                 action_execution_history.append((action, action_input))
-1137 |                 if action_execution_history.count((action, action_input)) >= 3:
-1138 |                     observation = "Circuit Breaker: Tool executed repeatedly with identical input. Halting loop to prevent infinite spend."
-1139 |                     yield f"event: status\ndata: {json.dumps(f'[{agent_name}] circuit breaker halted')}\n\n"
-1140 |                     agent_history.append({
-1141 |                         "role": "model",
-1142 |                         "parts": [{"text": json.dumps(turn_data)}]
-1143 |                     })
-1144 |                     agent_history.append({
-1145 |                         "role": "user",
-1146 |                         "parts": [{"text": f"Observation: {observation}"}]
-1147 |                     })
-1148 |                     continue
-1149 | 
-1150 |                 t_log_id = f"t-log-{int(datetime.datetime.now().timestamp())}"
-1151 |                 t_timestamp = now_str()
-1152 |                 
-1153 |                 permission = agent_data.get("toolPermissions", {}).get(action, "ALLOWED")
-1154 |                 
-1155 |                 if permission == "ASK":
-1156 |                     new_log = {
-1157 |                         "id": t_log_id,
-1158 |                         "timestamp": t_timestamp,
-1159 |                         "tool": action,
-1160 |                         "action": "Execution Request",
-1161 |                         "status": "PENDING",
-1162 |                         "detail": f"Waiting for user to approve execution of '{action_input[:50]}...'"
-1163 |                     }
-1164 |                     for n in nodes:
-1165 |                         if n["id"] == node_id:
-1166 |                             n["data"]["toolLogs"] = [new_log] + n["data"].get("toolLogs", [])
-1167 |                     yield f"event: metadata\ndata: {json.dumps(setup_metadata)}\n\n"
-1168 |                     
-1169 |                     db.create_tool_approval(session_id, node_id, action, action_input, t_log_id)
-1170 |                     
-1171 |                     yield f"event: tool_approval\ndata: {json.dumps({'sessionId': session_id, 'nodeId': node_id, 'toolName': action, 'action': 'Execution Approval Required', 'detail': action_input[:100], 'logId': t_log_id})}\n\n"
-1172 |                     yield f"event: status\ndata: {json.dumps(f'[{agent_name}] waiting for approval to run [{action}]')}\n\n"
-1173 | 
-1174 |                     # Poll database for verdict (with 120s timeout)
-1175 |                     approval_start = time.time()
-1176 |                     APPROVAL_TIMEOUT = 120
-1177 |                     while True:
-1178 |                         approval_status = db.get_tool_approval(session_id, node_id, action, t_log_id)
-1179 |                         if approval_status in ["approved", "denied"]:
-1180 |                             permission = "ALLOWED" if approval_status == "approved" else "DENIED"
-1181 |                             break
-1182 |                         if time.time() - approval_start > APPROVAL_TIMEOUT:
-1183 |                             permission = "DENIED"
-1184 |                             db.update_tool_approval(session_id, node_id, action, t_log_id, "denied")
-1185 |                             yield f"event: status\ndata: {json.dumps(f'[{agent_name}] approval timed out, auto-denied')}\n\n"
-1186 |                             break
-1187 |                         await asyncio.sleep(0.5)
-1188 |                     
-1189 |                     if permission == "ALLOWED":
-1190 |                         for n in nodes:
-1191 |                             if n["id"] == node_id:
-1192 |                                 n["data"]["toolLogs"] = [{**new_log, "status": "SUCCESS", "detail": f"Approved: {action_input[:50]}"}] + n["data"].get("toolLogs", [])[1:]
-1193 |                     else:
-1194 |                         for n in nodes:
-1195 |                             if n["id"] == node_id:
-1196 |                                 n["data"]["toolLogs"] = [{**new_log, "status": "BLOCKED", "detail": "Blocked by user."}] + n["data"].get("toolLogs", [])[1:]
-1197 | 
-1198 |                 if permission == "ALLOWED":
-1199 |                     yield f"event: status\ndata: {json.dumps(f'[{agent_name}] executing [{action}]')}\n\n"
-1200 |                     
-1201 |                     if action == "web_search":
-1202 |                         observation = await execute_web_search(action_input)
-1203 |                     elif action == "browse_web":
-1204 |                         observation = await execute_web_browse(action_input)
-1205 |                     elif action == "execute_code":
-1206 |                         observation = await execute_python_code(action_input)
-1207 |                     elif action == "api_call":
-1208 |                         observation = await execute_api_call(action_input)
-1209 |                     elif action == "query_memory":
-1210 |                         mem_res = await query_memory(action_input, api_key, session_id=session_id, provider=provider)
-1211 |                         observation = "\n".join(mem_res) if mem_res else "No matches found."
-1212 |                     elif action == "store_memory":
-1213 |                         await store_memory(node_id, action_input, api_key, session_id, provider=provider)
-1214 |                         observation = "Saved successfully."
-1215 |                     elif action == "send_message":
-1216 |                         parts = action_input.split("|", 1)
-1217 |                         if len(parts) == 2:
-1218 |                             target_agent, content = parts
-1219 |                             post_message(session_id, node_id, target_agent, content)
-1220 |                             observation = f"Message sent to {target_agent}."
-1221 |                         else:
-1222 |                             observation = "Invalid send_message format. Use 'target|content'."
-1223 |                     elif action in ["analyze_image", "read_file"]:
-1224 |                         observation = f"{action} is not yet available in this deployment."
-1225 |                     else:
-1226 |                         observation = "Mock tool result."
-1227 |                     
-1228 |                     success_log = {
-1229 |                         "id": t_log_id,
-1230 |                         "timestamp": now_str(),
-1231 |                         "tool": action,
-1232 |                         "action": "Call",
-1233 |                         "status": "SUCCESS",
-1234 |                         "detail": f"Ran tool with inputs: '{action_input[:50]}' -> Output: {observation[:100]}..."
-1235 |                     }
-1236 |                     for n in nodes:
-1237 |                         if n["id"] == node_id:
-1238 |                             logs_filtered = [l for l in n["data"].get("toolLogs", []) if l["id"] != t_log_id]
-1239 |                             n["data"]["toolLogs"] = [success_log] + logs_filtered
-1240 |                 else:
-1241 |                     observation = "Execution Blocked: Permission Denied."
-1242 |                 
-1243 |                 yield f"event: metadata\ndata: {json.dumps(setup_metadata)}\n\n"
-1244 |                 
-1245 |                 agent_history.append({
-1246 |                     "role": "model",
-1247 |                     "parts": [{"text": json.dumps(turn_data)}]
-1248 |                 })
-1249 |                 agent_history.append({
-1250 |                     "role": "user",
-1251 |                     "parts": [{"text": f"Observation: {observation}"}]
-1252 |                 })
-1253 | 
-1254 |             # Check if agent outcome is default / empty
-1255 |             if not agent_final_answer or agent_final_answer.strip() in ["Sub-task completed.", ""]:
-1256 |                 synthesis_prompt = f"Based on your objective '{agent_data['objective']}' and the ReAct steps executed, write a concise summary/result of your sub-task."
-1257 |                 agent_history.append({"role": "user", "parts": [{"text": synthesis_prompt}]})
-1258 |                 try:
-1259 |                     synth_text = await call_provider(
-1260 |                         provider=provider,
-1261 |                         model=model,
-1262 |                         api_key=api_key,
-1263 |                         messages=convert_gemini_history_to_standard(agent_history),
-1264 |                         system_prompt=agent_data["systemPrompt"],
-1265 |                         temperature=0.3,
-1266 |                         timeout=15.0
-1267 |                     )
-1268 |                     if synth_text:
-1269 |                         agent_final_answer = synth_text
-1270 |                 except Exception:
-1271 |                     pass
-1272 | 
-1273 |             agent_results[node_id] = agent_final_answer or "Sub-task completed."
-1274 |             
-1275 |             # Save state checkpoint
-1276 |             db.save_checkpoint(session_id, node_id, {"final_answer": agent_final_answer})
-1277 |             
-1278 |             for n in nodes:
-1279 |                 if n["id"] == node_id:
-1280 |                     n["data"]["status"] = "IDLE"
-1281 |             
-1282 |             setup_metadata["agent_talk"].append({
-1283 |                 "id": f"agent-log-{node_id}-{now_str()}",
-1284 |                 "senderId": node_id,
-1285 |                 "senderName": agent_name,
-1286 |                 "senderIcon": agent_data["icon"],
-1287 |                 "text": agent_final_answer[:180] + "..." if len(agent_final_answer) > 180 else agent_final_answer,
-1288 |                 "timestamp": now_str()
-1289 |             })
-1290 |             yield f"event: metadata\ndata: {json.dumps(setup_metadata)}\n\n"
-1291 |             
-1292 |             # Only store outcome memory if meaningful
-1293 |             if agent_final_answer and len(agent_final_answer) > 40 and agent_final_answer != "Sub-task completed.":
-1294 |                 try:
-1295 |                     memory_text = f"Objective: {agent_data['objective']}\nOutcome: {agent_final_answer[:500]}"
-1296 |                     await store_memory(node_id, memory_text, api_key, session_id, provider=provider)
-1297 |                 except Exception:
-1298 |                     pass
-1299 |         except Exception as e:
-1300 |             print(f"[AGENT ERROR] {agent_name} failed: {e}")
-1301 |             agent_results[node_id] = f"Agent encountered an error: {str(e)[:200]}"
-1302 |             for n in nodes:
-1303 |                 if n["id"] == node_id:
-1304 |                     n["data"]["status"] = "ERROR"
-1305 |             setup_metadata["agent_talk"].append({
-1306 |                 "id": f"agent-log-{node_id}-error-{now_str()}",
-1307 |                 "senderId": node_id,
-1308 |                 "senderName": agent_name,
-1309 |                 "senderIcon": agent_data["icon"],
-1310 |                 "text": f"⚠ Failed: {str(e)[:150]}",
-1311 |                 "timestamp": now_str()
-1312 |             })
-1313 |             yield f"event: metadata\ndata: {json.dumps(setup_metadata)}\n\n"
-1314 |             continue
-1315 | 
-1316 |     if complexity == "simple" and not agent_results:
-1317 |         agent_results["general"] = "Processed the request, but no specific output was generated."
-1318 | 
-1319 |     yield f"event: status\ndata: {json.dumps('Synthesizing final response...')}\n\n"
-1320 | 
-1321 |     # Build aggregator prompt — inject relevant memory + agent results
-1322 |     aggregator_prompt = ""
-1323 |     try:
-1324 |         memory_hits = await query_memory(prompt, api_key, top_k=3, agent_id=None, session_id=session_id, provider=provider)
-1325 |         if memory_hits:
-1326 |             aggregator_prompt += "### Relevant context from past conversation:\n" + "\n".join(f"- {m}" for m in memory_hits) + "\n\n"
-1327 |     except Exception:
-1328 |         pass
-1329 | 
-1330 |     if agent_results:
-1331 |         aggregator_prompt += "### Analysis context:\n"
-1332 |         for _nid, result in agent_results.items():
-1333 |             aggregator_prompt += f"{result}\n\n"
-1334 | 
-1335 |     aggregator_prompt += f"\nUser's current message: {prompt}"
-1336 | 
-1337 |     # Fallback if aggregator prompt is empty
-1338 |     if not aggregator_prompt.strip():
-1339 |         aggregator_prompt = f"Answer the following user request concisely and helpfully:\n\n{prompt}"
-1340 | 
-1341 |     # Build full conversation history for aggregator so it has cross-turn context
-1342 |     aggregator_contents = []
-1343 |     if history:
-1344 |         for msg in history:
-1345 |             role = "user" if msg.sender == "user" else "model"
-1346 |             aggregator_contents.append({"role": role, "parts": [{"text": msg.text}]})
-1347 |     aggregator_contents.append({"role": "user", "parts": [{"text": aggregator_prompt}]})
-1348 | 
-1349 |     final_synthesis_text = ""
-1350 |     try:
-1351 |         async for token in stream_provider(
-1352 |             provider=provider,
-1353 |             model=model,
-1354 |             api_key=api_key,
-1355 |             messages=convert_gemini_history_to_standard(aggregator_contents),
-1356 |             system_prompt=RESPONSE_SYSTEM_INSTRUCTION,
-1357 |             temperature=0.7,
-1358 |             timeout=90.0
-1359 |         ):
-1360 |             final_synthesis_text += token
-1361 |             yield f"event: text\ndata: {json.dumps(token)}\n\n"
-1362 |     except Exception as exc:
-1363 |         err_msg = f"\n\n*Stream Synthesis Error: {str(exc)}*\n\n"
-1364 |         yield f"event: text\ndata: {json.dumps(err_msg)}\n\n"
-1365 |         final_synthesis_text = err_msg
-1366 | 
-1367 |     print(f"[DEBUG] final_synthesis_text length: {len(final_synthesis_text)}")
-1368 |     if not final_synthesis_text:
-1369 |         print("[ERROR] Aggregator produced empty response")
-1370 | 
-1371 |     # Save complete session data
-1372 |     final_chat_messages = []
-1373 |     if history:
-1374 |         for msg in history:
-1375 |             final_chat_messages.append({"id": f"msg-{id(msg)}", "sender": msg.sender, "text": msg.text, "timestamp": ""})
-1376 |     final_chat_messages.append({"id": "user-prompt", "sender": "user", "text": prompt, "timestamp": now_str()})
-1377 |     final_chat_messages.append({"id": "ai-response", "sender": "ai", "text": final_synthesis_text, "timestamp": now_str()})
+1135 |             resolved_tools_str = ", ".join(agent_data.get("tools", []))
+1136 |             tools_instruction = f"Available tools: {resolved_tools_str}. To use a tool, specify the tool name in 'action' and input in 'action_input'. If you have enough information, set 'action' to 'none' and provide 'final_answer'."
+1137 | 
+1138 |             agent_history = [{
+1139 |                 "role": "user",
+1140 |                 "parts": [{"text": f"{tools_instruction}\n\nUser Request: {prompt}\n\n{dep_outputs}\n{memories_context}\n{msg_block}\n\nYour specific objective: {agent_data['objective']}\nPersonality: {agent_data.get('personality', 'Collaborative Specialist')}\nRules: {agent_data['rules']}"}]
+1141 |             }]
+1142 | 
+1143 |             agent_final_answer = "Sub-task completed."
+1144 |             action_execution_history = []
+1145 |             max_turns = 6 if complexity != "simple" else 3
+1146 | 
+1147 |             for turn in range(max_turns):
+1148 |                 turn_data = {}
+1149 |                 action = "none"
+1150 |                 observation = ""
+1151 |                 try:
+1152 |                     standard_history = convert_gemini_history_to_standard(agent_history)
+1153 |                     turn_data = await call_provider_json(
+1154 |                         provider=provider,
+1155 |                         model=model,
+1156 |                         api_key=api_key,
+1157 |                         messages=standard_history,
+1158 |                         system_prompt=agent_data["systemPrompt"],
+1159 |                         temperature=0.2,
+1160 |                         json_schema=agent_turn_schema,
+1161 |                         timeout=30.0,
+1162 |                         fallback_provider=fallback_provider,
+1163 |                         api_keys=api_keys,
+1164 |                         base_url=base_url
+1165 |                     )
+1166 |                     
+1167 |                     thought = turn_data.get("thought", "")
+1168 |                     action = turn_data.get("action", "none")
+1169 |                     action_input = turn_data.get("action_input", "")
+1170 |                     agent_final_answer = turn_data.get("final_answer", "")
+1171 |                     
+1172 |                     if thought:
+1173 |                         yield f"event: thinking\ndata: {json.dumps(f'[{agent_name}]: {thought}\\n')}\n\n"
+1174 |                 except Exception as e:
+1175 |                     print(f"ReAct Turn fail: {e}")
+1176 |                     break
+1177 | 
+1178 |                 if action == "none" or agent_final_answer:
+1179 |                     break
+1180 | 
+1181 |                 # Circuit Breaker Check
+1182 |                 action_execution_history.append((action, action_input))
+1183 |                 if action_execution_history.count((action, action_input)) >= 3:
+1184 |                     observation = "Circuit Breaker: Tool executed repeatedly with identical input. Halting loop to prevent infinite spend."
+1185 |                     yield f"event: status\ndata: {json.dumps(f'[{agent_name}] circuit breaker halted')}\n\n"
+1186 |                     agent_history.append({
+1187 |                         "role": "model",
+1188 |                         "parts": [{"text": json.dumps(turn_data)}]
+1189 |                     })
+1190 |                     agent_history.append({
+1191 |                         "role": "user",
+1192 |                         "parts": [{"text": f"Observation: {observation}"}]
+1193 |                     })
+1194 |                     continue
+1195 | 
+1196 |                 t_log_id = f"t-log-{int(datetime.datetime.now().timestamp())}"
+1197 |                 t_timestamp = now_str()
+1198 |                 
+1199 |                 permission = agent_data.get("toolPermissions", {}).get(action, "ALLOWED")
+1200 |                 
+1201 |                 if permission == "ASK":
+1202 |                     new_log = {
+1203 |                         "id": t_log_id,
+1204 |                         "timestamp": t_timestamp,
+1205 |                         "tool": action,
+1206 |                         "action": "Execution Request",
+1207 |                         "status": "PENDING",
+1208 |                         "detail": f"Waiting for user to approve execution of '{action_input[:50]}...'"
+1209 |                     }
+1210 |                     for n in nodes:
+1211 |                         if n["id"] == node_id:
+1212 |                             n["data"]["toolLogs"] = [new_log] + n["data"].get("toolLogs", [])
+1213 |                     yield f"event: metadata\ndata: {json.dumps(setup_metadata)}\n\n"
+1214 |                     
+1215 |                     db.create_tool_approval(session_id, node_id, action, action_input, t_log_id)
+1216 |                     
+1217 |                     yield f"event: tool_approval\ndata: {json.dumps({'sessionId': session_id, 'nodeId': node_id, 'toolName': action, 'action': 'Execution Approval Required', 'detail': action_input[:100], 'logId': t_log_id})}\n\n"
+1218 |                     yield f"event: status\ndata: {json.dumps(f'[{agent_name}] waiting for approval to run [{action}]')}\n\n"
+1219 | 
+1220 |                     # Poll database for verdict (with 120s timeout)
+1221 |                     approval_start = time.time()
+1222 |                     APPROVAL_TIMEOUT = 120
+1223 |                     while True:
+1224 |                         approval_status = db.get_tool_approval(session_id, node_id, action, t_log_id)
+1225 |                         if approval_status in ["approved", "denied"]:
+1226 |                             permission = "ALLOWED" if approval_status == "approved" else "DENIED"
+1227 |                             break
+1228 |                         if time.time() - approval_start > APPROVAL_TIMEOUT:
+1229 |                             permission = "DENIED"
+1230 |                             db.update_tool_approval(session_id, node_id, action, t_log_id, "denied")
+1231 |                             yield f"event: status\ndata: {json.dumps(f'[{agent_name}] approval timed out, auto-denied')}\n\n"
+1232 |                             break
+1233 |                         await asyncio.sleep(0.5)
+1234 |                     
+1235 |                     if permission == "ALLOWED":
+1236 |                         for n in nodes:
+1237 |                             if n["id"] == node_id:
+1238 |                                 n["data"]["toolLogs"] = [{**new_log, "status": "SUCCESS", "detail": f"Approved: {action_input[:50]}"}] + n["data"].get("toolLogs", [])[1:]
+1239 |                     else:
+1240 |                         for n in nodes:
+1241 |                             if n["id"] == node_id:
+1242 |                                 n["data"]["toolLogs"] = [{**new_log, "status": "BLOCKED", "detail": "Blocked by user."}] + n["data"].get("toolLogs", [])[1:]
+1243 | 
+1244 |                 if permission == "ALLOWED":
+1245 |                     yield f"event: status\ndata: {json.dumps(f'[{agent_name}] executing [{action}]')}\n\n"
+1246 |                     
+1247 |                     if action == "web_search":
+1248 |                         observation = await execute_web_search(action_input)
+1249 |                     elif action == "browse_web":
+1250 |                         observation = await execute_web_browse(action_input)
+1251 |                     elif action == "execute_code":
+1252 |                         observation = await execute_python_code(action_input)
+1253 |                     elif action == "api_call":
+1254 |                         observation = await execute_api_call(action_input)
+1255 |                     elif action == "query_memory":
+1256 |                         mem_res = await query_memory(action_input, api_key, session_id=session_id, provider=provider)
+1257 |                         observation = "\n".join(mem_res) if mem_res else "No matches found."
+1258 |                     elif action == "store_memory":
+1259 |                         await store_memory(node_id, action_input, api_key, session_id, provider=provider)
+1260 |                         observation = "Saved successfully."
+1261 |                     elif action == "send_message":
+1262 |                         parts = action_input.split("|", 1)
+1263 |                         if len(parts) == 2:
+1264 |                             target_agent, content = parts
+1265 |                             post_message(session_id, node_id, target_agent, content)
+1266 |                             observation = f"Message sent to {target_agent}."
+1267 |                         else:
+1268 |                             observation = "Invalid send_message format. Use 'target|content'."
+1269 |                     elif action in ["analyze_image", "read_file"]:
+1270 |                         observation = f"{action} is not yet available in this deployment."
+1271 |                     else:
+1272 |                         observation = "Mock tool result."
+1273 |                     
+1274 |                     success_log = {
+1275 |                         "id": t_log_id,
+1276 |                         "timestamp": now_str(),
+1277 |                         "tool": action,
+1278 |                         "action": "Call",
+1279 |                         "status": "SUCCESS",
+1280 |                         "detail": f"Ran tool with inputs: '{action_input[:50]}' -> Output: {observation[:100]}..."
+1281 |                     }
+1282 |                     for n in nodes:
+1283 |                         if n["id"] == node_id:
+1284 |                             logs_filtered = [l for l in n["data"].get("toolLogs", []) if l["id"] != t_log_id]
+1285 |                             n["data"]["toolLogs"] = [success_log] + logs_filtered
+1286 |                 else:
+1287 |                     observation = "Execution Blocked: Permission Denied."
+1288 |                 
+1289 |                 yield f"event: metadata\ndata: {json.dumps(setup_metadata)}\n\n"
+1290 |                 
+1291 |                 agent_history.append({
+1292 |                     "role": "model",
+1293 |                     "parts": [{"text": json.dumps(turn_data)}]
+1294 |                 })
+1295 |                 agent_history.append({
+1296 |                     "role": "user",
+1297 |                     "parts": [{"text": f"Observation: {observation}"}]
+1298 |                 })
+1299 | 
+1300 |             # Check if agent outcome is default / empty
+1301 |             if not agent_final_answer or agent_final_answer.strip() in ["Sub-task completed.", ""]:
+1302 |                 synthesis_prompt = f"Based on your objective '{agent_data['objective']}' and the ReAct steps executed, write a concise summary/result of your sub-task."
+1303 |                 agent_history.append({"role": "user", "parts": [{"text": synthesis_prompt}]})
+1304 |                 try:
+1305 |                     synth_text = await call_provider(
+1306 |                         provider=provider,
+1307 |                         model=model,
+1308 |                         api_key=api_key,
+1309 |                         messages=convert_gemini_history_to_standard(agent_history),
+1310 |                         system_prompt=agent_data["systemPrompt"],
+1311 |                         temperature=0.3,
+1312 |                         timeout=15.0,
+1313 |                         fallback_provider=fallback_provider,
+1314 |                         api_keys=api_keys,
+1315 |                         base_url=base_url
+1316 |                     )
+1317 |                     if synth_text:
+1318 |                         agent_final_answer = synth_text
+1319 |                 except Exception:
+1320 |                     pass
+1321 | 
+1322 |             agent_results[node_id] = agent_final_answer or "Sub-task completed."
+1323 |             
+1324 |             # Save state checkpoint
+1325 |             db.save_checkpoint(session_id, node_id, {"final_answer": agent_final_answer})
+1326 |             
+1327 |             for n in nodes:
+1328 |                 if n["id"] == node_id:
+1329 |                     n["data"]["status"] = "IDLE"
+1330 |             
+1331 |             setup_metadata["agent_talk"].append({
+1332 |                 "id": f"agent-log-{node_id}-{now_str()}",
+1333 |                 "senderId": node_id,
+1334 |                 "senderName": agent_name,
+1335 |                 "senderIcon": agent_data["icon"],
+1336 |                 "text": agent_final_answer[:180] + "..." if len(agent_final_answer) > 180 else agent_final_answer,
+1337 |                 "timestamp": now_str()
+1338 |             })
+1339 |             yield f"event: metadata\ndata: {json.dumps(setup_metadata)}\n\n"
+1340 |             
+1341 |             # Only store outcome memory if meaningful
+1342 |             if agent_final_answer and len(agent_final_answer) > 40 and agent_final_answer != "Sub-task completed.":
+1343 |                 try:
+1344 |                     memory_text = f"Objective: {agent_data['objective']}\nOutcome: {agent_final_answer[:500]}"
+1345 |                     await store_memory(node_id, memory_text, api_key, session_id, provider=provider)
+1346 |                 except Exception:
+1347 |                     pass
+1348 |         except Exception as e:
+1349 |             print(f"[AGENT ERROR] {agent_name} failed: {e}")
+1350 |             agent_results[node_id] = f"Agent encountered an error: {str(e)[:200]}"
+1351 |             for n in nodes:
+1352 |                 if n["id"] == node_id:
+1353 |                     n["data"]["status"] = "ERROR"
+1354 |             setup_metadata["agent_talk"].append({
+1355 |                 "id": f"agent-log-{node_id}-error-{now_str()}",
+1356 |                 "senderId": node_id,
+1357 |                 "senderName": agent_name,
+1358 |                 "senderIcon": agent_data["icon"],
+1359 |                 "text": f"⚠ Failed: {str(e)[:150]}",
+1360 |                 "timestamp": now_str()
+1361 |             })
+1362 |             yield f"event: metadata\ndata: {json.dumps(setup_metadata)}\n\n"
+1363 |             continue
+1364 | 
+1365 |     if complexity == "simple" and not agent_results:
+1366 |         agent_results["general"] = "Processed the request, but no specific output was generated."
+1367 | 
+1368 |     yield f"event: status\ndata: {json.dumps('Synthesizing final response...')}\n\n"
+1369 | 
+1370 |     # Build aggregator prompt — inject relevant memory + agent results
+1371 |     aggregator_prompt = ""
+1372 |     try:
+1373 |         memory_hits = await query_memory(prompt, api_key, top_k=3, agent_id=None, session_id=session_id, provider=provider)
+1374 |         if memory_hits:
+1375 |             aggregator_prompt += "### Relevant context from past conversation:\n" + "\n".join(f"- {m}" for m in memory_hits) + "\n\n"
+1376 |     except Exception:
+1377 |         pass
 1378 | 
-1379 |     db.save_session(
-1380 |         session_id=session_id,
-1381 |         title=prompt[:40] + "..." if len(prompt) > 40 else prompt,
-1382 |         prompt=prompt,
-1383 |         mode=complexity,
-1384 |         nodes=nodes,
-1385 |         edges=edges,
-1386 |         chat_messages=final_chat_messages,
-1387 |         agent_talk_logs=setup_metadata["agent_talk"],
-1388 |         execution_state="setup",
-1389 |         status_message="Execution completed",
-1390 |         follow_up_suggestions=follow_up_suggestions
-1391 |     )
-1392 | 
-1393 |     # Cache final response
-1394 |     cached_val = {
-1395 |         "metadata": {
-1396 |             "complexity": complexity,
-1397 |             "capabilities": capabilities,
-1398 |             "thinking_summary": thinking_summary,
-1399 |             "nodes": nodes,
-1400 |             "edges": edges,
-1401 |             "agent_talk": setup_metadata["agent_talk"],
-1402 |             "follow_up_suggestions": follow_up_suggestions
-1403 |         },
-1404 |         "text": final_synthesis_text
-1405 |     }
-1406 |     
-1407 |     # Compute embeddings inside
-1408 |     try:
-1409 |         prompt_embedding = await get_embedding(provider, api_key, prompt)
-1410 |         if prompt_embedding:
-1411 |             prompt_hash_overall = hashlib.sha256(prompt.encode('utf-8')).hexdigest()
-1412 |             db.save_cached_response(prompt_hash_overall, prompt, prompt_embedding, cached_val)
-1413 |     except Exception:
-1414 |         pass
-1415 | 
-1416 |     # Auto-store this full conversation turn in vector memory for cross-turn recall
-1417 |     if final_synthesis_text:
-1418 |         try:
-1419 |             convo_memory = f"User: {prompt}\nAssistant: {final_synthesis_text[:800]}"
-1420 |             await store_memory(f"session_{session_id}", convo_memory, api_key, session_id, provider=provider)
-1421 |         except Exception:
-1422 |             pass
-1423 | 
-1424 |     yield "event: done\ndata: {}\n\n"
-1425 | 
-1426 | @app.post("/execute_custom")
-1427 | async def execute_custom(req: ExecuteCustomRequest):
-1428 |     api_key = resolve_api_key(req.provider, req.api_key)
-1429 |     if not api_key:
-1430 |         raise HTTPException(
-1431 |             status_code=400,
-1432 |             detail=f"API Key for provider '{req.provider}' is missing. Please configure BYOK in Settings."
-1433 |         )
-1434 | 
-1435 |     complexity = "simple" if len(req.nodes) == 1 and req.nodes[0]["id"] == "general" else "custom"
-1436 |     capabilities = [n["data"].get("tag", "CUSTOM") for n in req.nodes]
-1437 |     
-1438 |     return StreamingResponse(
-1439 |         run_agent_execution_loop(
-1440 |             session_id=req.session_id,
-1441 |             prompt=req.prompt,
-1442 |             history=req.history or [],
-1443 |             api_key=api_key,
-1444 |             nodes=req.nodes,
-1445 |             edges=req.edges,
-1446 |             complexity=complexity,
-1447 |             capabilities=capabilities,
-1448 |             thinking_summary="Running customized agent workflow",
-1449 |             follow_up_suggestions=["Can you explain the agent collaboration?"],
-1450 |             provider=req.provider,
-1451 |             model=req.model
-1452 |         ),
-1453 |         media_type="text/event-stream"
-1454 |     )
-1455 | 
-1456 |
+1379 |     if agent_results:
+1380 |         aggregator_prompt += "### Analysis context:\n"
+1381 |         for _nid, result in agent_results.items():
+1382 |             aggregator_prompt += f"{result}\n\n"
+1383 | 
+1384 |     aggregator_prompt += f"\nUser's current message: {prompt}"
+1385 | 
+1386 |     # Fallback if aggregator prompt is empty
+1387 |     if not aggregator_prompt.strip():
+1388 |         aggregator_prompt = f"Answer the following user request concisely and helpfully:\n\n{prompt}"
+1389 | 
+1390 |     # Build full conversation history for aggregator so it has cross-turn context
+1391 |     aggregator_contents = []
+1392 |     if history:
+1393 |         for msg in history:
+1394 |             role = "user" if msg.sender == "user" else "model"
+1395 |             aggregator_contents.append({"role": role, "parts": [{"text": msg.text}]})
+1396 |     aggregator_contents.append({"role": "user", "parts": [{"text": aggregator_prompt}]})
+1397 | 
+1398 |     final_synthesis_text = ""
+1399 |     try:
+1400 |         async for token in stream_provider(
+1401 |             provider=provider,
+1402 |             model=model,
+1403 |             api_key=api_key,
+1404 |             messages=convert_gemini_history_to_standard(aggregator_contents),
+1405 |             system_prompt=RESPONSE_SYSTEM_INSTRUCTION,
+1406 |             temperature=0.7,
+1407 |             timeout=90.0,
+1408 |             fallback_provider=fallback_provider,
+1409 |             api_keys=api_keys,
+1410 |             base_url=base_url
+1411 |         ):
+1412 |             final_synthesis_text += token
+1413 |             yield f"event: text\ndata: {json.dumps(token)}\n\n"
+1414 |     except Exception as exc:
+1415 |         err_msg = f"\n\n*Stream Synthesis Error: {str(exc)}*\n\n"
+1416 |         yield f"event: text\ndata: {json.dumps(err_msg)}\n\n"
+1417 |         final_synthesis_text = err_msg
+1418 | 
+1419 |     print(f"[DEBUG] final_synthesis_text length: {len(final_synthesis_text)}")
+1420 |     if not final_synthesis_text:
+1421 |         print("[ERROR] Aggregator produced empty response")
+1422 | 
+1423 |     # Save complete session data
+1424 |     final_chat_messages = []
+1425 |     if history:
+1426 |         for msg in history:
+1427 |             final_chat_messages.append({"id": f"msg-{id(msg)}", "sender": msg.sender, "text": msg.text, "timestamp": ""})
+1428 |     final_chat_messages.append({"id": "user-prompt", "sender": "user", "text": prompt, "timestamp": now_str()})
+1429 |     final_chat_messages.append({"id": "ai-response", "sender": "ai", "text": final_synthesis_text, "timestamp": now_str()})
+1430 | 
+1431 |     db.save_session(
+1432 |         session_id=session_id,
+1433 |         title=prompt[:40] + "..." if len(prompt) > 40 else prompt,
+1434 |         prompt=prompt,
+1435 |         mode=complexity,
+1436 |         nodes=nodes,
+1437 |         edges=edges,
+1438 |         chat_messages=final_chat_messages,
+1439 |         agent_talk_logs=setup_metadata["agent_talk"],
+1440 |         execution_state="setup",
+1441 |         status_message="Execution completed",
+1442 |         follow_up_suggestions=follow_up_suggestions
+1443 |     )
+1444 | 
+1445 |     # Cache final response
+1446 |     cached_val = {
+1447 |         "metadata": {
+1448 |             "complexity": complexity,
+1449 |             "capabilities": capabilities,
+1450 |             "thinking_summary": thinking_summary,
+1451 |             "nodes": nodes,
+1452 |             "edges": edges,
+1453 |             "agent_talk": setup_metadata["agent_talk"],
+1454 |             "follow_up_suggestions": follow_up_suggestions
+1455 |         },
+1456 |         "text": final_synthesis_text
+1457 |     }
+1458 |     
+1459 |     # Compute embeddings inside
+1460 |     try:
+1461 |         prompt_embedding = await get_embedding(provider, api_key, prompt, api_keys=api_keys)
+1462 |         if prompt_embedding:
+1463 |             prompt_hash_overall = hashlib.sha256(prompt.encode('utf-8')).hexdigest()
+1464 |             db.save_cached_response(prompt_hash_overall, prompt, prompt_embedding, cached_val)
+1465 |     except Exception:
+1466 |         pass
+1467 | 
+1468 |     # Auto-store this full conversation turn in vector memory for cross-turn recall
+1469 |     if final_synthesis_text:
+1470 |         try:
+1471 |             convo_memory = f"User: {prompt}\nAssistant: {final_synthesis_text[:800]}"
+1472 |             await store_memory(f"session_{session_id}", convo_memory, api_key, session_id, provider=provider)
+1473 |         except Exception:
+1474 |             pass
+1475 | 
+1476 |     yield "event: done\ndata: {}\n\n"
+1477 | 
+1478 | @app.post("/execute_custom")
+1479 | async def execute_custom(req: ExecuteCustomRequest):
+1480 |     provider_config = get_provider_config(req.provider)
+1481 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
+1482 |     if not api_key and not provider_config.get("is_local", False):
+1483 |         raise HTTPException(
+1484 |             status_code=400,
+1485 |             detail=f"API Key for provider '{req.provider}' is missing. Please configure BYOK in Settings."
+1486 |         )
+1487 | 
+1488 |     complexity = "simple" if len(req.nodes) == 1 and req.nodes[0]["id"] == "general" else "custom"
+1489 |     capabilities = [n["data"].get("tag", "CUSTOM") for n in req.nodes]
+1490 |     
+1491 |     return StreamingResponse(
+1492 |         run_agent_execution_loop(
+1493 |             session_id=req.session_id,
+1494 |             prompt=req.prompt,
+1495 |             history=req.history or [],
+1496 |             api_key=api_key,
+1497 |             nodes=req.nodes,
+1498 |             edges=req.edges,
+1499 |             complexity=complexity,
+1500 |             capabilities=capabilities,
+1501 |             thinking_summary="Running customized agent workflow",
+1502 |             follow_up_suggestions=["Can you explain the agent collaboration?"],
+1503 |             provider=req.provider,
+1504 |             model=req.model,
+1505 |             fallback_provider=req.fallback_provider,
+1506 |             api_keys=req.api_keys,
+1507 |             base_url=req.base_url
+1508 |         ),
+1509 |         media_type="text/event-stream"
+1510 |     )
+1511 | 
+1512 |
 ```
 
 ### File: `Backend/memory_store.json`
@@ -1885,929 +1943,1353 @@ SoloSpace/
 
 ### File: `Backend/providers.py`
 
-> 915 lines | 34.0 KB
+> 1339 lines | 51.0 KB
 
 ```python
-  1 | """
-  2 | Unified multi-provider AI adapter.
-  3 | Supports: Gemini, OpenAI, Claude, OpenRouter, Groq, DeepSeek,
-  4 |           Together AI, Mistral, Fireworks, Perplexity, Cohere, Custom.
-  5 | """
-  6 | 
-  7 | import json
-  8 | import re
-  9 | import os
- 10 | from typing import List, Dict, Any, Optional, AsyncGenerator
- 11 | import httpx
- 12 | 
- 13 | # ─── Provider Registry ───────────────────────────────────────────────
- 14 | 
- 15 | PROVIDERS: Dict[str, Dict[str, Any]] = {
- 16 |     "gemini": {
- 17 |         "name": "Google Gemini",
- 18 |         "description": "Multimodal AI with native JSON schema & embeddings",
- 19 |         "base_url": "https://generativelanguage.googleapis.com/v1beta",
- 20 |         "chat_path": None,  # Gemini uses model-specific paths
- 21 |         "default_model": "gemini-2.5-flash",
- 22 |         "models": [
- 23 |             {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "tier": "fast"},
- 24 |             {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "tier": "advanced"},
- 25 |             {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "tier": "fast"},
- 26 |         ],
- 27 |         "capabilities": ["chat", "streaming", "json_schema", "embeddings"],
- 28 |         "key_url": "https://aistudio.google.com/apikey",
- 29 |         "key_hint": "AIzaSy...",
- 30 |         "adapter": "gemini",
- 31 |     },
- 32 |     "openai": {
- 33 |         "name": "OpenAI",
- 34 |         "description": "GPT-4o, o3-mini, o1 reasoning models",
- 35 |         "base_url": "https://api.openai.com/v1",
- 36 |         "chat_path": "/chat/completions",
- 37 |         "default_model": "gpt-4o",
- 38 |         "models": [
- 39 |             {"id": "gpt-4o", "name": "GPT-4o", "tier": "advanced"},
- 40 |             {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "tier": "fast"},
- 41 |             {"id": "gpt-4-turbo", "name": "GPT-4 Turbo", "tier": "advanced"},
- 42 |             {"id": "o3-mini", "name": "o3-mini", "tier": "reasoning"},
- 43 |             {"id": "o1", "name": "o1", "tier": "reasoning"},
- 44 |         ],
- 45 |         "capabilities": ["chat", "streaming", "json_mode", "embeddings"],
- 46 |         "key_url": "https://platform.openai.com/api-keys",
- 47 |         "key_hint": "sk-...",
- 48 |         "adapter": "openai",
- 49 |     },
- 50 |     "claude": {
- 51 |         "name": "Anthropic Claude",
- 52 |         "description": "Claude Sonnet 4, Opus, Haiku family",
- 53 |         "base_url": "https://api.anthropic.com/v1",
- 54 |         "chat_path": "/messages",
- 55 |         "default_model": "claude-3-5-sonnet-20241022",
- 56 |         "models": [
- 57 |             {"id": "claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet", "tier": "advanced"},
- 58 |             {"id": "claude-3-5-haiku-20241022", "name": "Claude 3.5 Haiku", "tier": "fast"},
- 59 |             {"id": "claude-3-opus-20240229", "name": "Claude 3 Opus", "tier": "advanced"},
- 60 |         ],
- 61 |         "capabilities": ["chat", "streaming"],
- 62 |         "key_url": "https://console.anthropic.com/settings/keys",
- 63 |         "key_hint": "sk-ant-...",
- 64 |         "adapter": "claude",
- 65 |     },
- 66 |     "openrouter": {
- 67 |         "name": "OpenRouter",
- 68 |         "description": "One API for 200+ models including GPT, Claude, Llama",
- 69 |         "base_url": "https://openrouter.ai/api/v1",
- 70 |         "chat_path": "/chat/completions",
- 71 |         "default_model": "openai/gpt-4o",
- 72 |         "models": [
- 73 |             {"id": "openai/gpt-4o", "name": "GPT-4o", "tier": "advanced"},
- 74 |             {"id": "anthropic/claude-sonnet-4", "name": "Claude Sonnet 4", "tier": "advanced"},
- 75 |             {"id": "google/gemini-2.5-flash-preview", "name": "Gemini 2.5 Flash", "tier": "fast"},
- 76 |             {"id": "meta-llama/llama-3.1-405b-instruct", "name": "Llama 3.1 405B", "tier": "open"},
- 77 |             {"id": "deepseek/deepseek-chat", "name": "DeepSeek V3", "tier": "open"},
- 78 |             {"id": "qwen/qwen-2.5-72b-instruct", "name": "Qwen 2.5 72B", "tier": "open"},
- 79 |         ],
- 80 |         "capabilities": ["chat", "streaming", "json_mode"],
- 81 |         "key_url": "https://openrouter.ai/keys",
- 82 |         "key_hint": "sk-or-...",
- 83 |         "adapter": "openai",
- 84 |     },
- 85 |     "groq": {
- 86 |         "name": "Groq",
- 87 |         "description": "Ultra-fast LPU inference on open models",
- 88 |         "base_url": "https://api.groq.com/openai/v1",
- 89 |         "chat_path": "/chat/completions",
- 90 |         "default_model": "llama-3.3-70b-versatile",
- 91 |         "models": [
- 92 |             {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B", "tier": "fast"},
- 93 |             {"id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B Instant", "tier": "fast"},
- 94 |             {"id": "mixtral-8x7b-32768", "name": "Mixtral 8x7B", "tier": "fast"},
- 95 |             {"id": "gemma2-9b-it", "name": "Gemma 2 9B", "tier": "fast"},
- 96 |         ],
- 97 |         "capabilities": ["chat", "streaming", "json_mode"],
- 98 |         "key_url": "https://console.groq.com/keys",
- 99 |         "key_hint": "gsk_...",
-100 |         "adapter": "openai",
-101 |     },
-102 |     "deepseek": {
-103 |         "name": "DeepSeek",
-104 |         "description": "DeepSeek V3 & R1 reasoning models",
-105 |         "base_url": "https://api.deepseek.com/v1",
-106 |         "chat_path": "/chat/completions",
-107 |         "default_model": "deepseek-chat",
-108 |         "models": [
-109 |             {"id": "deepseek-chat", "name": "DeepSeek V3", "tier": "advanced"},
-110 |             {"id": "deepseek-reasoner", "name": "DeepSeek R1", "tier": "reasoning"},
-111 |         ],
-112 |         "capabilities": ["chat", "streaming", "json_mode"],
-113 |         "key_url": "https://platform.deepseek.com/api_keys",
-114 |         "key_hint": "sk-...",
-115 |         "adapter": "openai",
-116 |     },
-117 |     "together": {
-118 |         "name": "Together AI",
-119 |         "description": "Open-source models with fast hosted inference",
-120 |         "base_url": "https://api.together.xyz/v1",
-121 |         "chat_path": "/chat/completions",
-122 |         "default_model": "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo",
-123 |         "models": [
-124 |             {"id": "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo", "name": "Llama 3.1 405B Turbo", "tier": "advanced"},
-125 |             {"id": "mistralai/Mixtral-8x7B-Instruct-v0.1", "name": "Mixtral 8x7B", "tier": "fast"},
-126 |             {"id": "Qwen/Qwen2.5-72B-Instruct-Turbo", "name": "Qwen 2.5 72B Turbo", "tier": "advanced"},
-127 |         ],
-128 |         "capabilities": ["chat", "streaming", "json_mode"],
-129 |         "key_url": "https://api.together.xyz/settings/api-keys",
-130 |         "key_hint": "",
-131 |         "adapter": "openai",
-132 |     },
-133 |     "mistral": {
-134 |         "name": "Mistral AI",
-135 |         "description": "Mistral Large, Codestral, and more",
-136 |         "base_url": "https://api.mistral.ai/v1",
-137 |         "chat_path": "/chat/completions",
-138 |         "default_model": "mistral-large-latest",
-139 |         "models": [
-140 |             {"id": "mistral-large-latest", "name": "Mistral Large", "tier": "advanced"},
-141 |             {"id": "mistral-medium-latest", "name": "Mistral Medium", "tier": "fast"},
-142 |             {"id": "codestral-latest", "name": "Codestral", "tier": "code"},
-143 |             {"id": "open-mistral-nemo", "name": "Mistral Nemo (Free)", "tier": "fast"},
-144 |         ],
-145 |         "capabilities": ["chat", "streaming", "json_mode"],
-146 |         "key_url": "https://console.mistral.ai/api-keys/",
-147 |         "key_hint": "",
-148 |         "adapter": "openai",
-149 |     },
-150 |     "fireworks": {
-151 |         "name": "Fireworks AI",
-152 |         "description": "Fast inference on popular open-source models",
-153 |         "base_url": "https://api.fireworks.ai/inference/v1",
-154 |         "chat_path": "/chat/completions",
-155 |         "default_model": "accounts/fireworks/models/llama-v3p1-405b-instruct",
-156 |         "models": [
-157 |             {"id": "accounts/fireworks/models/llama-v3p1-405b-instruct", "name": "Llama 3.1 405B", "tier": "advanced"},
-158 |             {"id": "accounts/fireworks/models/mixtral-8x7b-instruct", "name": "Mixtral 8x7B", "tier": "fast"},
-159 |             {"id": "accounts/fireworks/models/qwen2p5-72b-instruct", "name": "Qwen 2.5 72B", "tier": "advanced"},
-160 |         ],
-161 |         "capabilities": ["chat", "streaming", "json_mode"],
-162 |         "key_url": "https://fireworks.ai/api-keys",
-163 |         "key_hint": "fw_...",
-164 |         "adapter": "openai",
-165 |     },
-166 |     "perplexity": {
-167 |         "name": "Perplexity",
-168 |         "description": "Online search-augmented generation models",
-169 |         "base_url": "https://api.perplexity.ai",
-170 |         "chat_path": "/chat/completions",
-171 |         "default_model": "sonar-pro",
-172 |         "models": [
-173 |             {"id": "sonar-pro", "name": "Sonar Pro", "tier": "advanced"},
-174 |             {"id": "sonar", "name": "Sonar", "tier": "fast"},
-175 |         ],
-176 |         "capabilities": ["chat", "streaming"],
-177 |         "key_url": "https://www.perplexity.ai/settings/api",
-178 |         "key_hint": "pplx-...",
-179 |         "adapter": "openai",
-180 |     },
-181 |     "cohere": {
-182 |         "name": "Cohere",
-183 |         "description": "Command R+ enterprise models with citations",
-184 |         "base_url": "https://api.cohere.ai/v2",
-185 |         "chat_path": "/chat",
-186 |         "default_model": "command-r-plus",
-187 |         "models": [
-188 |             {"id": "command-r-plus", "name": "Command R+", "tier": "advanced"},
-189 |             {"id": "command-r", "name": "Command R", "tier": "fast"},
-190 |         ],
-191 |         "capabilities": ["chat", "streaming"],
-192 |         "key_url": "https://dashboard.cohere.com/api-keys",
-193 |         "key_hint": "",
-194 |         "adapter": "cohere",
-195 |     },
-196 |     "custom": {
-197 |         "name": "Custom / Open Code",
-198 |         "description": "Ollama, vLLM, LM Studio, or any OpenAI-compatible endpoint",
-199 |         "base_url": "",
-200 |         "chat_path": "/v1/chat/completions",
-201 |         "default_model": "",
-202 |         "models": [],
-203 |         "capabilities": ["chat", "streaming", "json_mode"],
-204 |         "key_url": "",
-205 |         "key_hint": "Any key or leave empty",
-206 |         "adapter": "openai",
-207 |         "is_custom": True,
-208 |     },
-209 | }
-210 | 
-211 | 
-212 | def get_provider_config(provider_id: str) -> Dict[str, Any]:
-213 |     """Get config for a provider. Returns empty dict if not found."""
-214 |     return PROVIDERS.get(provider_id.lower(), {})
-215 | 
-216 | 
-217 | def get_available_providers() -> Dict[str, Any]:
-218 |     """Return provider registry for the frontend."""
-219 |     result = {}
-220 |     for pid, cfg in PROVIDERS.items():
-221 |         result[pid] = {
-222 |             "name": cfg["name"],
-223 |             "description": cfg["description"],
-224 |             "models": cfg["models"],
-225 |             "default_model": cfg["default_model"],
-226 |             "capabilities": cfg["capabilities"],
-227 |             "key_url": cfg["key_url"],
-228 |             "key_hint": cfg["key_hint"],
-229 |             "is_custom": cfg.get("is_custom", False),
-230 |         }
-231 |     return result
-232 | 
-233 | 
-234 | def resolve_api_key(provider: str, user_key: Optional[str]) -> str:
-235 |     """Resolve key from user input or fallback to environment variables."""
-236 |     if user_key and user_key.strip():
-237 |         return user_key.strip()
-238 | 
-239 |     env_keys = {
-240 |         "gemini": "GEMINI_API_KEY",
-241 |         "openai": "OPENAI_API_KEY",
-242 |         "claude": "ANTHROPIC_API_KEY",
-243 |         "openrouter": "OPENROUTER_API_KEY",
-244 |         "groq": "GROQ_API_KEY",
-245 |         "deepseek": "DEEPSEEK_API_KEY",
-246 |         "together": "TOGETHER_API_KEY",
-247 |         "mistral": "MISTRAL_API_KEY",
-248 |         "fireworks": "FIREWORKS_API_KEY",
-249 |         "perplexity": "PERPLEXITY_API_KEY",
-250 |         "cohere": "COHERE_API_KEY",
-251 |     }
-252 |     env_var_name = env_keys.get(provider.lower())
-253 |     if env_var_name:
-254 |         val = os.environ.get(env_var_name)
-255 |         if val:
-256 |             return val
-257 |     return ""
-258 | 
-259 | 
-260 | def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
-261 |     """Extract and parse a JSON object from text that may contain markdown or extra content."""
-262 |     # Try direct parse first
-263 |     try:
-264 |         return json.loads(text.strip())
-265 |     except (json.JSONDecodeError, ValueError):
-266 |         pass
-267 | 
-268 |     # Try extracting from ```json ... ``` code block
-269 |     match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
-270 |     if match:
-271 |         try:
-272 |             return json.loads(match.group(1).strip())
-273 |         except (json.JSONDecodeError, ValueError):
-274 |             pass
-275 | 
-276 |     # Try finding outermost { ... }
-277 |     depth = 0
-278 |     start = -1
-279 |     for i, ch in enumerate(text):
-280 |         if ch == "{":
-281 |             if depth == 0:
-282 |                 start = i
-283 |             depth += 1
-284 |         elif ch == "}":
-285 |             depth -= 1
-286 |             if depth == 0 and start >= 0:
-287 |                 try:
-288 |                     return json.loads(text[start:i + 1])
-289 |                 except (json.JSONDecodeError, ValueError):
-290 |                     break
-291 | 
-292 |     return None
-293 | 
-294 | 
-295 | def _build_openai_messages(
-296 |     messages: List[Dict[str, str]],
-297 |     system_prompt: str,
-298 |     model: str,
-299 | ) -> List[Dict[str, str]]:
-300 |     """Convert internal message format to OpenAI-compatible messages."""
-301 |     result = []
-302 |     is_reasoning = any(m in model.lower() for m in ["o1", "o3"])
-303 |     if system_prompt:
-304 |         result.append({
-305 |             "role": "developer" if is_reasoning else "system",
-306 |             "content": system_prompt,
-307 |         })
-308 |     for msg in messages:
-309 |         result.append({
-310 |             "role": msg.get("role", "user"),
-311 |             "content": msg.get("content", ""),
-312 |         })
-313 |     return result
-314 | 
-315 | 
-316 | def _build_gemini_contents(
-317 |     messages: List[Dict[str, str]],
-318 |     system_prompt: str,
-319 | ) -> Dict[str, Any]:
-320 |     """Convert internal message format to Gemini contents format."""
-321 |     contents = []
-322 |     for msg in messages:
-323 |         # Map assistant role to model for Gemini
-324 |         role = "model" if msg.get("role") in ["model", "assistant"] else "user"
-325 |         contents.append({
-326 |             "role": role,
-327 |             "parts": [{"text": msg.get("content", "")}],
-328 |         })
-329 |     return {
-330 |         "contents": contents,
-331 |         "systemInstruction": {"parts": [{"text": system_prompt}]} if system_prompt else None,
-332 |     }
-333 | 
-334 | 
-335 | def _build_claude_messages(
-336 |     messages: List[Dict[str, str]],
-337 |     system_prompt: str,
-338 | ) -> Dict[str, Any]:
-339 |     """Convert internal message format to Claude format."""
-340 |     claude_msgs = []
-341 |     for msg in messages:
-342 |         # Claude expects assistant instead of model
-343 |         role = "assistant" if msg.get("role") in ["model", "assistant"] else "user"
-344 |         claude_msgs.append({
-345 |             "role": role,
-346 |             "content": msg.get("content", ""),
-347 |         })
-348 |     return {
-349 |         "system": system_prompt,
-350 |         "messages": claude_msgs,
-351 |     }
-352 | 
-353 | 
-354 | # ─── OpenAI-Compatible Adapter ───────────────────────────────────────
-355 | 
-356 | async def _call_openai_compatible(
-357 |     config: Dict[str, Any],
-358 |     model: str,
-359 |     api_key: str,
-360 |     messages: List[Dict[str, str]],
-361 |     system_prompt: str,
-362 |     temperature: float = 0.7,
-363 |     json_mode: bool = False,
-364 |     json_schema_hint: str = None,
-365 |     timeout: float = 30.0,
-366 | ) -> str:
-367 |     """Non-streaming call to any OpenAI-compatible endpoint."""
-368 |     base_url = config["base_url"].rstrip("/")
-369 |     chat_path = config.get("chat_path", "/chat/completions")
-370 |     url = f"{base_url}{chat_path}"
-371 | 
-372 |     headers = {
-373 |         "Content-Type": "application/json",
-374 |         "Authorization": f"Bearer {api_key}",
-375 |     }
-376 |     if "openrouter" in base_url:
-377 |         headers["HTTP-Referer"] = "https://solospace.app"
-378 |         headers["X-Title"] = "Solospace"
-379 | 
-380 |     oa_msgs = _build_openai_messages(messages, system_prompt, model)
-381 | 
-382 |     payload: Dict[str, Any] = {
-383 |         "model": model,
-384 |         "messages": oa_msgs,
-385 |         "temperature": temperature,
-386 |         "max_tokens": 8192,
-387 |     }
-388 | 
-389 |     if any(m in model.lower() for m in ["o1", "o3", "deepseek-reasoner"]):
-390 |         payload.pop("temperature", None)
-391 | 
-392 |     if json_mode:
-393 |         payload["response_format"] = {"type": "json_object"}
-394 |         if json_schema_hint:
-395 |             last_msg = oa_msgs[-1] if oa_msgs else {}
-396 |             if last_msg.get("role") == "user":
-397 |                 last_msg["content"] = f"{last_msg.get('content', '')}\n\nIMPORTANT: Respond ONLY with valid JSON matching this structure:\n{json_schema_hint}"
-398 | 
-399 |     async with httpx.AsyncClient() as client:
-400 |         resp = await client.post(url, json=payload, headers=headers, timeout=timeout)
-401 |         if resp.status_code != 200:
-402 |             raise Exception(f"Provider error ({resp.status_code}): {resp.text[:500]}")
-403 |         data = resp.json()
-404 |         return data["choices"][0]["message"]["content"]
-405 | 
-406 | 
-407 | async def _stream_openai_compatible(
-408 |     config: Dict[str, Any],
-409 |     model: str,
-410 |     api_key: str,
-411 |     messages: List[Dict[str, str]],
-412 |     system_prompt: str,
-413 |     temperature: float = 0.7,
-414 |     timeout: float = 90.0,
-415 | ) -> AsyncGenerator[str, None]:
-416 |     """Streaming call to any OpenAI-compatible endpoint. Yields text chunks."""
-417 |     base_url = config["base_url"].rstrip("/")
-418 |     chat_path = config.get("chat_path", "/chat/completions")
-419 |     url = f"{base_url}{chat_path}"
-420 | 
-421 |     headers = {
-422 |         "Content-Type": "application/json",
-423 |         "Authorization": f"Bearer {api_key}",
-424 |     }
-425 |     if "openrouter" in base_url:
-426 |         headers["HTTP-Referer"] = "https://solospace.app"
-427 |         headers["X-Title"] = "Solospace"
-428 | 
-429 |     oa_msgs = _build_openai_messages(messages, system_prompt, model)
-430 | 
-431 |     payload: Dict[str, Any] = {
-432 |         "model": model,
-433 |         "messages": oa_msgs,
-434 |         "temperature": temperature,
-435 |         "max_tokens": 8192,
-436 |         "stream": True,
-437 |     }
-438 |     if any(m in model.lower() for m in ["o1", "o3", "deepseek-reasoner"]):
-439 |         payload.pop("temperature", None)
-440 | 
-441 |     async with httpx.AsyncClient() as client:
-442 |         async with client.stream("POST", url, json=payload, headers=headers, timeout=timeout) as resp:
-443 |             if resp.status_code != 200:
-444 |                 err_body = await resp.aread()
-445 |                 raise Exception(f"Provider stream error ({resp.status_code}): {err_body.decode()[:500]}")
-446 |             async for line in resp.aiter_lines():
-447 |                 line = line.strip()
-448 |                 if not line or not line.startswith("data:"):
-449 |                     continue
-450 |                 data_str = line[5:].strip()
-451 |                 if data_str == "[DONE]":
-452 |                     break
-453 |                 try:
-454 |                     obj = json.loads(data_str)
-455 |                     delta = obj.get("choices", [{}])[0].get("delta", {})
-456 |                     content = delta.get("content", "")
-457 |                     if content:
-458 |                         yield content
-459 |                 except (json.JSONDecodeError, IndexError, KeyError):
-460 |                     continue
-461 | 
-462 | 
-463 | # ─── Gemini Adapter ──────────────────────────────────────────────────
-464 | 
-465 | GEMINI_SAFETY = [
-466 |     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-467 |     {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-468 |     {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-469 |     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-470 | ]
-471 | 
-472 | 
-473 | async def _call_gemini(
-474 |     config: Dict[str, Any],
-475 |     model: str,
-476 |     api_key: str,
-477 |     messages: List[Dict[str, str]],
-478 |     system_prompt: str,
-479 |     temperature: float = 0.7,
-480 |     json_schema: Dict[str, Any] = None,
-481 |     timeout: float = 30.0,
-482 | ) -> str:
-483 |     """Non-streaming call to Gemini API."""
-484 |     base_url = config["base_url"].rstrip("/")
-485 |     url = f"{base_url}/models/{model}:generateContent?key={api_key}"
-486 | 
-487 |     gemini_data = _build_gemini_contents(messages, system_prompt)
-488 | 
-489 |     payload: Dict[str, Any] = {
-490 |         **gemini_data,
-491 |         "generationConfig": {"temperature": temperature},
-492 |         "safetySettings": GEMINI_SAFETY,
-493 |     }
-494 | 
-495 |     if json_schema:
-496 |         payload["generationConfig"]["responseMimeType"] = "application/json"
-497 |         payload["generationConfig"]["responseSchema"] = json_schema
-498 | 
-499 |     async with httpx.AsyncClient() as client:
-500 |         resp = await client.post(url, json=payload, timeout=timeout)
-501 |         if resp.status_code != 200:
-502 |             raise Exception(f"Gemini error ({resp.status_code}): {resp.text[:500]}")
-503 |         data = resp.json()
-504 |         return data["candidates"][0]["content"]["parts"][-1]["text"]
-505 | 
-506 | 
-507 | async def _stream_gemini(
-508 |     config: Dict[str, Any],
-509 |     model: str,
-510 |     api_key: str,
-511 |     messages: List[Dict[str, str]],
-512 |     system_prompt: str,
-513 |     temperature: float = 0.7,
-514 |     timeout: float = 90.0,
-515 | ) -> AsyncGenerator[str, None]:
-516 |     """Streaming call to Gemini API. Yields text chunks."""
-517 |     base_url = config["base_url"].rstrip("/")
-518 |     url = f"{base_url}/models/{model}:streamGenerateContent?alt=sse&key={api_key}"
-519 | 
-520 |     gemini_data = _build_gemini_contents(messages, system_prompt)
-521 | 
-522 |     payload: Dict[str, Any] = {
-523 |         **gemini_data,
-524 |         "generationConfig": {"temperature": temperature},
-525 |         "safetySettings": GEMINI_SAFETY,
-526 |     }
-527 | 
-528 |     async with httpx.AsyncClient() as client:
-529 |         async with client.stream("POST", url, json=payload, timeout=timeout) as resp:
-530 |             if resp.status_code != 200:
-531 |                 err_body = await resp.aread()
-532 |                 raise Exception(f"Gemini stream error ({resp.status_code}): {err_body.decode()[:500]}")
-533 |             async for line in resp.aiter_lines():
-534 |                 line = line.strip()
-535 |                 if not line or not line.startswith("data:"):
-536 |                     continue
-537 |                 data_str = line[5:].strip()
-538 |                 if not data_str:
-539 |                     continue
-540 |                 try:
-541 |                     obj = json.loads(data_str)
-542 |                     for cand in obj.get("candidates", []):
-543 |                         for part in cand.get("content", {}).get("parts", []):
-544 |                             text = part.get("text", "")
-545 |                             if text:
-546 |                                 yield text
-547 |                 except (json.JSONDecodeError, IndexError, KeyError):
-548 |                     continue
-549 | 
-550 | 
-551 | # ─── Claude Adapter ──────────────────────────────────────────────────
-552 | 
-553 | async def _call_claude(
-554 |     config: Dict[str, Any],
-555 |     model: str,
-556 |     api_key: str,
-557 |     messages: List[Dict[str, str]],
-558 |     system_prompt: str,
-559 |     temperature: float = 0.7,
-560 |     json_mode: bool = False,
-561 |     json_schema_hint: str = None,
-562 |     timeout: float = 30.0,
-563 | ) -> str:
-564 |     """Non-streaming call to Claude API."""
-565 |     base_url = config["base_url"].rstrip("/")
-566 |     url = f"{base_url}/messages"
-567 | 
-568 |     claude_data = _build_claude_messages(messages, system_prompt)
-569 | 
-570 |     headers = {
-571 |         "Content-Type": "application/json",
-572 |         "x-api-key": api_key,
-573 |         "anthropic-version": "2023-06-01",
-574 |     }
-575 | 
-576 |     payload: Dict[str, Any] = {
-577 |         "model": model,
-578 |         "max_tokens": 4096,
-579 |         "temperature": temperature,
-580 |         **claude_data,
-581 |     }
-582 | 
-583 |     if json_mode:
-584 |         json_instruction = "IMPORTANT: You MUST respond ONLY with a single valid JSON object. No markdown, no explanation, no code fences. Just raw JSON."
-585 |         if json_schema_hint:
-586 |             json_instruction += f"\n\nThe JSON should match this structure:\n{json_schema_hint}"
-587 |         payload["system"] = f"{json_instruction}\n\n{claude_data.get('system', '')}"
-588 | 
-589 |     async with httpx.AsyncClient() as client:
-590 |         resp = await client.post(url, json=payload, headers=headers, timeout=timeout)
-591 |         if resp.status_code != 200:
-592 |             raise Exception(f"Claude error ({resp.status_code}): {resp.text[:500]}")
-593 |         data = resp.json()
-594 |         text_parts = []
-595 |         for block in data.get("content", []):
-596 |             if block.get("type") == "text":
-597 |                 text_parts.append(block["text"])
-598 |         return "\n".join(text_parts)
-599 | 
-600 | 
-601 | async def _stream_claude(
-602 |     config: Dict[str, Any],
-603 |     model: str,
-604 |     api_key: str,
-605 |     messages: List[Dict[str, str]],
-606 |     system_prompt: str,
-607 |     temperature: float = 0.7,
-608 |     timeout: float = 90.0,
-609 | ) -> AsyncGenerator[str, None]:
-610 |     """Streaming call to Claude API. Yields text chunks."""
-611 |     base_url = config["base_url"].rstrip("/")
-612 |     url = f"{base_url}/messages"
-613 | 
-614 |     claude_data = _build_claude_messages(messages, system_prompt)
-615 | 
-616 |     headers = {
-617 |         "Content-Type": "application/json",
-618 |         "x-api-key": api_key,
-619 |         "anthropic-version": "2023-06-01",
-620 |     }
-621 | 
-622 |     payload: Dict[str, Any] = {
-623 |         "model": model,
-624 |         "max_tokens": 4096,
-625 |         "temperature": temperature,
-626 |         "stream": True,
-627 |         **claude_data,
-628 |     }
-629 | 
-630 |     async with httpx.AsyncClient() as client:
-631 |         async with client.stream("POST", url, json=payload, headers=headers, timeout=timeout) as resp:
-632 |             if resp.status_code != 200:
-633 |                 err_body = await resp.aread()
-634 |                 raise Exception(f"Claude stream error ({resp.status_code}): {err_body.decode()[:500]}")
-635 |             async for line in resp.aiter_lines():
-636 |                 line = line.strip()
-637 |                 if not line or not line.startswith("data:"):
-638 |                     continue
-639 |                 data_str = line[5:].strip()
-640 |                 if not data_str:
-641 |                     continue
-642 |                 try:
-643 |                     obj = json.loads(data_str)
-644 |                     event_type = obj.get("type", "")
-645 |                     if event_type == "content_block_delta":
-646 |                         delta = obj.get("delta", {})
-647 |                         if delta.get("type") == "text_delta":
-648 |                             text = delta.get("text", "")
-649 |                             if text:
-650 |                                 yield text
-651 |                 except (json.JSONDecodeError, KeyError):
-652 |                     continue
-653 | 
-654 | 
-655 | # ─── Cohere Adapter ──────────────────────────────────────────────────
-656 | 
-657 | async def _call_cohere(
-658 |     config: Dict[str, Any],
-659 |     model: str,
-660 |     api_key: str,
-661 |     messages: List[Dict[str, str]],
-662 |     system_prompt: str,
-663 |     temperature: float = 0.7,
-664 |     json_mode: bool = False,
-665 |     json_schema_hint: str = None,
-666 |     timeout: float = 30.0,
-667 | ) -> str:
-668 |     """Non-streaming call to Cohere v2 API."""
-669 |     base_url = config["base_url"].rstrip("/")
-670 |     url = f"{base_url}/chat"
-671 | 
-672 |     headers = {
-673 |         "Content-Type": "application/json",
-674 |         "Authorization": f"Bearer {api_key}",
-675 |     }
-676 | 
-677 |     chat_history = []
-678 |     for msg in messages[:-1]:
-679 |         chat_history.append({
-680 |             "role": "USER" if msg.get("role") == "user" else "CHATBOT",
-681 |             "message": msg.get("content", ""),
-682 |         })
-683 | 
-684 |     payload: Dict[str, Any] = {
-685 |         "model": model,
-686 |         "message": messages[-1].get("content", "") if messages else "",
-687 |         "chat_history": chat_history,
-688 |         "temperature": temperature,
-689 |     }
-690 | 
-691 |     if system_prompt:
-692 |         payload["preamble"] = system_prompt
-693 | 
-694 |     if json_mode:
-695 |         json_instr = "Respond ONLY with valid JSON."
-696 |         if json_schema_hint:
-697 |             json_instr += f" Structure: {json_schema_hint}"
-698 |         payload["message"] = f"{json_instr}\n\n{payload['message']}"
-699 | 
-700 |     async with httpx.AsyncClient() as client:
-701 |         resp = await client.post(url, json=payload, headers=headers, timeout=timeout)
-702 |         if resp.status_code != 200:
-703 |             raise Exception(f"Cohere error ({resp.status_code}): {resp.text[:500]}")
-704 |         data = resp.json()
-705 |         return data.get("text", "")
-706 | 
-707 | 
-708 | async def _stream_cohere(
-709 |     config: Dict[str, Any],
-710 |     model: str,
-711 |     api_key: str,
-712 |     messages: List[Dict[str, str]],
-713 |     system_prompt: str,
-714 |     temperature: float = 0.7,
-715 |     timeout: float = 90.0,
-716 | ) -> AsyncGenerator[str, None]:
-717 |     """Streaming call to Cohere v2 API. Yields text chunks."""
-718 |     base_url = config["base_url"].rstrip("/")
-719 |     url = f"{base_url}/chat"
-720 | 
-721 |     headers = {
-722 |         "Content-Type": "application/json",
-723 |         "Authorization": f"Bearer {api_key}",
-724 |     }
-725 | 
-726 |     chat_history = []
-727 |     for msg in messages[:-1]:
-728 |         chat_history.append({
-729 |             "role": "USER" if msg.get("role") == "user" else "CHATBOT",
-730 |             "message": msg.get("content", ""),
-731 |         })
-732 | 
-733 |     payload: Dict[str, Any] = {
-734 |         "model": model,
-735 |         "message": messages[-1].get("content", "") if messages else "",
-736 |         "chat_history": chat_history,
-737 |         "temperature": temperature,
-738 |         "stream": True,
-739 |     }
-740 |     if system_prompt:
-741 |         payload["preamble"] = system_prompt
-742 | 
-743 |     async with httpx.AsyncClient() as client:
-744 |         async with client.stream("POST", url, json=payload, headers=headers, timeout=timeout) as resp:
-745 |             if resp.status_code != 200:
-746 |                 err_body = await resp.aread()
-747 |                 raise Exception(f"Cohere stream error ({resp.status_code}): {err_body.decode()[:500]}")
-748 |             async for line in resp.aiter_lines():
-749 |                 line = line.strip()
-750 |                 if not line:
-751 |                     continue
-752 |                 try:
-753 |                     obj = json.loads(line)
-754 |                     event_type = obj.get("event_type", "")
-755 |                     if event_type == "text-generation":
-756 |                         text = obj.get("text", "")
-757 |                         if text:
-758 |                             yield text
-759 |                 except (json.JSONDecodeError, KeyError):
-760 |                     continue
-761 | 
-762 | 
-763 | # ─── Unified Interface ───────────────────────────────────────────────
-764 | 
-765 | async def call_provider(
-766 |     provider: str,
-767 |     model: Optional[str],
-768 |     api_key: str,
-769 |     messages: List[Dict[str, str]],
-770 |     system_prompt: str = "",
-771 |     temperature: float = 0.7,
-772 |     json_schema: Dict[str, Any] = None,
-773 |     json_schema_hint: str = None,
-774 |     timeout: float = 30.0,
-775 | ) -> str:
-776 |     """Unified call to any provider."""
-777 |     config = get_provider_config(provider)
-778 |     if not config:
-779 |         raise Exception(f"Unknown provider: {provider}")
-780 | 
-781 |     resolved_model = model or config.get("default_model", "")
-782 |     resolved_key = resolve_api_key(provider, api_key)
-783 |     if not resolved_key:
-784 |         raise Exception(f"API key missing for provider {provider}")
-785 | 
-786 |     adapter = config.get("adapter", "openai")
-787 |     wants_json = json_schema is not None or json_schema_hint is not None
-788 | 
-789 |     if adapter == "gemini":
-790 |         return await _call_gemini(config, resolved_model, resolved_key, messages, system_prompt,
-791 |                                    temperature=temperature, json_schema=json_schema, timeout=timeout)
-792 |     elif adapter == "claude":
-793 |         return await _call_claude(config, resolved_model, resolved_key, messages, system_prompt,
-794 |                                    temperature=temperature, json_mode=wants_json,
-795 |                                    json_schema_hint=json_schema_hint, timeout=timeout)
-796 |     elif adapter == "cohere":
-797 |         return await _call_cohere(config, resolved_model, resolved_key, messages, system_prompt,
-798 |                                    temperature=temperature, json_mode=wants_json,
-799 |                                    json_schema_hint=json_schema_hint, timeout=timeout)
-800 |     else:  # openai-compatible
-801 |         return await _call_openai_compatible(config, resolved_model, resolved_key, messages, system_prompt,
-802 |                                               temperature=temperature, json_mode=wants_json,
-803 |                                               json_schema_hint=json_schema_hint, timeout=timeout)
-804 | 
-805 | 
-806 | async def stream_provider(
-807 |     provider: str,
-808 |     model: Optional[str],
-809 |     api_key: str,
-810 |     messages: List[Dict[str, str]],
-811 |     system_prompt: str = "",
-812 |     temperature: float = 0.7,
-813 |     timeout: float = 90.0,
-814 | ) -> AsyncGenerator[str, None]:
-815 |     """Unified streaming call to any provider."""
-816 |     config = get_provider_config(provider)
-817 |     if not config:
-818 |         raise Exception(f"Unknown provider: {provider}")
-819 | 
-820 |     resolved_model = model or config.get("default_model", "")
-821 |     resolved_key = resolve_api_key(provider, api_key)
-822 |     if not resolved_key:
-823 |         raise Exception(f"API key missing for provider {provider}")
-824 | 
-825 |     adapter = config.get("adapter", "openai")
-826 | 
-827 |     if adapter == "gemini":
-828 |         async for chunk in _stream_gemini(config, resolved_model, resolved_key, messages, system_prompt,
-829 |                                            temperature=temperature, timeout=timeout):
-830 |             yield chunk
-831 |     elif adapter == "claude":
-832 |         async for chunk in _stream_claude(config, resolved_model, resolved_key, messages, system_prompt,
-833 |                                            temperature=temperature, timeout=timeout):
-834 |             yield chunk
-835 |     elif adapter == "cohere":
-836 |         async for chunk in _stream_cohere(config, resolved_model, resolved_key, messages, system_prompt,
-837 |                                            temperature=temperature, timeout=timeout):
-838 |             yield chunk
-839 |     else:  # openai-compatible
-840 |         async for chunk in _stream_openai_compatible(config, resolved_model, resolved_key, messages, system_prompt,
-841 |                                                       temperature=temperature, timeout=timeout):
-842 |             yield chunk
-843 | 
-844 | 
-845 | async def call_provider_json(
-846 |     provider: str,
-847 |     model: Optional[str],
-848 |     api_key: str,
-849 |     messages: List[Dict[str, str]],
-850 |     system_prompt: str = "",
-851 |     temperature: float = 0.2,
-852 |     json_schema: Dict[str, Any] = None,
-853 |     timeout: float = 30.0,
-854 | ) -> Dict[str, Any]:
-855 |     """Unified JSON completions call."""
-856 |     schema_hint = None
-857 |     if json_schema:
-858 |         schema_hint = json.dumps(json_schema, indent=2)
-859 | 
-860 |     response_text = await call_provider(
-861 |         provider=provider,
-862 |         model=model,
-863 |         api_key=api_key,
-864 |         messages=messages,
-865 |         system_prompt=system_prompt,
-866 |         temperature=temperature,
-867 |         json_schema=json_schema,
-868 |         json_schema_hint=schema_hint,
-869 |         timeout=timeout
-870 |     )
-871 |     
-872 |     parsed = extract_json_from_text(response_text)
-873 |     if parsed is None:
-874 |         raise ValueError(f"Failed to extract JSON from response: {response_text[:1000]}")
-875 |     return parsed
-876 | 
-877 | 
-878 | async def get_embedding(provider: str, api_key: str, text: str) -> List[float]:
-879 |     """Unified embedding generator."""
-880 |     resolved_key = resolve_api_key(provider, api_key)
-881 |     if not resolved_key:
-882 |         return []
-883 | 
-884 |     if provider.lower() == "gemini":
-885 |         url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={resolved_key}"
-886 |         payload = {
-887 |             "model": "models/text-embedding-004",
-888 |             "content": {"parts": [{"text": text}]}
-889 |         }
-890 |         async with httpx.AsyncClient() as client:
-891 |             try:
-892 |                 r = await client.post(url, json=payload, timeout=15.0)
-893 |                 if r.status_code == 200:
-894 |                     return r.json().get("embedding", {}).get("values", [])
-895 |             except Exception as e:
-896 |                 print(f"[EMBEDDING ERROR] Gemini embedding failed: {e}")
-897 |     elif provider.lower() == "openai":
-898 |         url = "https://api.openai.com/v1/embeddings"
-899 |         headers = {
-900 |             "Content-Type": "application/json",
-901 |             "Authorization": f"Bearer {resolved_key}"
-902 |         }
-903 |         payload = {
-904 |             "model": "text-embedding-3-small",
-905 |             "input": text
-906 |         }
-907 |         async with httpx.AsyncClient() as client:
-908 |             try:
-909 |                 r = await client.post(url, json=payload, headers=headers, timeout=15.0)
-910 |                 if r.status_code == 200:
-911 |                     return r.json().get("data", [{}])[0].get("embedding", [])
-912 |             except Exception as e:
-913 |                 print(f"[EMBEDDING ERROR] OpenAI embedding failed: {e}")
-914 |     return []
-915 |
+   1 | """
+   2 | Unified multi-provider AI adapter.
+   3 | Supports: Gemini, OpenAI, Claude, OpenRouter, Groq, DeepSeek,
+   4 |           Together AI, Mistral, Fireworks, Perplexity, Cohere,
+   5 |           Azure OpenAI, AWS Bedrock, Ollama, xAI, Cerebras, LM Studio, Custom.
+   6 | """
+   7 | 
+   8 | import json
+   9 | import re
+  10 | import os
+  11 | import time
+  12 | import random
+  13 | import asyncio
+  14 | from typing import List, Dict, Any, Optional, AsyncGenerator
+  15 | import httpx
+  16 | 
+  17 | # ─── Retry / Backoff Configuration ──────────────────────────────────
+  18 | 
+  19 | MAX_RETRIES = 3
+  20 | BASE_DELAY = 1.0
+  21 | MAX_DELAY = 10.0
+  22 | JITTER_FACTOR = 0.5
+  23 | 
+  24 | async def call_with_retry(func, *args, **kwargs):
+  25 |     """Call a provider function with exponential backoff and jitter."""
+  26 |     retries = 0
+  27 |     while retries <= MAX_RETRIES:
+  28 |         try:
+  29 |             return await func(*args, **kwargs)
+  30 |         except Exception as e:
+  31 |             retries += 1
+  32 |             if retries > MAX_RETRIES:
+  33 |                 raise
+  34 |             delay = min(MAX_DELAY, BASE_DELAY * (2 ** retries))
+  35 |             delay += random.uniform(-JITTER_FACTOR * delay, JITTER_FACTOR * delay)
+  36 |             await asyncio.sleep(delay)
+  37 |     raise Exception("Retry loop exhausted")
+  38 | 
+  39 | # ─── Provider Registry ───────────────────────────────────────────────
+  40 | 
+  41 | PROVIDERS: Dict[str, Dict[str, Any]] = {
+  42 |     "gemini": {
+  43 |         "name": "Google Gemini",
+  44 |         "description": "Multimodal AI with native JSON schema & embeddings",
+  45 |         "base_url": "https://generativelanguage.googleapis.com/v1beta",
+  46 |         "chat_path": None,
+  47 |         "default_model": "gemini-2.5-flash",
+  48 |         "models": [
+  49 |             {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "tier": "fast"},
+  50 |             {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "tier": "advanced"},
+  51 |             {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "tier": "fast"},
+  52 |         ],
+  53 |         "capabilities": ["chat", "streaming", "json_schema", "embeddings"],
+  54 |         "key_url": "https://aistudio.google.com/apikey",
+  55 |         "key_hint": "AIzaSy...",
+  56 |         "adapter": "gemini",
+  57 |     },
+  58 |     "openai": {
+  59 |         "name": "OpenAI",
+  60 |         "description": "GPT-4o, o3-mini, o1 reasoning models",
+  61 |         "base_url": "https://api.openai.com/v1",
+  62 |         "chat_path": "/chat/completions",
+  63 |         "default_model": "gpt-4o",
+  64 |         "models": [
+  65 |             {"id": "gpt-4o", "name": "GPT-4o", "tier": "advanced"},
+  66 |             {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "tier": "fast"},
+  67 |             {"id": "gpt-4-turbo", "name": "GPT-4 Turbo", "tier": "advanced"},
+  68 |             {"id": "o3-mini", "name": "o3-mini", "tier": "reasoning"},
+  69 |             {"id": "o1", "name": "o1", "tier": "reasoning"},
+  70 |         ],
+  71 |         "capabilities": ["chat", "streaming", "json_mode", "embeddings"],
+  72 |         "key_url": "https://platform.openai.com/api-keys",
+  73 |         "key_hint": "sk-...",
+  74 |         "adapter": "openai",
+  75 |     },
+  76 |     "claude": {
+  77 |         "name": "Anthropic Claude",
+  78 |         "description": "Claude Sonnet 4, Opus, Haiku family",
+  79 |         "base_url": "https://api.anthropic.com/v1",
+  80 |         "chat_path": "/messages",
+  81 |         "default_model": "claude-3-5-sonnet-20241022",
+  82 |         "models": [
+  83 |             {"id": "claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet", "tier": "advanced"},
+  84 |             {"id": "claude-3-5-haiku-20241022", "name": "Claude 3.5 Haiku", "tier": "fast"},
+  85 |             {"id": "claude-3-opus-20240229", "name": "Claude 3 Opus", "tier": "advanced"},
+  86 |         ],
+  87 |         "capabilities": ["chat", "streaming"],
+  88 |         "key_url": "https://console.anthropic.com/settings/keys",
+  89 |         "key_hint": "sk-ant-...",
+  90 |         "adapter": "claude",
+  91 |     },
+  92 |     "openrouter": {
+  93 |         "name": "OpenRouter",
+  94 |         "description": "One API for 200+ models including GPT, Claude, Llama",
+  95 |         "base_url": "https://openrouter.ai/api/v1",
+  96 |         "chat_path": "/chat/completions",
+  97 |         "default_model": "openai/gpt-4o",
+  98 |         "models": [
+  99 |             {"id": "openai/gpt-4o", "name": "GPT-4o", "tier": "advanced"},
+ 100 |             {"id": "anthropic/claude-sonnet-4", "name": "Claude Sonnet 4", "tier": "advanced"},
+ 101 |             {"id": "google/gemini-2.5-flash-preview", "name": "Gemini 2.5 Flash", "tier": "fast"},
+ 102 |             {"id": "meta-llama/llama-3.1-405b-instruct", "name": "Llama 3.1 405B", "tier": "open"},
+ 103 |             {"id": "deepseek/deepseek-chat", "name": "DeepSeek V3", "tier": "open"},
+ 104 |             {"id": "qwen/qwen-2.5-72b-instruct", "name": "Qwen 2.5 72B", "tier": "open"},
+ 105 |         ],
+ 106 |         "capabilities": ["chat", "streaming", "json_mode"],
+ 107 |         "key_url": "https://openrouter.ai/keys",
+ 108 |         "key_hint": "sk-or-...",
+ 109 |         "adapter": "openai",
+ 110 |     },
+ 111 |     "groq": {
+ 112 |         "name": "Groq",
+ 113 |         "description": "Ultra-fast LPU inference on open models",
+ 114 |         "base_url": "https://api.groq.com/openai/v1",
+ 115 |         "chat_path": "/chat/completions",
+ 116 |         "default_model": "llama-3.3-70b-versatile",
+ 117 |         "models": [
+ 118 |             {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B", "tier": "fast"},
+ 119 |             {"id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B Instant", "tier": "fast"},
+ 120 |             {"id": "mixtral-8x7b-32768", "name": "Mixtral 8x7B", "tier": "fast"},
+ 121 |             {"id": "gemma2-9b-it", "name": "Gemma 2 9B", "tier": "fast"},
+ 122 |         ],
+ 123 |         "capabilities": ["chat", "streaming", "json_mode"],
+ 124 |         "key_url": "https://console.groq.com/keys",
+ 125 |         "key_hint": "gsk_...",
+ 126 |         "adapter": "openai",
+ 127 |     },
+ 128 |     "deepseek": {
+ 129 |         "name": "DeepSeek",
+ 130 |         "description": "DeepSeek V3 & R1 reasoning models",
+ 131 |         "base_url": "https://api.deepseek.com/v1",
+ 132 |         "chat_path": "/chat/completions",
+ 133 |         "default_model": "deepseek-chat",
+ 134 |         "models": [
+ 135 |             {"id": "deepseek-chat", "name": "DeepSeek V3", "tier": "advanced"},
+ 136 |             {"id": "deepseek-reasoner", "name": "DeepSeek R1", "tier": "reasoning"},
+ 137 |         ],
+ 138 |         "capabilities": ["chat", "streaming", "json_mode"],
+ 139 |         "key_url": "https://platform.deepseek.com/api_keys",
+ 140 |         "key_hint": "sk-...",
+ 141 |         "adapter": "openai",
+ 142 |     },
+ 143 |     "together": {
+ 144 |         "name": "Together AI",
+ 145 |         "description": "Open-source models with fast hosted inference",
+ 146 |         "base_url": "https://api.together.xyz/v1",
+ 147 |         "chat_path": "/chat/completions",
+ 148 |         "default_model": "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo",
+ 149 |         "models": [
+ 150 |             {"id": "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo", "name": "Llama 3.1 405B Turbo", "tier": "advanced"},
+ 151 |             {"id": "mistralai/Mixtral-8x7B-Instruct-v0.1", "name": "Mixtral 8x7B", "tier": "fast"},
+ 152 |             {"id": "Qwen/Qwen2.5-72B-Instruct-Turbo", "name": "Qwen 2.5 72B Turbo", "tier": "advanced"},
+ 153 |         ],
+ 154 |         "capabilities": ["chat", "streaming", "json_mode"],
+ 155 |         "key_url": "https://api.together.xyz/settings/api-keys",
+ 156 |         "key_hint": "",
+ 157 |         "adapter": "openai",
+ 158 |     },
+ 159 |     "mistral": {
+ 160 |         "name": "Mistral AI",
+ 161 |         "description": "Mistral Large, Codestral, and more",
+ 162 |         "base_url": "https://api.mistral.ai/v1",
+ 163 |         "chat_path": "/chat/completions",
+ 164 |         "default_model": "mistral-large-latest",
+ 165 |         "models": [
+ 166 |             {"id": "mistral-large-latest", "name": "Mistral Large", "tier": "advanced"},
+ 167 |             {"id": "mistral-medium-latest", "name": "Mistral Medium", "tier": "fast"},
+ 168 |             {"id": "codestral-latest", "name": "Codestral", "tier": "code"},
+ 169 |             {"id": "open-mistral-nemo", "name": "Mistral Nemo (Free)", "tier": "fast"},
+ 170 |         ],
+ 171 |         "capabilities": ["chat", "streaming", "json_mode"],
+ 172 |         "key_url": "https://console.mistral.ai/api-keys/",
+ 173 |         "key_hint": "",
+ 174 |         "adapter": "openai",
+ 175 |     },
+ 176 |     "fireworks": {
+ 177 |         "name": "Fireworks AI",
+ 178 |         "description": "Fast inference on popular open-source models",
+ 179 |         "base_url": "https://api.fireworks.ai/inference/v1",
+ 180 |         "chat_path": "/chat/completions",
+ 181 |         "default_model": "accounts/fireworks/models/llama-v3p1-405b-instruct",
+ 182 |         "models": [
+ 183 |             {"id": "accounts/fireworks/models/llama-v3p1-405b-instruct", "name": "Llama 3.1 405B", "tier": "advanced"},
+ 184 |             {"id": "accounts/fireworks/models/mixtral-8x7b-instruct", "name": "Mixtral 8x7B", "tier": "fast"},
+ 185 |             {"id": "accounts/fireworks/models/qwen2p5-72b-instruct", "name": "Qwen 2.5 72B", "tier": "advanced"},
+ 186 |         ],
+ 187 |         "capabilities": ["chat", "streaming", "json_mode"],
+ 188 |         "key_url": "https://fireworks.ai/api-keys",
+ 189 |         "key_hint": "fw_...",
+ 190 |         "adapter": "openai",
+ 191 |     },
+ 192 |     "perplexity": {
+ 193 |         "name": "Perplexity",
+ 194 |         "description": "Online search-augmented generation models",
+ 195 |         "base_url": "https://api.perplexity.ai",
+ 196 |         "chat_path": "/chat/completions",
+ 197 |         "default_model": "sonar-pro",
+ 198 |         "models": [
+ 199 |             {"id": "sonar-pro", "name": "Sonar Pro", "tier": "advanced"},
+ 200 |             {"id": "sonar", "name": "Sonar", "tier": "fast"},
+ 201 |         ],
+ 202 |         "capabilities": ["chat", "streaming"],
+ 203 |         "key_url": "https://www.perplexity.ai/settings/api",
+ 204 |         "key_hint": "pplx-...",
+ 205 |         "adapter": "openai",
+ 206 |     },
+ 207 |     "cohere": {
+ 208 |         "name": "Cohere",
+ 209 |         "description": "Command R+ enterprise models with citations",
+ 210 |         "base_url": "https://api.cohere.ai/v2",
+ 211 |         "chat_path": "/chat",
+ 212 |         "default_model": "command-r-plus",
+ 213 |         "models": [
+ 214 |             {"id": "command-r-plus", "name": "Command R+", "tier": "advanced"},
+ 215 |             {"id": "command-r", "name": "Command R", "tier": "fast"},
+ 216 |         ],
+ 217 |         "capabilities": ["chat", "streaming"],
+ 218 |         "key_url": "https://dashboard.cohere.com/api-keys",
+ 219 |         "key_hint": "",
+ 220 |         "adapter": "cohere",
+ 221 |     },
+ 222 |     "azure_openai": {
+ 223 |         "name": "Azure OpenAI",
+ 224 |         "description": "Azure OpenAI service deployment",
+ 225 |         "base_url": "https://YOUR_RESOURCE.openai.azure.com/openai/deployments",
+ 226 |         "chat_path": "/chat/completions",
+ 227 |         "default_model": "gpt-4o",
+ 228 |         "models": [],
+ 229 |         "capabilities": ["chat", "streaming", "json_mode", "embeddings"],
+ 230 |         "key_url": "https://azure.microsoft.com/en-us/products/ai-services/openai",
+ 231 |         "key_hint": "Azure API key",
+ 232 |         "adapter": "openai",
+ 233 |         "requires_deployment": True,
+ 234 |         "requires_base_url": True,
+ 235 |     },
+ 236 |     "bedrock": {
+ 237 |         "name": "AWS Bedrock",
+ 238 |         "description": "AWS Bedrock models using boto3 runtime",
+ 239 |         "base_url": "",
+ 240 |         "default_model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+ 241 |         "models": [
+ 242 |             {"id": "anthropic.claude-3-5-sonnet-20241022-v2:0", "name": "Claude 3.5 Sonnet v2", "tier": "advanced"},
+ 243 |             {"id": "anthropic.claude-3-5-haiku-20241022-v1:0", "name": "Claude 3.5 Haiku", "tier": "fast"},
+ 244 |             {"id": "meta.llama3-3-70b-instruct-v1:0", "name": "Llama 3.3 70B", "tier": "advanced"},
+ 245 |             {"id": "meta.llama3-1-8b-instruct-v1:0", "name": "Llama 3.1 8B", "tier": "fast"},
+ 246 |         ],
+ 247 |         "capabilities": ["chat", "streaming", "json_mode"],
+ 248 |         "key_url": "https://aws.amazon.com/bedrock/",
+ 249 |         "key_hint": "AWS Access Key ID",
+ 250 |         "adapter": "bedrock",
+ 251 |         "requires_aws": True,
+ 252 |     },
+ 253 |     "ollama": {
+ 254 |         "name": "Ollama (Local)",
+ 255 |         "description": "Run local models on http://localhost:11434",
+ 256 |         "base_url": "http://localhost:11434/v1",
+ 257 |         "chat_path": "/chat/completions",
+ 258 |         "default_model": "llama3",
+ 259 |         "models": [],
+ 260 |         "capabilities": ["chat", "streaming", "json_mode"],
+ 261 |         "key_url": "",
+ 262 |         "key_hint": "No API key required",
+ 263 |         "adapter": "openai",
+ 264 |         "is_local": True,
+ 265 |         "requires_base_url": True,
+ 266 |     },
+ 267 |     "xai": {
+ 268 |         "name": "xAI Grok",
+ 269 |         "description": "Grok-2 and Grok-2-mini models",
+ 270 |         "base_url": "https://api.x.ai/v1",
+ 271 |         "chat_path": "/chat/completions",
+ 272 |         "default_model": "grok-2",
+ 273 |         "models": [
+ 274 |             {"id": "grok-2", "name": "Grok-2", "tier": "advanced"},
+ 275 |             {"id": "grok-2-mini", "name": "Grok-2-mini", "tier": "fast"},
+ 276 |         ],
+ 277 |         "capabilities": ["chat", "streaming", "json_mode"],
+ 278 |         "key_url": "https://x.ai/api-keys",
+ 279 |         "key_hint": "xai-...",
+ 280 |         "adapter": "openai",
+ 281 |     },
+ 282 |     "cerebras": {
+ 283 |         "name": "Cerebras",
+ 284 |         "description": "Ultra-fast Cerebras CS-3 inference on Llama models",
+ 285 |         "base_url": "https://api.cerebras.ai/v1",
+ 286 |         "chat_path": "/chat/completions",
+ 287 |         "default_model": "llama3.1-70b",
+ 288 |         "models": [
+ 289 |             {"id": "llama3.1-70b", "name": "Llama 3.1 70B", "tier": "advanced"},
+ 290 |             {"id": "llama3.1-8b", "name": "Llama 3.1 8B", "tier": "fast"},
+ 291 |         ],
+ 292 |         "capabilities": ["chat", "streaming", "json_mode"],
+ 293 |         "key_url": "https://cerebras.ai/api-keys",
+ 294 |         "key_hint": "cerebras-...",
+ 295 |         "adapter": "openai",
+ 296 |     },
+ 297 |     "lmstudio": {
+ 298 |         "name": "LM Studio (Local)",
+ 299 |         "description": "Local models served on http://localhost:1234",
+ 300 |         "base_url": "http://localhost:1234/v1",
+ 301 |         "chat_path": "/chat/completions",
+ 302 |         "default_model": "local-model",
+ 303 |         "models": [],
+ 304 |         "capabilities": ["chat", "streaming", "json_mode"],
+ 305 |         "key_url": "",
+ 306 |         "key_hint": "No API key required",
+ 307 |         "adapter": "openai",
+ 308 |         "is_local": True,
+ 309 |         "requires_base_url": True,
+ 310 |     },
+ 311 |     "custom": {
+ 312 |         "name": "Custom / Open Code",
+ 313 |         "description": "vLLM, LM Studio, Ollama or any OpenAI-compatible API",
+ 314 |         "base_url": "",
+ 315 |         "chat_path": "/v1/chat/completions",
+ 316 |         "default_model": "",
+ 317 |         "models": [],
+ 318 |         "capabilities": ["chat", "streaming", "json_mode"],
+ 319 |         "key_url": "",
+ 320 |         "key_hint": "Any key or leave empty",
+ 321 |         "adapter": "openai",
+ 322 |         "is_custom": True,
+ 323 |         "requires_base_url": True,
+ 324 |     },
+ 325 | }
+ 326 | 
+ 327 | 
+ 328 | def get_provider_config(provider_id: str) -> Dict[str, Any]:
+ 329 |     """Get config for a provider. Returns empty dict if not found."""
+ 330 |     return PROVIDERS.get(provider_id.lower(), {})
+ 331 | 
+ 332 | 
+ 333 | def get_available_providers() -> Dict[str, Any]:
+ 334 |     """Return provider registry for the frontend."""
+ 335 |     result = {}
+ 336 |     for pid, cfg in PROVIDERS.items():
+ 337 |         result[pid] = {
+ 338 |             "name": cfg["name"],
+ 339 |             "description": cfg["description"],
+ 340 |             "models": cfg["models"],
+ 341 |             "default_model": cfg["default_model"],
+ 342 |             "capabilities": cfg["capabilities"],
+ 343 |             "key_url": cfg["key_url"],
+ 344 |             "key_hint": cfg["key_hint"],
+ 345 |             "is_custom": cfg.get("is_custom", False),
+ 346 |             "is_local": cfg.get("is_local", False),
+ 347 |             "requires_base_url": cfg.get("requires_base_url", False),
+ 348 |         }
+ 349 |     return result
+ 350 | 
+ 351 | 
+ 352 | def resolve_api_key(provider: str, user_key: Optional[str] = None, api_keys: Optional[Dict[str, str]] = None) -> str:
+ 353 |     """Resolve key from user input dictionary, single user_key, or fallback to env."""
+ 354 |     if api_keys and provider in api_keys and api_keys[provider].strip():
+ 355 |         return api_keys[provider].strip()
+ 356 |     if user_key and user_key.strip():
+ 357 |         return user_key.strip()
+ 358 | 
+ 359 |     env_keys = {
+ 360 |         "gemini": "GEMINI_API_KEY",
+ 361 |         "openai": "OPENAI_API_KEY",
+ 362 |         "claude": "ANTHROPIC_API_KEY",
+ 363 |         "openrouter": "OPENROUTER_API_KEY",
+ 364 |         "groq": "GROQ_API_KEY",
+ 365 |         "deepseek": "DEEPSEEK_API_KEY",
+ 366 |         "together": "TOGETHER_API_KEY",
+ 367 |         "mistral": "MISTRAL_API_KEY",
+ 368 |         "fireworks": "FIREWORKS_API_KEY",
+ 369 |         "perplexity": "PERPLEXITY_API_KEY",
+ 370 |         "cohere": "COHERE_API_KEY",
+ 371 |         "azure_openai": "AZURE_OPENAI_API_KEY",
+ 372 |         "xai": "XAI_API_KEY",
+ 373 |         "cerebras": "CEREBRAS_API_KEY",
+ 374 |         "bedrock": "AWS_ACCESS_KEY_ID",
+ 375 |     }
+ 376 |     env_var_name = env_keys.get(provider.lower())
+ 377 |     if env_var_name:
+ 378 |         val = os.environ.get(env_var_name)
+ 379 |         if val:
+ 380 |             return val
+ 381 |     return ""
+ 382 | 
+ 383 | 
+ 384 | def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
+ 385 |     """Extract and parse a JSON object from text that may contain markdown or extra content."""
+ 386 |     try:
+ 387 |         return json.loads(text.strip())
+ 388 |     except (json.JSONDecodeError, ValueError):
+ 389 |         pass
+ 390 | 
+ 391 |     match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+ 392 |     if match:
+ 393 |         try:
+ 394 |             return json.loads(match.group(1).strip())
+ 395 |         except (json.JSONDecodeError, ValueError):
+ 396 |             pass
+ 397 | 
+ 398 |     depth = 0
+ 399 |     start = -1
+ 400 |     for i, ch in enumerate(text):
+ 401 |         if ch == "{":
+ 402 |             if depth == 0:
+ 403 |                 start = i
+ 404 |             depth += 1
+ 405 |         elif ch == "}":
+ 406 |             depth -= 1
+ 407 |             if depth == 0 and start >= 0:
+ 408 |                 try:
+ 409 |                     return json.loads(text[start:i + 1])
+ 410 |                 except (json.JSONDecodeError, ValueError):
+ 411 |                     break
+ 412 |     return None
+ 413 | 
+ 414 | 
+ 415 | def _build_openai_messages(
+ 416 |     messages: List[Dict[str, str]],
+ 417 |     system_prompt: str,
+ 418 |     model: str,
+ 419 | ) -> List[Dict[str, str]]:
+ 420 |     """Convert internal message format to OpenAI-compatible messages."""
+ 421 |     result = []
+ 422 |     is_reasoning = any(m in model.lower() for m in ["o1", "o3"])
+ 423 |     if system_prompt:
+ 424 |         result.append({
+ 425 |             "role": "developer" if is_reasoning else "system",
+ 426 |             "content": system_prompt,
+ 427 |         })
+ 428 |     for msg in messages:
+ 429 |         result.append({
+ 430 |             "role": msg.get("role", "user"),
+ 431 |             "content": msg.get("content", ""),
+ 432 |         })
+ 433 |     return result
+ 434 | 
+ 435 | 
+ 436 | def _build_gemini_contents(
+ 437 |     messages: List[Dict[str, str]],
+ 438 |     system_prompt: str,
+ 439 | ) -> Dict[str, Any]:
+ 440 |     """Convert internal message format to Gemini contents format."""
+ 441 |     contents = []
+ 442 |     for msg in messages:
+ 443 |         role = "model" if msg.get("role") in ["model", "assistant"] else "user"
+ 444 |         contents.append({
+ 445 |             "role": role,
+ 446 |             "parts": [{"text": msg.get("content", "")}],
+ 447 |         })
+ 448 |     return {
+ 449 |         "contents": contents,
+ 450 |         "systemInstruction": {"parts": [{"text": system_prompt}]} if system_prompt else None,
+ 451 |     }
+ 452 | 
+ 453 | 
+ 454 | def _build_claude_messages(
+ 455 |     messages: List[Dict[str, str]],
+ 456 |     system_prompt: str,
+ 457 | ) -> Dict[str, Any]:
+ 458 |     """Convert internal message format to Claude format."""
+ 459 |     claude_msgs = []
+ 460 |     for msg in messages:
+ 461 |         role = "assistant" if msg.get("role") in ["model", "assistant"] else "user"
+ 462 |         claude_msgs.append({
+ 463 |             "role": role,
+ 464 |             "content": msg.get("content", ""),
+ 465 |         })
+ 466 |     return {
+ 467 |         "system": system_prompt,
+ 468 |         "messages": claude_msgs,
+ 469 |     }
+ 470 | 
+ 471 | 
+ 472 | # ─── OpenAI-Compatible Adapter ───────────────────────────────────────
+ 473 | 
+ 474 | async def _call_openai_compatible(
+ 475 |     config: Dict[str, Any],
+ 476 |     model: str,
+ 477 |     api_key: str,
+ 478 |     messages: List[Dict[str, str]],
+ 479 |     system_prompt: str,
+ 480 |     temperature: float = 0.7,
+ 481 |     json_mode: bool = False,
+ 482 |     json_schema_hint: str = None,
+ 483 |     timeout: float = 30.0,
+ 484 | ) -> str:
+ 485 |     """Non-streaming call to any OpenAI-compatible endpoint."""
+ 486 |     base_url = config["base_url"].rstrip("/")
+ 487 |     chat_path = config.get("chat_path", "/chat/completions")
+ 488 |     
+ 489 |     requires_deployment = config.get("requires_deployment", False)
+ 490 |     if requires_deployment:
+ 491 |         api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+ 492 |         url = f"{base_url}/{model}/chat/completions?api-version={api_version}"
+ 493 |         headers = {
+ 494 |             "Content-Type": "application/json",
+ 495 |             "api-key": api_key,
+ 496 |         }
+ 497 |     else:
+ 498 |         url = f"{base_url}{chat_path}"
+ 499 |         headers = {
+ 500 |             "Content-Type": "application/json",
+ 501 |             "Authorization": f"Bearer {api_key}" if api_key else "",
+ 502 |         }
+ 503 |         if not api_key:
+ 504 |             headers.pop("Authorization", None)
+ 505 | 
+ 506 |     if "openrouter" in base_url:
+ 507 |         headers["HTTP-Referer"] = "https://solospace.app"
+ 508 |         headers["X-Title"] = "Solospace"
+ 509 | 
+ 510 |     oa_msgs = _build_openai_messages(messages, system_prompt, model)
+ 511 | 
+ 512 |     payload: Dict[str, Any] = {
+ 513 |         "model": model,
+ 514 |         "messages": oa_msgs,
+ 515 |         "temperature": temperature,
+ 516 |         "max_tokens": 8192,
+ 517 |     }
+ 518 | 
+ 519 |     if any(m in model.lower() for m in ["o1", "o3", "deepseek-reasoner"]):
+ 520 |         payload.pop("temperature", None)
+ 521 | 
+ 522 |     if json_mode:
+ 523 |         payload["response_format"] = {"type": "json_object"}
+ 524 |         if json_schema_hint:
+ 525 |             last_msg = oa_msgs[-1] if oa_msgs else {}
+ 526 |             if last_msg.get("role") == "user":
+ 527 |                 last_msg["content"] = f"{last_msg.get('content', '')}\n\nIMPORTANT: Respond ONLY with valid JSON matching this structure:\n{json_schema_hint}"
+ 528 | 
+ 529 |     async with httpx.AsyncClient() as client:
+ 530 |         resp = await client.post(url, json=payload, headers=headers, timeout=timeout)
+ 531 |         if resp.status_code != 200:
+ 532 |             raise Exception(f"Provider error ({resp.status_code}): {resp.text[:500]}")
+ 533 |         data = resp.json()
+ 534 |         return data["choices"][0]["message"]["content"]
+ 535 | 
+ 536 | 
+ 537 | async def _stream_openai_compatible(
+ 538 |     config: Dict[str, Any],
+ 539 |     model: str,
+ 540 |     api_key: str,
+ 541 |     messages: List[Dict[str, str]],
+ 542 |     system_prompt: str,
+ 543 |     temperature: float = 0.7,
+ 544 |     timeout: float = 90.0,
+ 545 | ) -> AsyncGenerator[str, None]:
+ 546 |     """Streaming call to any OpenAI-compatible endpoint. Yields text chunks."""
+ 547 |     base_url = config["base_url"].rstrip("/")
+ 548 |     chat_path = config.get("chat_path", "/chat/completions")
+ 549 |     
+ 550 |     requires_deployment = config.get("requires_deployment", False)
+ 551 |     if requires_deployment:
+ 552 |         api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+ 553 |         url = f"{base_url}/{model}/chat/completions?api-version={api_version}"
+ 554 |         headers = {
+ 555 |             "Content-Type": "application/json",
+ 556 |             "api-key": api_key,
+ 557 |         }
+ 558 |     else:
+ 559 |         url = f"{base_url}{chat_path}"
+ 560 |         headers = {
+ 561 |             "Content-Type": "application/json",
+ 562 |             "Authorization": f"Bearer {api_key}" if api_key else "",
+ 563 |         }
+ 564 |         if not api_key:
+ 565 |             headers.pop("Authorization", None)
+ 566 | 
+ 567 |     if "openrouter" in base_url:
+ 568 |         headers["HTTP-Referer"] = "https://solospace.app"
+ 569 |         headers["X-Title"] = "Solospace"
+ 570 | 
+ 571 |     oa_msgs = _build_openai_messages(messages, system_prompt, model)
+ 572 | 
+ 573 |     payload: Dict[str, Any] = {
+ 574 |         "model": model,
+ 575 |         "messages": oa_msgs,
+ 576 |         "temperature": temperature,
+ 577 |         "max_tokens": 8192,
+ 578 |         "stream": True,
+ 579 |     }
+ 580 |     if any(m in model.lower() for m in ["o1", "o3", "deepseek-reasoner"]):
+ 581 |         payload.pop("temperature", None)
+ 582 | 
+ 583 |     async with httpx.AsyncClient() as client:
+ 584 |         async with client.stream("POST", url, json=payload, headers=headers, timeout=timeout) as resp:
+ 585 |             if resp.status_code != 200:
+ 586 |                 err_body = await resp.aread()
+ 587 |                 raise Exception(f"Provider stream error ({resp.status_code}): {err_body.decode()[:500]}")
+ 588 |             async for line in resp.aiter_lines():
+ 589 |                 line = line.strip()
+ 590 |                 if not line or not line.startswith("data:"):
+ 591 |                     continue
+ 592 |                 data_str = line[5:].strip()
+ 593 |                 if data_str == "[DONE]":
+ 594 |                     break
+ 595 |                 try:
+ 596 |                     obj = json.loads(data_str)
+ 597 |                     delta = obj.get("choices", [{}])[0].get("delta", {})
+ 598 |                     content = delta.get("content", "")
+ 599 |                     if content:
+ 600 |                         yield content
+ 601 |                 except (json.JSONDecodeError, IndexError, KeyError):
+ 602 |                     continue
+ 603 | 
+ 604 | 
+ 605 | # ─── Gemini Adapter ──────────────────────────────────────────────────
+ 606 | 
+ 607 | GEMINI_SAFETY = [
+ 608 |     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+ 609 |     {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+ 610 |     {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+ 611 |     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+ 612 | ]
+ 613 | 
+ 614 | 
+ 615 | async def _call_gemini(
+ 616 |     config: Dict[str, Any],
+ 617 |     model: str,
+ 618 |     api_key: str,
+ 619 |     messages: List[Dict[str, str]],
+ 620 |     system_prompt: str,
+ 621 |     temperature: float = 0.7,
+ 622 |     json_schema: Dict[str, Any] = None,
+ 623 |     timeout: float = 30.0,
+ 624 | ) -> str:
+ 625 |     """Non-streaming call to Gemini API."""
+ 626 |     base_url = config["base_url"].rstrip("/")
+ 627 |     url = f"{base_url}/models/{model}:generateContent?key={api_key}"
+ 628 | 
+ 629 |     gemini_data = _build_gemini_contents(messages, system_prompt)
+ 630 | 
+ 631 |     payload: Dict[str, Any] = {
+ 632 |         **gemini_data,
+ 633 |         "generationConfig": {"temperature": temperature},
+ 634 |         "safetySettings": GEMINI_SAFETY,
+ 635 |     }
+ 636 | 
+ 637 |     if json_schema:
+ 638 |         payload["generationConfig"]["responseMimeType"] = "application/json"
+ 639 |         payload["generationConfig"]["responseSchema"] = json_schema
+ 640 | 
+ 641 |     async with httpx.AsyncClient() as client:
+ 642 |         resp = await client.post(url, json=payload, timeout=timeout)
+ 643 |         if resp.status_code != 200:
+ 644 |             raise Exception(f"Gemini error ({resp.status_code}): {resp.text[:500]}")
+ 645 |         data = resp.json()
+ 646 |         return data["candidates"][0]["content"]["parts"][-1]["text"]
+ 647 | 
+ 648 | 
+ 649 | async def _stream_gemini(
+ 650 |     config: Dict[str, Any],
+ 651 |     model: str,
+ 652 |     api_key: str,
+ 653 |     messages: List[Dict[str, str]],
+ 654 |     system_prompt: str,
+ 655 |     temperature: float = 0.7,
+ 656 |     timeout: float = 90.0,
+ 657 | ) -> AsyncGenerator[str, None]:
+ 658 |     """Streaming call to Gemini API. Yields text chunks."""
+ 659 |     base_url = config["base_url"].rstrip("/")
+ 660 |     url = f"{base_url}/models/{model}:streamGenerateContent?alt=sse&key={api_key}"
+ 661 | 
+ 662 |     gemini_data = _build_gemini_contents(messages, system_prompt)
+ 663 | 
+ 664 |     payload: Dict[str, Any] = {
+ 665 |         **gemini_data,
+ 666 |         "generationConfig": {"temperature": temperature},
+ 667 |         "safetySettings": GEMINI_SAFETY,
+ 668 |     }
+ 669 | 
+ 670 |     async with httpx.AsyncClient() as client:
+ 671 |         async with client.stream("POST", url, json=payload, timeout=timeout) as resp:
+ 672 |             if resp.status_code != 200:
+ 673 |                 err_body = await resp.aread()
+ 674 |                 raise Exception(f"Gemini stream error ({resp.status_code}): {err_body.decode()[:500]}")
+ 675 |             async for line in resp.aiter_lines():
+ 676 |                 line = line.strip()
+ 677 |                 if not line or not line.startswith("data:"):
+ 678 |                     continue
+ 679 |                 data_str = line[5:].strip()
+ 680 |                 if not data_str:
+ 681 |                     continue
+ 682 |                 try:
+ 683 |                     obj = json.loads(data_str)
+ 684 |                     for cand in obj.get("candidates", []):
+ 685 |                         for part in cand.get("content", {}).get("parts", []):
+ 686 |                             text = part.get("text", "")
+ 687 |                             if text:
+ 688 |                                 yield text
+ 689 |                 except (json.JSONDecodeError, IndexError, KeyError):
+ 690 |                     continue
+ 691 | 
+ 692 | 
+ 693 | # ─── Claude Adapter ──────────────────────────────────────────────────
+ 694 | 
+ 695 | async def _call_claude(
+ 696 |     config: Dict[str, Any],
+ 697 |     model: str,
+ 698 |     api_key: str,
+ 699 |     messages: List[Dict[str, str]],
+ 700 |     system_prompt: str,
+ 701 |     temperature: float = 0.7,
+ 702 |     json_mode: bool = False,
+ 703 |     json_schema_hint: str = None,
+ 704 |     timeout: float = 30.0,
+ 705 | ) -> str:
+ 706 |     """Non-streaming call to Claude API."""
+ 707 |     base_url = config["base_url"].rstrip("/")
+ 708 |     url = f"{base_url}/messages"
+ 709 | 
+ 710 |     claude_data = _build_claude_messages(messages, system_prompt)
+ 711 | 
+ 712 |     headers = {
+ 713 |         "Content-Type": "application/json",
+ 714 |         "x-api-key": api_key,
+ 715 |         "anthropic-version": "2023-06-01",
+ 716 |     }
+ 717 | 
+ 718 |     payload: Dict[str, Any] = {
+ 719 |         "model": model,
+ 720 |         "max_tokens": 4096,
+ 721 |         "temperature": temperature,
+ 722 |         **claude_data,
+ 723 |     }
+ 724 | 
+ 725 |     if json_mode:
+ 726 |         json_instruction = "IMPORTANT: You MUST respond ONLY with a single valid JSON object. No markdown, no explanation, no code fences. Just raw JSON."
+ 727 |         if json_schema_hint:
+ 728 |             json_instruction += f"\n\nThe JSON should match this structure:\n{json_schema_hint}"
+ 729 |         payload["system"] = f"{json_instruction}\n\n{claude_data.get('system', '')}"
+ 730 | 
+ 731 |     async with httpx.AsyncClient() as client:
+ 732 |         resp = await client.post(url, json=payload, headers=headers, timeout=timeout)
+ 733 |         if resp.status_code != 200:
+ 734 |             raise Exception(f"Claude error ({resp.status_code}): {resp.text[:500]}")
+ 735 |         data = resp.json()
+ 736 |         text_parts = []
+ 737 |         for block in data.get("content", []):
+ 738 |             if block.get("type") == "text":
+ 739 |                 text_parts.append(block["text"])
+ 740 |         return "\n".join(text_parts)
+ 741 | 
+ 742 | 
+ 743 | async def _stream_claude(
+ 744 |     config: Dict[str, Any],
+ 745 |     model: str,
+ 746 |     api_key: str,
+ 747 |     messages: List[Dict[str, str]],
+ 748 |     system_prompt: str,
+ 749 |     temperature: float = 0.7,
+ 750 |     timeout: float = 90.0,
+ 751 | ) -> AsyncGenerator[str, None]:
+ 752 |     """Streaming call to Claude API. Yields text chunks."""
+ 753 |     base_url = config["base_url"].rstrip("/")
+ 754 |     url = f"{base_url}/messages"
+ 755 | 
+ 756 |     claude_data = _build_claude_messages(messages, system_prompt)
+ 757 | 
+ 758 |     headers = {
+ 759 |         "Content-Type": "application/json",
+ 760 |         "x-api-key": api_key,
+ 761 |         "anthropic-version": "2023-06-01",
+ 762 |     }
+ 763 | 
+ 764 |     payload: Dict[str, Any] = {
+ 765 |         "model": model,
+ 766 |         "max_tokens": 4096,
+ 767 |         "temperature": temperature,
+ 768 |         "stream": True,
+ 769 |         **claude_data,
+ 770 |     }
+ 771 | 
+ 772 |     async with httpx.AsyncClient() as client:
+ 773 |         async with client.stream("POST", url, json=payload, headers=headers, timeout=timeout) as resp:
+ 774 |             if resp.status_code != 200:
+ 775 |                 err_body = await resp.aread()
+ 776 |                 raise Exception(f"Claude stream error ({resp.status_code}): {err_body.decode()[:500]}")
+ 777 |             async for line in resp.aiter_lines():
+ 778 |                 line = line.strip()
+ 779 |                 if not line or not line.startswith("data:"):
+ 780 |                     continue
+ 781 |                 data_str = line[5:].strip()
+ 782 |                 if not data_str:
+ 783 |                     continue
+ 784 |                 try:
+ 785 |                     obj = json.loads(data_str)
+ 786 |                     event_type = obj.get("type", "")
+ 787 |                     if event_type == "content_block_delta":
+ 788 |                         delta = obj.get("delta", {})
+ 789 |                         if delta.get("type") == "text_delta":
+ 790 |                             text = delta.get("text", "")
+ 791 |                             if text:
+ 792 |                                 yield text
+ 793 |                 except (json.JSONDecodeError, KeyError):
+ 794 |                     continue
+ 795 | 
+ 796 | 
+ 797 | # ─── Cohere Adapter ──────────────────────────────────────────────────
+ 798 | 
+ 799 | async def _call_cohere(
+ 800 |     config: Dict[str, Any],
+ 801 |     model: str,
+ 802 |     api_key: str,
+ 803 |     messages: List[Dict[str, str]],
+ 804 |     system_prompt: str,
+ 805 |     temperature: float = 0.7,
+ 806 |     json_mode: bool = False,
+ 807 |     json_schema_hint: str = None,
+ 808 |     timeout: float = 30.0,
+ 809 | ) -> str:
+ 810 |     """Non-streaming call to Cohere v2 API."""
+ 811 |     base_url = config["base_url"].rstrip("/")
+ 812 |     url = f"{base_url}/chat"
+ 813 | 
+ 814 |     headers = {
+ 815 |         "Content-Type": "application/json",
+ 816 |         "Authorization": f"Bearer {api_key}",
+ 817 |     }
+ 818 | 
+ 819 |     chat_history = []
+ 820 |     for msg in messages[:-1]:
+ 821 |         chat_history.append({
+ 822 |             "role": "USER" if msg.get("role") == "user" else "CHATBOT",
+ 823 |             "message": msg.get("content", ""),
+ 824 |         })
+ 825 | 
+ 826 |     payload: Dict[str, Any] = {
+ 827 |         "model": model,
+ 828 |         "message": messages[-1].get("content", "") if messages else "",
+ 829 |         "chat_history": chat_history,
+ 830 |         "temperature": temperature,
+ 831 |     }
+ 832 | 
+ 833 |     if system_prompt:
+ 834 |         payload["preamble"] = system_prompt
+ 835 | 
+ 836 |     if json_mode:
+ 837 |         json_instr = "Respond ONLY with valid JSON."
+ 838 |         if json_schema_hint:
+ 839 |             json_instr += f" Structure: {json_schema_hint}"
+ 840 |         payload["message"] = f"{json_instr}\n\n{payload['message']}"
+ 841 | 
+ 842 |     async with httpx.AsyncClient() as client:
+ 843 |         resp = await client.post(url, json=payload, headers=headers, timeout=timeout)
+ 844 |         if resp.status_code != 200:
+ 845 |             raise Exception(f"Cohere error ({resp.status_code}): {resp.text[:500]}")
+ 846 |         data = resp.json()
+ 847 |         return data.get("text", "")
+ 848 | 
+ 849 | 
+ 850 | async def _stream_cohere(
+ 851 |     config: Dict[str, Any],
+ 852 |     model: str,
+ 853 |     api_key: str,
+ 854 |     messages: List[Dict[str, str]],
+ 855 |     system_prompt: str,
+ 856 |     temperature: float = 0.7,
+ 857 |     timeout: float = 90.0,
+ 858 | ) -> AsyncGenerator[str, None]:
+ 859 |     """Streaming call to Cohere v2 API. Yields text chunks."""
+ 860 |     base_url = config["base_url"].rstrip("/")
+ 861 |     url = f"{base_url}/chat"
+ 862 | 
+ 863 |     headers = {
+ 864 |         "Content-Type": "application/json",
+ 865 |         "Authorization": f"Bearer {api_key}",
+ 866 |     }
+ 867 | 
+ 868 |     chat_history = []
+ 869 |     for msg in messages[:-1]:
+ 870 |         chat_history.append({
+ 871 |             "role": "USER" if msg.get("role") == "user" else "CHATBOT",
+ 872 |             "message": msg.get("content", ""),
+ 873 |         })
+ 874 | 
+ 875 |     payload: Dict[str, Any] = {
+ 876 |         "model": model,
+ 877 |         "message": messages[-1].get("content", "") if messages else "",
+ 878 |         "chat_history": chat_history,
+ 879 |         "temperature": temperature,
+ 880 |         "stream": True,
+ 881 |     }
+ 882 |     if system_prompt:
+ 883 |         payload["preamble"] = system_prompt
+ 884 | 
+ 885 |     async with httpx.AsyncClient() as client:
+ 886 |         async with client.stream("POST", url, json=payload, headers=headers, timeout=timeout) as resp:
+ 887 |             if resp.status_code != 200:
+ 888 |                 err_body = await resp.aread()
+ 889 |                 raise Exception(f"Cohere stream error ({resp.status_code}): {err_body.decode()[:500]}")
+ 890 |             async for line in resp.aiter_lines():
+ 891 |                 line = line.strip()
+ 892 |                 if not line:
+ 893 |                     continue
+ 894 |                 try:
+ 895 |                     obj = json.loads(line)
+ 896 |                     event_type = obj.get("event_type", "")
+ 897 |                     if event_type == "text-generation":
+ 898 |                         text = obj.get("text", "")
+ 899 |                         if text:
+ 900 |                             yield text
+ 901 |                 except (json.JSONDecodeError, KeyError):
+ 902 |                     continue
+ 903 | 
+ 904 | 
+ 905 | # ─── AWS Bedrock Adapter ─────────────────────────────────────────────
+ 906 | 
+ 907 | async def _call_bedrock(
+ 908 |     config: Dict[str, Any],
+ 909 |     model: str,
+ 910 |     api_key: str,
+ 911 |     messages: List[Dict[str, str]],
+ 912 |     system_prompt: str,
+ 913 |     temperature: float = 0.7,
+ 914 |     json_mode: bool = False,
+ 915 |     json_schema_hint: str = None,
+ 916 |     timeout: float = 30.0,
+ 917 | ) -> str:
+ 918 |     """AWS Bedrock adapter using boto3 client."""
+ 919 |     try:
+ 920 |         import boto3
+ 921 |         from botocore.config import Config
+ 922 |     except ImportError:
+ 923 |         raise Exception("AWS Bedrock requires boto3 to be installed on the server.")
+ 924 | 
+ 925 |     conversation = []
+ 926 |     if system_prompt:
+ 927 |         conversation.append({"role": "system", "content": system_prompt})
+ 928 |     for msg in messages:
+ 929 |         # Convert assistant/model roles to assistant
+ 930 |         role = "assistant" if msg.get("role") in ["assistant", "model"] else "user"
+ 931 |         conversation.append({"role": role, "content": msg.get("content", "")})
+ 932 | 
+ 933 |     # Prepare client parameters
+ 934 |     client_params = {
+ 935 |         "region_name": os.environ.get("AWS_REGION", "us-east-1"),
+ 936 |         "config": Config(read_timeout=timeout)
+ 937 |     }
+ 938 |     if api_key:
+ 939 |         client_params["aws_access_key_id"] = api_key
+ 940 |         client_params["aws_secret_access_key"] = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
+ 941 | 
+ 942 |     client = boto3.client("bedrock-runtime", **client_params)
+ 943 | 
+ 944 |     # Payload mapping (standard Anthropic Converse API style or model-specific invocation)
+ 945 |     body = {
+ 946 |         "messages": conversation,
+ 947 |         "temperature": temperature,
+ 948 |         "max_tokens": 4096
+ 949 |     }
+ 950 |     if json_mode:
+ 951 |         body["responseFormat"] = {"type": "json_object"}
+ 952 |         # Bedrock models don't support native structured schemas globally yet, inject hint
+ 953 |         if json_schema_hint:
+ 954 |             conversation.append({
+ 955 |                 "role": "user",
+ 956 |                 "content": f"Respond strictly in valid JSON matching this schema:\n{json_schema_hint}"
+ 957 |             })
+ 958 | 
+ 959 |     try:
+ 960 |         # We use Converse API which is standard across Amazon Bedrock models
+ 961 |         system_blocks = [{"text": system_prompt}] if system_prompt else []
+ 962 |         converse_messages = []
+ 963 |         for msg in messages:
+ 964 |             role = "assistant" if msg.get("role") in ["assistant", "model"] else "user"
+ 965 |             converse_messages.append({
+ 966 |                 "role": role,
+ 967 |                 "content": [{"text": msg.get("content", "")}]
+ 968 |             })
+ 969 |         
+ 970 |         # Converse request
+ 971 |         resp = client.converse(
+ 972 |             modelId=model,
+ 973 |             messages=converse_messages,
+ 974 |             system=system_blocks,
+ 975 |             inferenceConfig={"temperature": temperature, "maxTokens": 4096}
+ 976 |         )
+ 977 |         return resp["output"]["message"]["content"][0]["text"]
+ 978 |     except Exception as e:
+ 979 |         raise Exception(f"Bedrock converse call failed: {str(e)}")
+ 980 | 
+ 981 | 
+ 982 | async def _stream_bedrock(
+ 983 |     config: Dict[str, Any],
+ 984 |     model: str,
+ 985 |     api_key: str,
+ 986 |     messages: List[Dict[str, str]],
+ 987 |     system_prompt: str,
+ 988 |     temperature: float = 0.7,
+ 989 |     timeout: float = 90.0,
+ 990 | ) -> AsyncGenerator[str, None]:
+ 991 |     """AWS Bedrock streaming adapter using converse_stream API."""
+ 992 |     try:
+ 993 |         import boto3
+ 994 |         from botocore.config import Config
+ 995 |     except ImportError:
+ 996 |         raise Exception("AWS Bedrock requires boto3 to be installed on the server.")
+ 997 | 
+ 998 |     client_params = {
+ 999 |         "region_name": os.environ.get("AWS_REGION", "us-east-1"),
+1000 |         "config": Config(read_timeout=timeout)
+1001 |     }
+1002 |     if api_key:
+1003 |         client_params["aws_access_key_id"] = api_key
+1004 |         client_params["aws_secret_access_key"] = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
+1005 | 
+1006 |     client = boto3.client("bedrock-runtime", **client_params)
+1007 | 
+1008 |     system_blocks = [{"text": system_prompt}] if system_prompt else []
+1009 |     converse_messages = []
+1010 |     for msg in messages:
+1011 |         role = "assistant" if msg.get("role") in ["assistant", "model"] else "user"
+1012 |         converse_messages.append({
+1013 |             "role": role,
+1014 |             "content": [{"text": msg.get("content", "")}]
+1015 |         })
+1016 | 
+1017 |     try:
+1018 |         resp = client.converse_stream(
+1019 |             modelId=model,
+1020 |             messages=converse_messages,
+1021 |             system=system_blocks,
+1022 |             inferenceConfig={"temperature": temperature, "maxTokens": 4096}
+1023 |         )
+1024 |         for event in resp.get("stream", []):
+1025 |             if "contentBlockDelta" in event:
+1026 |                 delta = event["contentBlockDelta"].get("delta", {})
+1027 |                 if "text" in delta:
+1028 |                     yield delta["text"]
+1029 |     except Exception as e:
+1030 |         raise Exception(f"Bedrock converse stream failed: {str(e)}")
+1031 | 
+1032 | 
+1033 | # ─── Unified Interface ───────────────────────────────────────────────
+1034 | 
+1035 | async def call_provider(
+1036 |     provider: str,
+1037 |     model: Optional[str],
+1038 |     api_key: str,
+1039 |     messages: List[Dict[str, str]],
+1040 |     system_prompt: str = "",
+1041 |     temperature: float = 0.7,
+1042 |     json_schema: Dict[str, Any] = None,
+1043 |     json_schema_hint: str = None,
+1044 |     timeout: float = 30.0,
+1045 |     fallback_provider: Optional[str] = None,
+1046 |     api_keys: Optional[Dict[str, str]] = None,
+1047 |     base_url: Optional[str] = None,
+1048 | ) -> str:
+1049 |     """Unified non-streaming call to any provider with retry and fallback routing."""
+1050 |     config = get_provider_config(provider)
+1051 |     if not config:
+1052 |         raise Exception(f"Unknown provider: {provider}")
+1053 | 
+1054 |     resolved_model = model or config.get("default_model", "")
+1055 |     resolved_base_url = base_url or config.get("base_url", "")
+1056 |     
+1057 |     cloned_config = dict(config)
+1058 |     if resolved_base_url:
+1059 |         cloned_config["base_url"] = resolved_base_url
+1060 | 
+1061 |     resolved_key = resolve_api_key(provider, api_key, api_keys)
+1062 |     if not resolved_key and not cloned_config.get("is_local", False):
+1063 |         raise Exception(f"API key missing for provider {provider}")
+1064 | 
+1065 |     adapter = cloned_config.get("adapter", "openai")
+1066 |     wants_json = json_schema is not None or json_schema_hint is not None
+1067 | 
+1068 |     async def _call():
+1069 |         if adapter == "gemini":
+1070 |             return await _call_gemini(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+1071 |                                        temperature=temperature, json_schema=json_schema, timeout=timeout)
+1072 |         elif adapter == "claude":
+1073 |             return await _call_claude(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+1074 |                                        temperature=temperature, json_mode=wants_json,
+1075 |                                        json_schema_hint=json_schema_hint, timeout=timeout)
+1076 |         elif adapter == "cohere":
+1077 |             return await _call_cohere(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+1078 |                                        temperature=temperature, json_mode=wants_json,
+1079 |                                        json_schema_hint=json_schema_hint, timeout=timeout)
+1080 |         elif adapter == "bedrock":
+1081 |             return await _call_bedrock(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+1082 |                                        temperature=temperature, json_mode=wants_json,
+1083 |                                        json_schema_hint=json_schema_hint, timeout=timeout)
+1084 |         else:  # openai-compatible
+1085 |             return await _call_openai_compatible(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+1086 |                                                  temperature=temperature, json_mode=wants_json,
+1087 |                                                  json_schema_hint=json_schema_hint, timeout=timeout)
+1088 | 
+1089 |     try:
+1090 |         return await call_with_retry(_call)
+1091 |     except Exception as e:
+1092 |         if fallback_provider and fallback_provider.lower() != provider.lower():
+1093 |             print(f"[FALLBACK] Primary provider {provider} failed: {e}. Routing to fallback {fallback_provider}...")
+1094 |             fallback_config = get_provider_config(fallback_provider)
+1095 |             fallback_model = fallback_config.get("default_model", "")
+1096 |             fallback_key = resolve_api_key(fallback_provider, None, api_keys)
+1097 |             
+1098 |             # Extract optional custom base URL for fallback from frontend dictionary if configured
+1099 |             fallback_base_url = None
+1100 |             
+1101 |             return await call_provider(
+1102 |                 provider=fallback_provider,
+1103 |                 model=fallback_model,
+1104 |                 api_key=fallback_key,
+1105 |                 messages=messages,
+1106 |                 system_prompt=system_prompt,
+1107 |                 temperature=temperature,
+1108 |                 json_schema=json_schema,
+1109 |                 json_schema_hint=json_schema_hint,
+1110 |                 timeout=timeout,
+1111 |                 fallback_provider=None,
+1112 |                 api_keys=api_keys,
+1113 |                 base_url=fallback_base_url
+1114 |             )
+1115 |         else:
+1116 |             raise
+1117 | 
+1118 | 
+1119 | async def stream_provider(
+1120 |     provider: str,
+1121 |     model: Optional[str],
+1122 |     api_key: str,
+1123 |     messages: List[Dict[str, str]],
+1124 |     system_prompt: str = "",
+1125 |     temperature: float = 0.7,
+1126 |     timeout: float = 90.0,
+1127 |     fallback_provider: Optional[str] = None,
+1128 |     api_keys: Optional[Dict[str, str]] = None,
+1129 |     base_url: Optional[str] = None,
+1130 | ) -> AsyncGenerator[str, None]:
+1131 |     """Unified streaming call to any provider with retry and fallback routing."""
+1132 |     config = get_provider_config(provider)
+1133 |     if not config:
+1134 |         raise Exception(f"Unknown provider: {provider}")
+1135 | 
+1136 |     resolved_model = model or config.get("default_model", "")
+1137 |     resolved_base_url = base_url or config.get("base_url", "")
+1138 |     
+1139 |     cloned_config = dict(config)
+1140 |     if resolved_base_url:
+1141 |         cloned_config["base_url"] = resolved_base_url
+1142 | 
+1143 |     resolved_key = resolve_api_key(provider, api_key, api_keys)
+1144 |     if not resolved_key and not cloned_config.get("is_local", False):
+1145 |         raise Exception(f"API key missing for provider {provider}")
+1146 | 
+1147 |     adapter = cloned_config.get("adapter", "openai")
+1148 | 
+1149 |     async def _stream():
+1150 |         if adapter == "gemini":
+1151 |             async for chunk in _stream_gemini(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+1152 |                                                temperature=temperature, timeout=timeout):
+1153 |                 yield chunk
+1154 |         elif adapter == "claude":
+1155 |             async for chunk in _stream_claude(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+1156 |                                                temperature=temperature, timeout=timeout):
+1157 |                 yield chunk
+1158 |         elif adapter == "cohere":
+1159 |             async for chunk in _stream_cohere(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+1160 |                                                temperature=temperature, timeout=timeout):
+1161 |                 yield chunk
+1162 |         elif adapter == "bedrock":
+1163 |             async for chunk in _stream_bedrock(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+1164 |                                                temperature=temperature, timeout=timeout):
+1165 |                 yield chunk
+1166 |         else:  # openai-compatible
+1167 |             async for chunk in _stream_openai_compatible(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+1168 |                                                          temperature=temperature, timeout=timeout):
+1169 |                 yield chunk
+1170 | 
+1171 |     retries = 0
+1172 |     while retries <= MAX_RETRIES:
+1173 |         try:
+1174 |             async for chunk in _stream():
+1175 |                 yield chunk
+1176 |             return
+1177 |         except Exception as e:
+1178 |             retries += 1
+1179 |             if retries > MAX_RETRIES:
+1180 |                 if fallback_provider and fallback_provider.lower() != provider.lower():
+1181 |                     print(f"[FALLBACK STREAM] Primary {provider} failed: {e}. Switching to fallback {fallback_provider}...")
+1182 |                     fallback_config = get_provider_config(fallback_provider)
+1183 |                     fallback_model = fallback_config.get("default_model", "")
+1184 |                     fallback_key = resolve_api_key(fallback_provider, None, api_keys)
+1185 |                     
+1186 |                     async for chunk in stream_provider(
+1187 |                         provider=fallback_provider,
+1188 |                         model=fallback_model,
+1189 |                         api_key=fallback_key,
+1190 |                         messages=messages,
+1191 |                         system_prompt=system_prompt,
+1192 |                         temperature=temperature,
+1193 |                         timeout=timeout,
+1194 |                         fallback_provider=None,
+1195 |                         api_keys=api_keys,
+1196 |                         base_url=None
+1197 |                     ):
+1198 |                         yield chunk
+1199 |                     return
+1200 |                 else:
+1201 |                     raise
+1202 |             delay = min(MAX_DELAY, BASE_DELAY * (2 ** retries))
+1203 |             delay += random.uniform(-JITTER_FACTOR * delay, JITTER_FACTOR * delay)
+1204 |             await asyncio.sleep(delay)
+1205 | 
+1206 | 
+1207 | async def call_provider_json(
+1208 |     provider: str,
+1209 |     model: Optional[str],
+1210 |     api_key: str,
+1211 |     messages: List[Dict[str, str]],
+1212 |     system_prompt: str = "",
+1213 |     temperature: float = 0.2,
+1214 |     json_schema: Dict[str, Any] = None,
+1215 |     timeout: float = 30.0,
+1216 |     fallback_provider: Optional[str] = None,
+1217 |     api_keys: Optional[Dict[str, str]] = None,
+1218 |     base_url: Optional[str] = None,
+1219 | ) -> Dict[str, Any]:
+1220 |     """Unified JSON completions call with fallback validation."""
+1221 |     schema_hint = None
+1222 |     if json_schema:
+1223 |         schema_hint = json.dumps(json_schema, indent=2)
+1224 | 
+1225 |     response_text = await call_provider(
+1226 |         provider=provider,
+1227 |         model=model,
+1228 |         api_key=api_key,
+1229 |         messages=messages,
+1230 |         system_prompt=system_prompt,
+1231 |         temperature=temperature,
+1232 |         json_schema=json_schema,
+1233 |         json_schema_hint=schema_hint,
+1234 |         timeout=timeout,
+1235 |         fallback_provider=fallback_provider,
+1236 |         api_keys=api_keys,
+1237 |         base_url=base_url
+1238 |     )
+1239 |     
+1240 |     parsed = extract_json_from_text(response_text)
+1241 |     if parsed is None:
+1242 |         raise ValueError(f"Failed to extract JSON from response: {response_text[:1000]}")
+1243 |     return parsed
+1244 | 
+1245 | 
+1246 | # ─── Embedding Abstraction ───────────────────────────────────────────
+1247 | 
+1248 | async def get_embedding(provider: str, api_key: str, text: str, api_keys: Optional[Dict[str, str]] = None) -> List[float]:
+1249 |     """Unified embedding generator."""
+1250 |     resolved_key = resolve_api_key(provider, api_key, api_keys)
+1251 |     if not resolved_key:
+1252 |         return []
+1253 | 
+1254 |     if provider.lower() == "gemini":
+1255 |         url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={resolved_key}"
+1256 |         payload = {
+1257 |             "model": "models/text-embedding-004",
+1258 |             "content": {"parts": [{"text": text}]}
+1259 |         }
+1260 |         async with httpx.AsyncClient() as client:
+1261 |             try:
+1262 |                 r = await client.post(url, json=payload, timeout=15.0)
+1263 |                 if r.status_code == 200:
+1264 |                     return r.json().get("embedding", {}).get("values", [])
+1265 |             except Exception as e:
+1266 |                 print(f"[EMBEDDING ERROR] Gemini embedding failed: {e}")
+1267 |     elif provider.lower() == "openai":
+1268 |         url = "https://api.openai.com/v1/embeddings"
+1269 |         headers = {
+1270 |             "Content-Type": "application/json",
+1271 |             "Authorization": f"Bearer {resolved_key}"
+1272 |         }
+1273 |         payload = {
+1274 |             "model": "text-embedding-3-small",
+1275 |             "input": text
+1276 |         }
+1277 |         async with httpx.AsyncClient() as client:
+1278 |             try:
+1279 |                 r = await client.post(url, json=payload, headers=headers, timeout=15.0)
+1280 |                 if r.status_code == 200:
+1281 |                     return r.json().get("data", [{}])[0].get("embedding", [])
+1282 |             except Exception as e:
+1283 |                 print(f"[EMBEDDING ERROR] OpenAI embedding failed: {e}")
+1284 |     return []
+1285 | 
+1286 | 
+1287 | # ─── Dynamic Model Fetching ─────────────────────────────────────────
+1288 | 
+1289 | async def fetch_models_from_provider(
+1290 |     provider: str,
+1291 |     api_key: str,
+1292 |     api_keys: Optional[Dict[str, str]] = None,
+1293 |     base_url: Optional[str] = None,
+1294 | ) -> List[Dict[str, Any]]:
+1295 |     """Fetch available models from the provider's API dynamically."""
+1296 |     config = get_provider_config(provider)
+1297 |     if not config:
+1298 |         return []
+1299 |     
+1300 |     resolved_key = resolve_api_key(provider, api_key, api_keys)
+1301 |     if not resolved_key and not config.get("is_local", False):
+1302 |         return []
+1303 | 
+1304 |     resolved_base_url = base_url or config.get("base_url", "")
+1305 |     if not resolved_base_url:
+1306 |         return config.get("models", [])
+1307 | 
+1308 |     adapter = config.get("adapter", "openai")
+1309 |     base_url_str = resolved_base_url.rstrip("/")
+1310 |     
+1311 |     if adapter in ("openai", "openai-compatible"):
+1312 |         url = f"{base_url_str}/models"
+1313 |         headers = {}
+1314 |         if resolved_key:
+1315 |             if config.get("requires_deployment"):
+1316 |                 headers["api-key"] = resolved_key
+1317 |             else:
+1318 |                 headers["Authorization"] = f"Bearer {resolved_key}"
+1319 | 
+1320 |         try:
+1321 |             async with httpx.AsyncClient(timeout=10.0) as client:
+1322 |                 resp = await client.get(url, headers=headers)
+1323 |                 if resp.status_code == 200:
+1324 |                     data = resp.json()
+1325 |                     models = []
+1326 |                     for item in data.get("data", []):
+1327 |                         model_id = item.get("id")
+1328 |                         if model_id:
+1329 |                             models.append({
+1330 |                                 "id": model_id,
+1331 |                                 "name": model_id,
+1332 |                                 "tier": "custom"
+1333 |                             })
+1334 |                     return models
+1335 |         except Exception as e:
+1336 |             print(f"[FETCH MODELS ERROR] Failed to fetch models for {provider}: {e}")
+1337 |             
+1338 |     return config.get("models", [])
+1339 |
 ```
 
 ### File: `Backend/requirements.txt`
 
-> 6 lines | 0.1 KB
+> 7 lines | 0.1 KB
 
 ```text
 1 | fastapi>=0.100.0
@@ -2815,7 +3297,8 @@ SoloSpace/
 3 | httpx>=0.24.0
 4 | pydantic>=2.0
 5 | beautifulsoup4>=4.12.0
-6 |
+6 | boto3>=1.28.0
+7 |
 ```
 
 ### File: `Backend/run.bat`
@@ -2961,6 +3444,45 @@ SoloSpace/
 78 |   }
 79 | }
 80 |
+```
+
+### File: `Frontend/app/api/gemini/models/route.ts`
+
+> 32 lines | 0.8 KB
+
+```typescript
+ 1 | import { NextResponse } from "next/server";
+ 2 | 
+ 3 | export async function POST(req: Request) {
+ 4 |   try {
+ 5 |     const body = await req.json();
+ 6 | 
+ 7 |     const pyResponse = await fetch("http://127.0.0.1:8000/models", {
+ 8 |       method: "POST",
+ 9 |       headers: {
+10 |         "Content-Type": "application/json",
+11 |       },
+12 |       body: JSON.stringify(body),
+13 |     });
+14 | 
+15 |     if (!pyResponse.ok) {
+16 |       return NextResponse.json(
+17 |         { error: `Backend error: ${pyResponse.status}` },
+18 |         { status: pyResponse.status }
+19 |       );
+20 |     }
+21 | 
+22 |     const data = await pyResponse.json();
+23 |     return NextResponse.json(data);
+24 |   } catch (err: any) {
+25 |     console.error("Proxy error — Python backend unreachable:", err.message);
+26 |     return NextResponse.json(
+27 |       { error: "Python backend is unavailable" },
+28 |       { status: 503 }
+29 |     );
+30 |   }
+31 | }
+32 |
 ```
 
 ### File: `Frontend/app/api/gemini/orchestrate/route.ts`
@@ -3390,7 +3912,7 @@ SoloSpace/
 
 ### File: `Frontend/app/page.tsx`
 
-> 1596 lines | 82.1 KB
+> 1674 lines | 86.9 KB
 
 ```tsx
    1 | 'use client';
@@ -3471,1524 +3993,1602 @@ SoloSpace/
   76 |   const setModel = useWorkflowStore((s) => s.setModel);
   77 |   const setProviderApiKey = useWorkflowStore((s) => s.setProviderApiKey);
   78 |   const fetchAvailableProviders = useWorkflowStore((s) => s.fetchAvailableProviders);
-  79 | 
-  80 |   const triggerSteerOrchestration = useWorkflowStore((s) => s.triggerSteerOrchestration);
-  81 |   const setChatMessages = useWorkflowStore((s) => s.setChatMessages);
-  82 |   const createSession = useWorkflowStore((s) => s.createSession);
-  83 |   const switchSession = useWorkflowStore((s) => s.switchSession);
-  84 |   const cancelOrchestration = useWorkflowStore((s) => s.cancelOrchestration);
-  85 |   const followUpSuggestions = useWorkflowStore((s) => s.followUpSuggestions);
-  86 |   const fetchSessions = useWorkflowStore((s) => s.fetchSessions);
-  87 |   const loadSessionFromDb = useWorkflowStore((s) => s.loadSessionFromDb);
-  88 |   const deleteSessionFromDb = useWorkflowStore((s) => s.deleteSessionFromDb);
-  89 | 
-  90 |   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
-  91 |   const copyToClipboard = (text: string, msgId: string) => {
-  92 |     navigator.clipboard.writeText(text);
-  93 |     setCopiedMsgId(msgId);
-  94 |     setTimeout(() => setCopiedMsgId(null), 2000);
-  95 |   };
-  96 | 
-  97 |   const chatContainerRef = useRef<HTMLDivElement>(null);
-  98 |   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
-  99 | 
- 100 |   const handleScroll = () => {
- 101 |     const container = chatContainerRef.current;
- 102 |     if (!container) return;
- 103 |     const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120;
- 104 |     setShouldAutoScroll(isAtBottom);
- 105 |   };
- 106 | 
- 107 |   const textareaRef = useRef<HTMLTextAreaElement>(null);
- 108 |   const adjustTextareaHeight = () => {
- 109 |     const tx = textareaRef.current;
- 110 |     if (tx) {
- 111 |       tx.style.height = "auto";
- 112 |       tx.style.height = `${Math.min(tx.scrollHeight, 200)}px`;
- 113 |     }
- 114 |   };
- 115 | 
- 116 |   // Screen and Tab States
- 117 |   const [workspaceState, setWorkspaceState] = useState<"home" | "active">("home");
- 118 |   const [currentTab, setCurrentTab] = useState<"chat" | "arena">("chat");
- 119 |   const [isAutoMode, setIsAutoMode] = useState<boolean>(true);
- 120 |   const [isSidebarExpanded, setIsSidebarExpanded] = useState<boolean>(true);
- 121 |   const [isLoadingSession, setIsLoadingSession] = useState<boolean>(false);
- 122 | 
- 123 |   // Input fields
- 124 |   const [userQuery, setUserQuery] = useState<string>("");
- 125 |   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
- 126 |   const activePrompt = activeSession ? activeSession.prompt : "";
- 127 | 
- 128 |   useEffect(() => {
- 129 |     adjustTextareaHeight();
- 130 |   }, [userQuery]);
- 131 | 
- 132 |   // API key — read directly from Zustand (not local state, to avoid disconnect)
- 133 |   const [isSecretOpen, setIsSecretOpen] = useState<boolean>(false);
- 134 |   const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
- 135 | 
- 136 |   // Tooltip helper state for collapsed sidebar
- 137 |   const [hoveredSidebarItem, setHoveredSidebarItem] = useState<string | null>(null);
- 138 | 
- 139 |   // Node Configuration Panel
- 140 |   const [isConfigPanelOpen, setIsConfigPanelOpen] = useState<boolean>(false);
- 141 |   const [newRuleText, setNewRuleText] = useState<string>("");
- 142 | 
- 143 |   // Chat scroll ref
- 144 |   const chatEndRef = useRef<HTMLDivElement>(null);
- 145 | 
- 146 |   // List of available tools in the Arena tool panel
- 147 |   const toolsList = [
- 148 |     { name: "Web Search", icon: <Globe className="w-4 h-4" />, desc: "Real-time Google search indices" },
- 149 |     { name: "Memory", icon: <Database className="w-4 h-4" />, desc: "Persistent memory vector vault" },
- 150 |     { name: "Browser", icon: <Eye className="w-4 h-4" />, desc: "Headless browser sandbox access" },
- 151 |     { name: "File Upload", icon: <UploadCloud className="w-4 h-4" />, desc: "Parsing spreadsheet/code datasets" },
- 152 |     { name: "Vision", icon: <Eye className="w-4 h-4" />, desc: "Image recognition & layout review" },
- 153 |     { name: "Voice", icon: <Mic className="w-4 h-4" />, desc: "Acoustic synthesis & recognition" },
- 154 |     { name: "Code Executor", icon: <Terminal className="w-4 h-4" />, desc: "Sandboxed node/python runs" },
- 155 |     { name: "API Connector", icon: <GitFork className="w-4 h-4" />, desc: "Synchronize external webhooks" }
- 156 |   ];
- 157 | 
- 158 |   // Sync config panel with selectedNodeId
- 159 |   useEffect(() => {
- 160 |     if (selectedNodeId) {
- 161 |       setIsConfigPanelOpen(true);
- 162 |     } else {
- 163 |       setIsConfigPanelOpen(false);
- 164 |     }
- 165 |   }, [selectedNodeId]);
- 166 | 
- 167 |   // Synchronize modal's local display state when it opens
- 168 |   const [apiKeyInput, setApiKeyInput] = useState<string>("");
- 169 |   const [selectedProvider, setSelectedProvider] = useState<string>("gemini");
- 170 |   const [selectedModel, setSelectedModel] = useState<string>("");
- 171 | 
- 172 |   useEffect(() => {
- 173 |     if (isSecretOpen) {
- 174 |       setSelectedProvider(provider);
- 175 |       setSelectedModel(model);
- 176 |       setApiKeyInput(apiKeys[provider] || apiKey || "");
- 177 |     }
- 178 |   }, [isSecretOpen, provider, model, apiKeys, apiKey]);
- 179 | 
- 180 |   // When selectedProvider changes, set selectedModel to its default model, and load key
- 181 |   useEffect(() => {
- 182 |     if (isSecretOpen && availableProviders[selectedProvider]) {
- 183 |       const pConfig = availableProviders[selectedProvider];
- 184 |       const modelExists = pConfig.models?.some((m: any) => m.id === selectedModel);
- 185 |       if (!modelExists) {
- 186 |         setSelectedModel(pConfig.default_model);
- 187 |       }
- 188 |       setApiKeyInput(apiKeys[selectedProvider] || "");
- 189 |     }
- 190 |   }, [selectedProvider, availableProviders]);
- 191 | 
- 192 |   // Scroll helper
- 193 |   const scrollToBottom = () => {
- 194 |     if (shouldAutoScroll) {
- 195 |       chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
- 196 |     }
- 197 |   };
- 198 | 
- 199 |   // Auto-scroll chat to bottom if enabled
- 200 |   useEffect(() => {
- 201 |     scrollToBottom();
- 202 |   }, [chatMessages, isThinking, shouldAutoScroll]);
- 203 | 
- 204 |   // Auto-scroll when chat tab becomes active
- 205 |   useEffect(() => {
- 206 |     if (workspaceState === "active" && currentTab === "chat") {
- 207 |       scrollToBottom();
- 208 |     }
- 209 |   }, [currentTab, workspaceState]);
- 210 | 
- 211 |   // Reset to home when active session is deleted
- 212 |   useEffect(() => {
- 213 |     if (workspaceState === "active" && activeSessionId === null) {
- 214 |       setWorkspaceState("home");
- 215 |       setCurrentTab("chat");
- 216 |       setUserQuery("");
- 217 |     }
- 218 |   }, [activeSessionId, workspaceState]);
+  79 |   const fallbackProvider = useWorkflowStore((s) => s.fallbackProvider);
+  80 |   const providerBaseUrls = useWorkflowStore((s) => s.providerBaseUrls);
+  81 |   const providerModels = useWorkflowStore((s) => s.providerModels);
+  82 |   const setFallbackProvider = useWorkflowStore((s) => s.setFallbackProvider);
+  83 |   const setProviderBaseUrl = useWorkflowStore((s) => s.setProviderBaseUrl);
+  84 |   const fetchProviderModels = useWorkflowStore((s) => s.fetchProviderModels);
+  85 | 
+  86 |   const triggerSteerOrchestration = useWorkflowStore((s) => s.triggerSteerOrchestration);
+  87 |   const setChatMessages = useWorkflowStore((s) => s.setChatMessages);
+  88 |   const createSession = useWorkflowStore((s) => s.createSession);
+  89 |   const switchSession = useWorkflowStore((s) => s.switchSession);
+  90 |   const cancelOrchestration = useWorkflowStore((s) => s.cancelOrchestration);
+  91 |   const followUpSuggestions = useWorkflowStore((s) => s.followUpSuggestions);
+  92 |   const fetchSessions = useWorkflowStore((s) => s.fetchSessions);
+  93 |   const loadSessionFromDb = useWorkflowStore((s) => s.loadSessionFromDb);
+  94 |   const deleteSessionFromDb = useWorkflowStore((s) => s.deleteSessionFromDb);
+  95 | 
+  96 |   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+  97 |   const copyToClipboard = (text: string, msgId: string) => {
+  98 |     navigator.clipboard.writeText(text);
+  99 |     setCopiedMsgId(msgId);
+ 100 |     setTimeout(() => setCopiedMsgId(null), 2000);
+ 101 |   };
+ 102 | 
+ 103 |   const chatContainerRef = useRef<HTMLDivElement>(null);
+ 104 |   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
+ 105 | 
+ 106 |   const handleScroll = () => {
+ 107 |     const container = chatContainerRef.current;
+ 108 |     if (!container) return;
+ 109 |     const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120;
+ 110 |     setShouldAutoScroll(isAtBottom);
+ 111 |   };
+ 112 | 
+ 113 |   const textareaRef = useRef<HTMLTextAreaElement>(null);
+ 114 |   const adjustTextareaHeight = () => {
+ 115 |     const tx = textareaRef.current;
+ 116 |     if (tx) {
+ 117 |       tx.style.height = "auto";
+ 118 |       tx.style.height = `${Math.min(tx.scrollHeight, 200)}px`;
+ 119 |     }
+ 120 |   };
+ 121 | 
+ 122 |   // Screen and Tab States
+ 123 |   const [workspaceState, setWorkspaceState] = useState<"home" | "active">("home");
+ 124 |   const [currentTab, setCurrentTab] = useState<"chat" | "arena">("chat");
+ 125 |   const [isAutoMode, setIsAutoMode] = useState<boolean>(true);
+ 126 |   const [isSidebarExpanded, setIsSidebarExpanded] = useState<boolean>(true);
+ 127 |   const [isLoadingSession, setIsLoadingSession] = useState<boolean>(false);
+ 128 | 
+ 129 |   // Input fields
+ 130 |   const [userQuery, setUserQuery] = useState<string>("");
+ 131 |   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
+ 132 |   const activePrompt = activeSession ? activeSession.prompt : "";
+ 133 | 
+ 134 |   useEffect(() => {
+ 135 |     adjustTextareaHeight();
+ 136 |   }, [userQuery]);
+ 137 | 
+ 138 |   // API key — read directly from Zustand (not local state, to avoid disconnect)
+ 139 |   const [isSecretOpen, setIsSecretOpen] = useState<boolean>(false);
+ 140 |   const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
+ 141 | 
+ 142 |   // Tooltip helper state for collapsed sidebar
+ 143 |   const [hoveredSidebarItem, setHoveredSidebarItem] = useState<string | null>(null);
+ 144 | 
+ 145 |   // Node Configuration Panel
+ 146 |   const [isConfigPanelOpen, setIsConfigPanelOpen] = useState<boolean>(false);
+ 147 |   const [newRuleText, setNewRuleText] = useState<string>("");
+ 148 | 
+ 149 |   // Chat scroll ref
+ 150 |   const chatEndRef = useRef<HTMLDivElement>(null);
+ 151 | 
+ 152 |   // List of available tools in the Arena tool panel
+ 153 |   const toolsList = [
+ 154 |     { name: "Web Search", icon: <Globe className="w-4 h-4" />, desc: "Real-time Google search indices" },
+ 155 |     { name: "Memory", icon: <Database className="w-4 h-4" />, desc: "Persistent memory vector vault" },
+ 156 |     { name: "Browser", icon: <Eye className="w-4 h-4" />, desc: "Headless browser sandbox access" },
+ 157 |     { name: "File Upload", icon: <UploadCloud className="w-4 h-4" />, desc: "Parsing spreadsheet/code datasets" },
+ 158 |     { name: "Vision", icon: <Eye className="w-4 h-4" />, desc: "Image recognition & layout review" },
+ 159 |     { name: "Voice", icon: <Mic className="w-4 h-4" />, desc: "Acoustic synthesis & recognition" },
+ 160 |     { name: "Code Executor", icon: <Terminal className="w-4 h-4" />, desc: "Sandboxed node/python runs" },
+ 161 |     { name: "API Connector", icon: <GitFork className="w-4 h-4" />, desc: "Synchronize external webhooks" }
+ 162 |   ];
+ 163 | 
+ 164 |   // Sync config panel with selectedNodeId
+ 165 |   useEffect(() => {
+ 166 |     if (selectedNodeId) {
+ 167 |       setIsConfigPanelOpen(true);
+ 168 |     } else {
+ 169 |       setIsConfigPanelOpen(false);
+ 170 |     }
+ 171 |   }, [selectedNodeId]);
+ 172 | 
+ 173 |   // Synchronize modal's local display state when it opens
+ 174 |   const [apiKeyInput, setApiKeyInput] = useState<string>("");
+ 175 |   const [selectedProvider, setSelectedProvider] = useState<string>("gemini");
+ 176 |   const [selectedModel, setSelectedModel] = useState<string>("");
+ 177 |   const [baseUrlInput, setBaseUrlInput] = useState<string>("");
+ 178 |   const [fallbackProviderInput, setFallbackProviderInput] = useState<string>("");
+ 179 |   const [isFetchingModels, setIsFetchingModels] = useState<boolean>(false);
+ 180 |   const [modelsFetchStatus, setModelsFetchStatus] = useState<string>("");
+ 181 | 
+ 182 |   useEffect(() => {
+ 183 |     if (isSecretOpen) {
+ 184 |       setSelectedProvider(provider);
+ 185 |       setSelectedModel(model);
+ 186 |       setApiKeyInput(apiKeys[provider] || apiKey || "");
+ 187 |       setBaseUrlInput(providerBaseUrls[provider] || "");
+ 188 |       setFallbackProviderInput(fallbackProvider || "");
+ 189 |       setModelsFetchStatus("");
+ 190 |     }
+ 191 |   }, [isSecretOpen, provider, model, apiKeys, apiKey, providerBaseUrls, fallbackProvider]);
+ 192 | 
+ 193 |   // When selectedProvider changes, set selectedModel to its default model, and load key and base url
+ 194 |   useEffect(() => {
+ 195 |     if (isSecretOpen && availableProviders[selectedProvider]) {
+ 196 |       const pConfig = availableProviders[selectedProvider];
+ 197 |       const modelsList = providerModels[selectedProvider] || pConfig.models || [];
+ 198 |       const modelExists = modelsList.some((m: any) => m.id === selectedModel);
+ 199 |       if (!modelExists) {
+ 200 |         setSelectedModel(pConfig.default_model);
+ 201 |       }
+ 202 |       setApiKeyInput(apiKeys[selectedProvider] || "");
+ 203 |       setBaseUrlInput(providerBaseUrls[selectedProvider] || pConfig.base_url || "");
+ 204 |       setModelsFetchStatus("");
+ 205 |     }
+ 206 |   }, [selectedProvider, availableProviders, providerModels]);
+ 207 | 
+ 208 |   // Scroll helper
+ 209 |   const scrollToBottom = () => {
+ 210 |     if (shouldAutoScroll) {
+ 211 |       chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+ 212 |     }
+ 213 |   };
+ 214 | 
+ 215 |   // Auto-scroll chat to bottom if enabled
+ 216 |   useEffect(() => {
+ 217 |     scrollToBottom();
+ 218 |   }, [chatMessages, isThinking, shouldAutoScroll]);
  219 | 
- 220 |   // Load sessions and available providers from DB on mount
+ 220 |   // Auto-scroll when chat tab becomes active
  221 |   useEffect(() => {
- 222 |     fetchSessions().catch(e => console.error("Failed to load sessions:", e));
- 223 |     fetchAvailableProviders().catch(e => console.error("Failed to load providers:", e));
- 224 |   }, []);
- 225 | 
- 226 |   const handleCloseConfigPanel = () => {
- 227 |     setIsConfigPanelOpen(false);
- 228 |     setSelectedNodeId(null);
- 229 |   };
- 230 | 
- 231 |   // Orchestrator — always stays in chat first
- 232 |   const startOrchestration = (promptText: string) => {
- 233 |     if (!promptText.trim()) return;
- 234 |     setWorkspaceState("active");
- 235 |     setCurrentTab("chat"); // ALWAYS stay in chat
- 236 | 
- 237 |     let sessionId = activeSessionId;
- 238 |     if (!sessionId) {
- 239 |       sessionId = createSession(promptText, isAutoMode ? "auto" : "custom");
- 240 |     }
+ 222 |     if (workspaceState === "active" && currentTab === "chat") {
+ 223 |       scrollToBottom();
+ 224 |     }
+ 225 |   }, [currentTab, workspaceState]);
+ 226 | 
+ 227 |   // Reset to home when active session is deleted
+ 228 |   useEffect(() => {
+ 229 |     if (workspaceState === "active" && activeSessionId === null) {
+ 230 |       setWorkspaceState("home");
+ 231 |       setCurrentTab("chat");
+ 232 |       setUserQuery("");
+ 233 |     }
+ 234 |   }, [activeSessionId, workspaceState]);
+ 235 | 
+ 236 |   // Load sessions and available providers from DB on mount
+ 237 |   useEffect(() => {
+ 238 |     fetchSessions().catch(e => console.error("Failed to load sessions:", e));
+ 239 |     fetchAvailableProviders().catch(e => console.error("Failed to load providers:", e));
+ 240 |   }, []);
  241 | 
- 242 |     setExecutionState("running");
- 243 |     triggerSteerOrchestration(promptText, isAutoMode);
- 244 |     setUserQuery("");
+ 242 |   const handleCloseConfigPanel = () => {
+ 243 |     setIsConfigPanelOpen(false);
+ 244 |     setSelectedNodeId(null);
  245 |   };
  246 | 
- 247 |   // Node editing actions
- 248 |   const handleAddRule = () => {
- 249 |     if (!newRuleText.trim() || !selectedNodeId) return;
- 250 |     addRule(selectedNodeId, newRuleText.trim());
- 251 |     setNewRuleText("");
- 252 |   };
- 253 | 
- 254 |   const handleDeleteRule = (ruleIndex: number) => {
- 255 |     if (!selectedNodeId) return;
- 256 |     deleteRule(selectedNodeId, ruleIndex);
- 257 |   };
- 258 | 
- 259 |   const activeNodeDetail = nodes.find(n => n.id === selectedNodeId) as any;
- 260 | 
- 261 |   // ── Thinking indicator bubble
- 262 |   const ThinkingBubble = () => (
- 263 |     <motion.div
- 264 |       initial={{ opacity: 0, y: 8 }}
- 265 |       animate={{ opacity: 1, y: 0 }}
- 266 |       exit={{ opacity: 0, y: -4 }}
- 267 |       className="flex flex-col gap-1.5 py-2 px-1"
- 268 |     >
- 269 |       <div className="flex items-center gap-2">
- 270 |         <span className="text-xs text-neutral-500 italic">Thinking</span>
- 271 |         <span className="flex gap-1">
- 272 |           {[0, 1, 2].map(i => (
- 273 |             <span
- 274 |               key={i}
- 275 |               className="w-1.5 h-1.5 rounded-full bg-neutral-500 animate-bounce"
- 276 |               style={{ animationDelay: `${i * 0.15}s`, animationDuration: "0.9s" }}
- 277 |             />
- 278 |           ))}
- 279 |         </span>
- 280 |       </div>
- 281 |       {statusMessage && (
- 282 |         <span className="text-[10px] font-mono text-neutral-600 pl-0.5 truncate max-w-sm">
- 283 |           {statusMessage}
- 284 |         </span>
- 285 |       )}
- 286 |       {liveThoughts && (
- 287 |         <div className="mt-1 text-[10px] text-neutral-500 font-sans leading-relaxed max-w-lg whitespace-pre-wrap border-l-2 border-neutral-800 pl-2">
- 288 |           {liveThoughts.slice(-400)}
- 289 |         </div>
- 290 |       )}
- 291 |     </motion.div>
- 292 |   );
- 293 | 
- 294 |   // ── Collapsible agent trace (real data from backend)
- 295 |   const AgentTraceBlock = ({ logs, thinkingSummary }: { logs: AgentTalkLog[], thinkingSummary?: string }) => {
- 296 |     if (logs.length === 0 && !thinkingSummary) return null;
- 297 |     return (
- 298 |       <div className="border border-[#1f1f1f] rounded-xl overflow-hidden bg-[#050505] mt-3 max-w-2xl w-full">
- 299 |         <details className="group" open>
- 300 |           <summary className="flex items-center justify-between p-3 cursor-pointer select-none text-[11px] font-semibold text-neutral-500 hover:text-white hover:bg-neutral-900/40 transition-colors">
- 301 |             <div className="flex items-center gap-2">
- 302 |               <Sparkles className="w-3 h-3 text-neutral-500 group-hover:text-cyan-400 transition-colors" />
- 303 |               <span className="font-mono text-[10px] tracking-wider uppercase">Agent Trace & Thinking</span>
- 304 |             </div>
- 305 |             <div className="flex items-center gap-2">
- 306 |               {logs.length > 0 && <span className="text-[9px] text-neutral-600 font-mono">{logs.length} specialist{logs.length !== 1 ? "s" : ""}</span>}
- 307 |               <ChevronRight className="w-3.5 h-3.5 text-neutral-600 group-open:rotate-90 transition-transform" />
- 308 |             </div>
- 309 |           </summary>
- 310 |           <div className="border-t border-[#1f1f1f] p-3 space-y-3 bg-[#030303]">
- 311 |             {thinkingSummary && (
- 312 |               <div className="space-y-1.5 pb-2 border-b border-[#0d0d0d] last:border-0 last:pb-0">
- 313 |                 <span className="text-[9px] font-mono text-neutral-500 font-bold uppercase tracking-wider">Reasoning Process</span>
- 314 |                 <p className="text-[11px] text-neutral-400 leading-relaxed font-sans whitespace-pre-wrap">
- 315 |                   {thinkingSummary}
- 316 |                 </p>
- 317 |               </div>
- 318 |             )}
- 319 |             {logs.map((log) => (
- 320 |               <div key={log.id} className="flex gap-2 items-start text-[10.5px] leading-relaxed border-b border-[#0d0d0d] pb-2 last:border-0 last:pb-0">
- 321 |                 <div className="w-5 h-5 rounded-md bg-neutral-900 flex items-center justify-center border border-white/5 shrink-0 select-none text-[10px] font-mono text-neutral-400">
- 322 |                   {log.senderIcon === "science" ? "[S]" : log.senderIcon === "code" ? "[C]" : log.senderIcon === "trending_up" ? "[T]" : log.senderIcon === "present_to_all" ? "[U]" : "[G]"}
- 323 |                 </div>
- 324 |                 <div className="flex-1 min-w-0">
- 325 |                   <div className="flex justify-between items-baseline select-none">
- 326 |                     <span className="font-bold text-white uppercase tracking-wider text-[8.5px] leading-none">{log.senderName}</span>
- 327 |                     <span className="text-[7.5px] text-neutral-600 font-mono leading-none">{log.timestamp}</span>
- 328 |                   </div>
- 329 |                   <p className="text-neutral-400 mt-0.5 font-sans leading-relaxed">{log.text}</p>
- 330 |                 </div>
- 331 |               </div>
- 332 |             ))}
- 333 |           </div>
- 334 |         </details>
- 335 |       </div>
- 336 |     );
- 337 |   };
- 338 | 
- 339 |   return (
- 340 |     <div className="flex h-screen w-full bg-black text-[#f5f5f5] overflow-hidden font-sans">
- 341 | 
- 342 |       <aside
- 343 |         className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-30 select-none ${
- 344 |           isSidebarExpanded ? "w-64" : "w-[60px]"
- 345 |         }`}
- 346 |         onClick={(e) => {
- 347 |           if (!isSidebarExpanded) {
- 348 |             const target = e.target as HTMLElement;
- 349 |             if (!target.closest('button, a, input')) {
- 350 |               setIsSidebarExpanded(true);
- 351 |             }
- 352 |           }
- 353 |         }}
- 354 |       >
- 355 |         {/* Top Header Area */}
- 356 |         <div className="flex items-center gap-3 h-16 border-b border-[#1f1f1f] px-4 justify-between">
- 357 |           {isSidebarExpanded ? (
- 358 |             <div className="flex items-center gap-2.5">
- 359 |               <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center">
- 360 |                 <Bot className="w-4 h-4 text-black stroke-[2.5]" />
- 361 |               </div>
- 362 |               <div>
- 363 |                 <h1 className="text-sm font-bold text-white tracking-tight leading-none">Solospace</h1>
- 364 |               </div>
- 365 |             </div>
- 366 |           ) : (
- 367 |             <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center mx-auto">
- 368 |               <Bot className="w-4 h-4 text-black stroke-[2.5]" />
- 369 |             </div>
- 370 |           )}
- 371 |           {isSidebarExpanded && (
- 372 |             <button
- 373 |               onClick={() => setIsSidebarExpanded(false)}
- 374 |               className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"
- 375 |               title="Collapse sidebar"
- 376 |             >
- 377 |               <ChevronLeft className="w-4 h-4" />
- 378 |             </button>
- 379 |           )}
- 380 |         </div>
- 381 | 
- 382 |         {/* Sidebar Nav Buttons */}
- 383 |         <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto custom-scrollbar">
- 384 | 
- 385 | 
- 386 | 
- 387 |           {/* New Chat Button */}
- 388 |           <button
- 389 |             id="new-chat-btn"
- 390 |             onClick={() => {
- 391 |               const ctrl = useWorkflowStore.getState().abortController;
- 392 |               if (ctrl) ctrl.abort();
- 393 | 
- 394 |               setWorkspaceState("home");
- 395 |               setUserQuery("");
- 396 |               useWorkflowStore.setState({
- 397 |                 activeSessionId: null,
- 398 |                 nodes: [],
- 399 |                 edges: [],
- 400 |                 chatMessages: [],
- 401 |                 agentTalkLogs: [],
- 402 |                 executionState: "setup",
- 403 |                 statusMessage: "",
- 404 |                 isThinking: false,
- 405 |                 isOrchestrating: false,
- 406 |                 liveThoughts: "",
- 407 |                 pendingApproval: null,
- 408 |                 followUpSuggestions: [],
- 409 |                 abortController: null
- 410 |               });
- 411 |             }}
- 412 |             onMouseEnter={() => setHoveredSidebarItem("New Chat")}
- 413 |             onMouseLeave={() => setHoveredSidebarItem(null)}
- 414 |             className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${
- 415 |               isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"
- 416 |             }`}
- 417 |           >
- 418 |             <SquarePlus className="w-5 h-5 stroke-[1.8]" />
- 419 |             {isSidebarExpanded && <span className="text-xs font-semibold">New Chat</span>}
- 420 |             {!isSidebarExpanded && hoveredSidebarItem === "New Chat" && (
- 421 |               <div className="absolute left-[64px] bg-[#1a1a1a] border border-[#2d2d2d] py-1 px-2.5 rounded text-[10px] text-white whitespace-nowrap z-50 pointer-events-none shadow-md">
- 422 |                 New Chat
- 423 |               </div>
- 424 |             )}
- 425 |           </button>
- 426 | 
- 427 |           {/* BYOK Button */}
- 428 |           <button
- 429 |             id="byok-sidebar-btn"
- 430 |             onClick={() => setIsSecretOpen(true)}
- 431 |             onMouseEnter={() => setHoveredSidebarItem("BYOK")}
- 432 |             onMouseLeave={() => setHoveredSidebarItem(null)}
- 433 |             className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${
- 434 |               isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"
- 435 |             }`}
- 436 |           >
- 437 |             <Key className="w-5 h-5 stroke-[1.8]" />
- 438 |             {isSidebarExpanded && <span className="text-xs font-semibold">API Keys</span>}
- 439 |             {!isSidebarExpanded && hoveredSidebarItem === "BYOK" && (
- 440 |               <div className="absolute left-[64px] bg-[#1a1a1a] border border-[#2d2d2d] py-1 px-2.5 rounded text-[10px] text-white whitespace-nowrap z-50 pointer-events-none shadow-md">
- 441 |                 Bring Your Own Key
- 442 |               </div>
- 443 |             )}
- 444 |           </button>
- 445 | 
- 446 |           {/* Recents Log */}
- 447 |           {isSidebarExpanded && (
- 448 |             <div className="pt-6 space-y-2 select-none">
- 449 |               <div className="flex items-center gap-1.5 px-3">
- 450 |                 <History className="w-3.5 h-3.5 text-neutral-600" />
- 451 |                 <span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest font-mono">Recents</span>
- 452 |               </div>
- 453 |               <div className="space-y-1 max-h-[220px] overflow-y-auto custom-scrollbar">
- 454 |                 {Object.values(sessions).length === 0 ? (
- 455 |                   <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span>
- 456 |                 ) : (
- 457 |                   Object.values(sessions).reverse().map((s) => (
- 458 |                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
- 459 |                       <button
- 460 |                         disabled={isLoadingSession}
- 461 |                         onClick={async () => {
- 462 |                           setIsLoadingSession(true);
- 463 |                           try {
- 464 |                             await loadSessionFromDb(s.id);
- 465 |                             setWorkspaceState("active");
- 466 |                             setCurrentTab("chat");
- 467 |                           } catch (err) {
- 468 |                             console.error(err);
- 469 |                           } finally {
- 470 |                             setIsLoadingSession(false);
- 471 |                           }
- 472 |                         }}
- 473 |                         className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${
- 474 |                           activeSessionId === s.id
- 475 |                             ? "text-white font-bold"
- 476 |                             : "text-neutral-500 hover:text-white"
- 477 |                         }`}
- 478 |                         title={s.prompt}
- 479 |                       >
- 480 |                         {s.title}
- 481 |                       </button>
- 482 |                       <button
- 483 |                         onClick={async (e) => {
- 484 |                           e.stopPropagation();
- 485 |                           if (confirm(`Are you sure you want to delete "${s.title}"?`)) {
- 486 |                             await deleteSessionFromDb(s.id);
+ 247 |   // Orchestrator — always stays in chat first
+ 248 |   const startOrchestration = (promptText: string) => {
+ 249 |     if (!promptText.trim()) return;
+ 250 |     setWorkspaceState("active");
+ 251 |     setCurrentTab("chat"); // ALWAYS stay in chat
+ 252 | 
+ 253 |     let sessionId = activeSessionId;
+ 254 |     if (!sessionId) {
+ 255 |       sessionId = createSession(promptText, isAutoMode ? "auto" : "custom");
+ 256 |     }
+ 257 | 
+ 258 |     setExecutionState("running");
+ 259 |     triggerSteerOrchestration(promptText, isAutoMode);
+ 260 |     setUserQuery("");
+ 261 |   };
+ 262 | 
+ 263 |   // Node editing actions
+ 264 |   const handleAddRule = () => {
+ 265 |     if (!newRuleText.trim() || !selectedNodeId) return;
+ 266 |     addRule(selectedNodeId, newRuleText.trim());
+ 267 |     setNewRuleText("");
+ 268 |   };
+ 269 | 
+ 270 |   const handleDeleteRule = (ruleIndex: number) => {
+ 271 |     if (!selectedNodeId) return;
+ 272 |     deleteRule(selectedNodeId, ruleIndex);
+ 273 |   };
+ 274 | 
+ 275 |   const activeNodeDetail = nodes.find(n => n.id === selectedNodeId) as any;
+ 276 | 
+ 277 |   // ── Thinking indicator bubble
+ 278 |   const ThinkingBubble = () => (
+ 279 |     <motion.div
+ 280 |       initial={{ opacity: 0, y: 8 }}
+ 281 |       animate={{ opacity: 1, y: 0 }}
+ 282 |       exit={{ opacity: 0, y: -4 }}
+ 283 |       className="flex flex-col gap-1.5 py-2 px-1"
+ 284 |     >
+ 285 |       <div className="flex items-center gap-2">
+ 286 |         <span className="text-xs text-neutral-500 italic">Thinking</span>
+ 287 |         <span className="flex gap-1">
+ 288 |           {[0, 1, 2].map(i => (
+ 289 |             <span
+ 290 |               key={i}
+ 291 |               className="w-1.5 h-1.5 rounded-full bg-neutral-500 animate-bounce"
+ 292 |               style={{ animationDelay: `${i * 0.15}s`, animationDuration: "0.9s" }}
+ 293 |             />
+ 294 |           ))}
+ 295 |         </span>
+ 296 |       </div>
+ 297 |       {statusMessage && (
+ 298 |         <span className="text-[10px] font-mono text-neutral-600 pl-0.5 truncate max-w-sm">
+ 299 |           {statusMessage}
+ 300 |         </span>
+ 301 |       )}
+ 302 |       {liveThoughts && (
+ 303 |         <div className="mt-1 text-[10px] text-neutral-500 font-sans leading-relaxed max-w-lg whitespace-pre-wrap border-l-2 border-neutral-800 pl-2">
+ 304 |           {liveThoughts.slice(-400)}
+ 305 |         </div>
+ 306 |       )}
+ 307 |     </motion.div>
+ 308 |   );
+ 309 | 
+ 310 |   // ── Collapsible agent trace (real data from backend)
+ 311 |   const AgentTraceBlock = ({ logs, thinkingSummary }: { logs: AgentTalkLog[], thinkingSummary?: string }) => {
+ 312 |     if (logs.length === 0 && !thinkingSummary) return null;
+ 313 |     return (
+ 314 |       <div className="border border-[#1f1f1f] rounded-xl overflow-hidden bg-[#050505] mt-3 max-w-2xl w-full">
+ 315 |         <details className="group" open>
+ 316 |           <summary className="flex items-center justify-between p-3 cursor-pointer select-none text-[11px] font-semibold text-neutral-500 hover:text-white hover:bg-neutral-900/40 transition-colors">
+ 317 |             <div className="flex items-center gap-2">
+ 318 |               <Sparkles className="w-3 h-3 text-neutral-500 group-hover:text-cyan-400 transition-colors" />
+ 319 |               <span className="font-mono text-[10px] tracking-wider uppercase">Agent Trace & Thinking</span>
+ 320 |             </div>
+ 321 |             <div className="flex items-center gap-2">
+ 322 |               {logs.length > 0 && <span className="text-[9px] text-neutral-600 font-mono">{logs.length} specialist{logs.length !== 1 ? "s" : ""}</span>}
+ 323 |               <ChevronRight className="w-3.5 h-3.5 text-neutral-600 group-open:rotate-90 transition-transform" />
+ 324 |             </div>
+ 325 |           </summary>
+ 326 |           <div className="border-t border-[#1f1f1f] p-3 space-y-3 bg-[#030303]">
+ 327 |             {thinkingSummary && (
+ 328 |               <div className="space-y-1.5 pb-2 border-b border-[#0d0d0d] last:border-0 last:pb-0">
+ 329 |                 <span className="text-[9px] font-mono text-neutral-500 font-bold uppercase tracking-wider">Reasoning Process</span>
+ 330 |                 <p className="text-[11px] text-neutral-400 leading-relaxed font-sans whitespace-pre-wrap">
+ 331 |                   {thinkingSummary}
+ 332 |                 </p>
+ 333 |               </div>
+ 334 |             )}
+ 335 |             {logs.map((log) => (
+ 336 |               <div key={log.id} className="flex gap-2 items-start text-[10.5px] leading-relaxed border-b border-[#0d0d0d] pb-2 last:border-0 last:pb-0">
+ 337 |                 <div className="w-5 h-5 rounded-md bg-neutral-900 flex items-center justify-center border border-white/5 shrink-0 select-none text-[10px] font-mono text-neutral-400">
+ 338 |                   {log.senderIcon === "science" ? "[S]" : log.senderIcon === "code" ? "[C]" : log.senderIcon === "trending_up" ? "[T]" : log.senderIcon === "present_to_all" ? "[U]" : "[G]"}
+ 339 |                 </div>
+ 340 |                 <div className="flex-1 min-w-0">
+ 341 |                   <div className="flex justify-between items-baseline select-none">
+ 342 |                     <span className="font-bold text-white uppercase tracking-wider text-[8.5px] leading-none">{log.senderName}</span>
+ 343 |                     <span className="text-[7.5px] text-neutral-600 font-mono leading-none">{log.timestamp}</span>
+ 344 |                   </div>
+ 345 |                   <p className="text-neutral-400 mt-0.5 font-sans leading-relaxed">{log.text}</p>
+ 346 |                 </div>
+ 347 |               </div>
+ 348 |             ))}
+ 349 |           </div>
+ 350 |         </details>
+ 351 |       </div>
+ 352 |     );
+ 353 |   };
+ 354 | 
+ 355 |   return (
+ 356 |     <div className="flex h-screen w-full bg-black text-[#f5f5f5] overflow-hidden font-sans">
+ 357 | 
+ 358 |       <aside
+ 359 |         className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-30 select-none ${
+ 360 |           isSidebarExpanded ? "w-64" : "w-[60px]"
+ 361 |         }`}
+ 362 |         onClick={(e) => {
+ 363 |           if (!isSidebarExpanded) {
+ 364 |             const target = e.target as HTMLElement;
+ 365 |             if (!target.closest('button, a, input')) {
+ 366 |               setIsSidebarExpanded(true);
+ 367 |             }
+ 368 |           }
+ 369 |         }}
+ 370 |       >
+ 371 |         {/* Top Header Area */}
+ 372 |         <div className="flex items-center gap-3 h-16 border-b border-[#1f1f1f] px-4 justify-between">
+ 373 |           {isSidebarExpanded ? (
+ 374 |             <div className="flex items-center gap-2.5">
+ 375 |               <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center">
+ 376 |                 <Bot className="w-4 h-4 text-black stroke-[2.5]" />
+ 377 |               </div>
+ 378 |               <div>
+ 379 |                 <h1 className="text-sm font-bold text-white tracking-tight leading-none">Solospace</h1>
+ 380 |               </div>
+ 381 |             </div>
+ 382 |           ) : (
+ 383 |             <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center mx-auto">
+ 384 |               <Bot className="w-4 h-4 text-black stroke-[2.5]" />
+ 385 |             </div>
+ 386 |           )}
+ 387 |           {isSidebarExpanded && (
+ 388 |             <button
+ 389 |               onClick={() => setIsSidebarExpanded(false)}
+ 390 |               className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"
+ 391 |               title="Collapse sidebar"
+ 392 |             >
+ 393 |               <ChevronLeft className="w-4 h-4" />
+ 394 |             </button>
+ 395 |           )}
+ 396 |         </div>
+ 397 | 
+ 398 |         {/* Sidebar Nav Buttons */}
+ 399 |         <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto custom-scrollbar">
+ 400 | 
+ 401 | 
+ 402 | 
+ 403 |           {/* New Chat Button */}
+ 404 |           <button
+ 405 |             id="new-chat-btn"
+ 406 |             onClick={() => {
+ 407 |               const ctrl = useWorkflowStore.getState().abortController;
+ 408 |               if (ctrl) ctrl.abort();
+ 409 | 
+ 410 |               setWorkspaceState("home");
+ 411 |               setUserQuery("");
+ 412 |               useWorkflowStore.setState({
+ 413 |                 activeSessionId: null,
+ 414 |                 nodes: [],
+ 415 |                 edges: [],
+ 416 |                 chatMessages: [],
+ 417 |                 agentTalkLogs: [],
+ 418 |                 executionState: "setup",
+ 419 |                 statusMessage: "",
+ 420 |                 isThinking: false,
+ 421 |                 isOrchestrating: false,
+ 422 |                 liveThoughts: "",
+ 423 |                 pendingApproval: null,
+ 424 |                 followUpSuggestions: [],
+ 425 |                 abortController: null
+ 426 |               });
+ 427 |             }}
+ 428 |             onMouseEnter={() => setHoveredSidebarItem("New Chat")}
+ 429 |             onMouseLeave={() => setHoveredSidebarItem(null)}
+ 430 |             className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${
+ 431 |               isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"
+ 432 |             }`}
+ 433 |           >
+ 434 |             <SquarePlus className="w-5 h-5 stroke-[1.8]" />
+ 435 |             {isSidebarExpanded && <span className="text-xs font-semibold">New Chat</span>}
+ 436 |             {!isSidebarExpanded && hoveredSidebarItem === "New Chat" && (
+ 437 |               <div className="absolute left-[64px] bg-[#1a1a1a] border border-[#2d2d2d] py-1 px-2.5 rounded text-[10px] text-white whitespace-nowrap z-50 pointer-events-none shadow-md">
+ 438 |                 New Chat
+ 439 |               </div>
+ 440 |             )}
+ 441 |           </button>
+ 442 | 
+ 443 |           {/* BYOK Button */}
+ 444 |           <button
+ 445 |             id="byok-sidebar-btn"
+ 446 |             onClick={() => setIsSecretOpen(true)}
+ 447 |             onMouseEnter={() => setHoveredSidebarItem("BYOK")}
+ 448 |             onMouseLeave={() => setHoveredSidebarItem(null)}
+ 449 |             className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${
+ 450 |               isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"
+ 451 |             }`}
+ 452 |           >
+ 453 |             <Key className="w-5 h-5 stroke-[1.8]" />
+ 454 |             {isSidebarExpanded && <span className="text-xs font-semibold">API Keys</span>}
+ 455 |             {!isSidebarExpanded && hoveredSidebarItem === "BYOK" && (
+ 456 |               <div className="absolute left-[64px] bg-[#1a1a1a] border border-[#2d2d2d] py-1 px-2.5 rounded text-[10px] text-white whitespace-nowrap z-50 pointer-events-none shadow-md">
+ 457 |                 Bring Your Own Key
+ 458 |               </div>
+ 459 |             )}
+ 460 |           </button>
+ 461 | 
+ 462 |           {/* Recents Log */}
+ 463 |           {isSidebarExpanded && (
+ 464 |             <div className="pt-6 space-y-2 select-none">
+ 465 |               <div className="flex items-center gap-1.5 px-3">
+ 466 |                 <History className="w-3.5 h-3.5 text-neutral-600" />
+ 467 |                 <span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest font-mono">Recents</span>
+ 468 |               </div>
+ 469 |               <div className="space-y-1 max-h-[220px] overflow-y-auto custom-scrollbar">
+ 470 |                 {Object.values(sessions).length === 0 ? (
+ 471 |                   <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span>
+ 472 |                 ) : (
+ 473 |                   Object.values(sessions).reverse().map((s) => (
+ 474 |                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
+ 475 |                       <button
+ 476 |                         disabled={isLoadingSession}
+ 477 |                         onClick={async () => {
+ 478 |                           setIsLoadingSession(true);
+ 479 |                           try {
+ 480 |                             await loadSessionFromDb(s.id);
+ 481 |                             setWorkspaceState("active");
+ 482 |                             setCurrentTab("chat");
+ 483 |                           } catch (err) {
+ 484 |                             console.error(err);
+ 485 |                           } finally {
+ 486 |                             setIsLoadingSession(false);
  487 |                           }
  488 |                         }}
- 489 |                         className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"
- 490 |                         title="Delete Chat"
- 491 |                       >
- 492 |                         <Trash2 className="w-3.5 h-3.5" />
- 493 |                       </button>
- 494 |                     </div>
- 495 |                   ))
- 496 |                 )}
- 497 |               </div>
- 498 |             </div>
- 499 |           )}
- 500 |         </nav>
- 501 | 
- 502 |         {/* Sidebar Footer */}
- 503 |         <div className="p-2 border-t border-[#1f1f1f] space-y-1 select-none">
- 504 |           <button
- 505 |             onClick={() => alert("Settings panel coming soon.")}
- 506 |             className={`w-full flex items-center rounded-lg hover:bg-neutral-900 transition-colors py-2 cursor-pointer ${
- 507 |               isSidebarExpanded ? "px-3 gap-3 text-neutral-400 hover:text-white" : "justify-center text-neutral-400 hover:text-white"
- 508 |             }`}
- 509 |           >
- 510 |             <Settings className="w-4 h-4" />
- 511 |             {isSidebarExpanded && <span className="text-xs">Settings</span>}
- 512 |           </button>
- 513 |           <button
- 514 |             onClick={() => setIsProfileOpen(true)}
- 515 |             className={`w-full flex items-center rounded-lg hover:bg-neutral-900 transition-colors py-2 cursor-pointer ${
- 516 |               isSidebarExpanded ? "px-3 gap-3 text-neutral-400 hover:text-white" : "justify-center text-neutral-400 hover:text-white"
- 517 |             }`}
- 518 |           >
- 519 |             <div className="w-6 h-6 rounded-full bg-neutral-800 flex items-center justify-center shrink-0 border border-neutral-700">
- 520 |               <User className="w-3.5 h-3.5 text-neutral-300" />
- 521 |             </div>
- 522 |             {isSidebarExpanded && <span className="text-xs truncate font-medium">Profile</span>}
- 523 |           </button>
- 524 |         </div>
- 525 |       </aside>
- 526 | 
- 527 |       <main className="flex-1 flex flex-col min-w-0 bg-[#000000] relative transition-all duration-300">
- 528 | 
- 529 |         {/* Header */}
- 530 |         <header className="flex justify-between items-center w-full px-6 h-16 border-b border-[#141414] shrink-0 z-10 bg-black/85 backdrop-blur-md">
- 531 |           <div className="flex items-center gap-2">
- 532 |           </div>
- 533 | 
- 534 |           {/* Tab Switcher — Chat always left, Flow/Arena only visible when complex task ran */}
- 535 |           <div className="flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-[2px] rounded-full select-none">
- 536 |             <button
- 537 |               id="tab-chat"
- 538 |               onClick={() => {
- 539 |                 if (workspaceState === "home") return;
- 540 |                 setCurrentTab("chat");
- 541 |               }}
- 542 |               className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
- 543 |                 currentTab === "chat" || workspaceState === "home"
- 544 |                   ? "bg-neutral-800 text-white"
- 545 |                   : "text-neutral-400 hover:text-white"
- 546 |               }`}
- 547 |             >
- 548 |               Chat
- 549 |             </button>
- 550 |             {/* Flow tab only shown when complex task (nodes exist) */}
- 551 |             {workspaceState === "active" && (
- 552 |               <button
- 553 |                 id="tab-flow"
- 554 |                 onClick={() => setCurrentTab("arena")}
- 555 |                 className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
- 556 |                   currentTab === "arena"
- 557 |                     ? "bg-neutral-800 text-white"
- 558 |                     : "text-neutral-400 hover:text-white"
- 559 |                 }`}
- 560 |               >
- 561 |                 <GitFork className="w-3 h-3" />
- 562 |                 Flow
- 563 |                 {nodes.length > 0 && (
- 564 |                   <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse ml-0.5" />
- 565 |                 )}
- 566 |               </button>
- 567 |             )}
- 568 |           </div>
- 569 | 
- 570 |           {/* Right Header Controls */}
- 571 |           <div className="flex items-center gap-4 select-none">
- 572 |             <button
- 573 |               onClick={() => alert("Solospace — AI-powered assistant. Enter any prompt to get a complete, detailed response. For complex tasks, use the Flow tab to inspect the multi-agent pipeline.")}
- 574 |               className="text-neutral-400 hover:text-white p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer"
- 575 |             >
- 576 |               <HelpCircle className="w-4 h-4 stroke-[1.8]" />
- 577 |             </button>
- 578 |           </div>
- 579 |         </header>
- 580 | 
- 581 |         {/* View Layout */}
- 582 |         <div className="flex-1 relative overflow-hidden">
- 583 | 
- 584 |           {/* A. HOME SCREEN */}
- 585 |           {workspaceState === "home" && (
- 586 |             <div className="absolute inset-0 flex flex-col justify-between overflow-y-auto custom-scrollbar">
- 587 |               <div />
- 588 |               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
- 589 |                 <div className="text-center mb-10 space-y-2 select-none">
- 590 |                   <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">
- 591 |                     What&apos;s on your mind?
- 592 |                   </h1>
- 593 |                   <p className="text-sm text-neutral-400 font-sans">
- 594 |                     Ask anything. Get a real, complete answer instantly.
- 595 |                   </p>
- 596 |                 </div>
- 597 | 
- 598 |                 {/* Search Bar */}
- 599 |                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
- 600 |                   <div className="flex items-center gap-3">
- 601 |                     <button
- 602 |                       onClick={() => alert("File attachment coming soon.")}
- 603 |                       className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"
- 604 |                       title="Attach File"
- 605 |                     >
- 606 |                       <UploadCloud className="w-5 h-5 stroke-[1.8]" />
- 607 |                     </button>
- 608 |                     <textarea
- 609 |                       id="home-prompt-input"
- 610 |                       rows={1}
- 611 |                       value={userQuery}
- 612 |                       onChange={(e) => setUserQuery(e.target.value)}
- 613 |                       onKeyDown={(e) => {
- 614 |                         if (e.key === "Enter" && !e.shiftKey) {
- 615 |                           e.preventDefault();
- 616 |                           if (userQuery.trim()) startOrchestration(userQuery);
- 617 |                         }
- 618 |                       }}
- 619 |                       placeholder="Describe your idea, problem, or question..."
- 620 |                       className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar"
- 621 |                       style={{ maxHeight: "150px" }}
- 622 |                     />
- 623 |                     <div className="flex items-center gap-1.5 shrink-0">
- 624 |                       <button
- 625 |                         onClick={() => alert("Voice input coming soon.")}
- 626 |                         className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors cursor-pointer"
- 627 |                         title="Voice Input"
- 628 |                       >
- 629 |                         <Mic className="w-5 h-5 stroke-[1.8]" />
- 630 |                       </button>
- 631 |                       <button
- 632 |                         id="home-send-btn"
- 633 |                         onClick={() => startOrchestration(userQuery)}
- 634 |                         disabled={!userQuery.trim()}
- 635 |                         className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"
- 636 |                         title="Send prompt"
- 637 |                       >
- 638 |                         <ArrowRight className="w-4 h-4 text-black stroke-[3]" />
- 639 |                       </button>
- 640 |                     </div>
- 641 |                   </div>
- 642 |                 </div>
- 643 | 
- 644 |                 {/* Mode Selector */}
- 645 |                 <div className="flex items-center gap-3 mt-5 select-none">
- 646 |                   <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">Mode:</span>
- 647 |                   <button
- 648 |                     onClick={() => setIsAutoMode(true)}
- 649 |                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${
- 650 |                       isAutoMode
- 651 |                         ? "bg-white text-black border-white font-bold"
- 652 |                         : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"
- 653 |                     }`}
- 654 |                   >
- 655 |                     <Zap className="w-3 h-3 stroke-[2]" />
- 656 |                     <span>Auto Agent</span>
- 657 |                   </button>
- 658 |                   <button
- 659 |                     onClick={() => setIsAutoMode(false)}
- 660 |                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${
- 661 |                       !isAutoMode
- 662 |                         ? "bg-white text-black border-white font-bold"
- 663 |                         : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"
- 664 |                     }`}
- 665 |                   >
- 666 |                     <Sliders className="w-3 h-3" />
- 667 |                     <span>Custom Agent</span>
- 668 |                   </button>
- 669 |                 </div>
- 670 |               </div>
- 671 |               <div />
- 672 |             </div>
- 673 |           )}
- 674 | 
- 675 |           {/* B. ACTIVE WORKSPACE */}
- 676 |           {workspaceState === "active" && (
- 677 |             <div className="absolute inset-0 flex">
- 678 | 
- 679 |               {/* VIEW 1: CHAT (Primary — always shown first) */}
- 680 |               {currentTab === "chat" && (
- 681 |                 <div className="flex-1 flex flex-col justify-between overflow-hidden bg-black">
- 682 | 
- 683 |                   {/* Chat messages */}
- 684 |                   <div
- 685 |                     ref={chatContainerRef}
- 686 |                     onScroll={handleScroll}
- 687 |                     className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4"
- 688 |                   >
- 689 |                     {isLoadingSession ? (
- 690 |                       <div className="flex items-center justify-center h-full">
- 691 |                         <div className="flex flex-col items-center gap-3 text-neutral-500">
- 692 |                           <div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
- 693 |                           <span className="text-xs font-semibold">Loading Session...</span>
- 694 |                         </div>
- 695 |                       </div>
- 696 |                     ) : (
- 697 |                       <div className="max-w-5xl mx-auto space-y-4 select-text">
+ 489 |                         className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${
+ 490 |                           activeSessionId === s.id
+ 491 |                             ? "text-white font-bold"
+ 492 |                             : "text-neutral-500 hover:text-white"
+ 493 |                         }`}
+ 494 |                         title={s.prompt}
+ 495 |                       >
+ 496 |                         {s.title}
+ 497 |                       </button>
+ 498 |                       <button
+ 499 |                         onClick={async (e) => {
+ 500 |                           e.stopPropagation();
+ 501 |                           if (confirm(`Are you sure you want to delete "${s.title}"?`)) {
+ 502 |                             await deleteSessionFromDb(s.id);
+ 503 |                           }
+ 504 |                         }}
+ 505 |                         className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"
+ 506 |                         title="Delete Chat"
+ 507 |                       >
+ 508 |                         <Trash2 className="w-3.5 h-3.5" />
+ 509 |                       </button>
+ 510 |                     </div>
+ 511 |                   ))
+ 512 |                 )}
+ 513 |               </div>
+ 514 |             </div>
+ 515 |           )}
+ 516 |         </nav>
+ 517 | 
+ 518 |         {/* Sidebar Footer */}
+ 519 |         <div className="p-2 border-t border-[#1f1f1f] space-y-1 select-none">
+ 520 |           <button
+ 521 |             onClick={() => alert("Settings panel coming soon.")}
+ 522 |             className={`w-full flex items-center rounded-lg hover:bg-neutral-900 transition-colors py-2 cursor-pointer ${
+ 523 |               isSidebarExpanded ? "px-3 gap-3 text-neutral-400 hover:text-white" : "justify-center text-neutral-400 hover:text-white"
+ 524 |             }`}
+ 525 |           >
+ 526 |             <Settings className="w-4 h-4" />
+ 527 |             {isSidebarExpanded && <span className="text-xs">Settings</span>}
+ 528 |           </button>
+ 529 |           <button
+ 530 |             onClick={() => setIsProfileOpen(true)}
+ 531 |             className={`w-full flex items-center rounded-lg hover:bg-neutral-900 transition-colors py-2 cursor-pointer ${
+ 532 |               isSidebarExpanded ? "px-3 gap-3 text-neutral-400 hover:text-white" : "justify-center text-neutral-400 hover:text-white"
+ 533 |             }`}
+ 534 |           >
+ 535 |             <div className="w-6 h-6 rounded-full bg-neutral-800 flex items-center justify-center shrink-0 border border-neutral-700">
+ 536 |               <User className="w-3.5 h-3.5 text-neutral-300" />
+ 537 |             </div>
+ 538 |             {isSidebarExpanded && <span className="text-xs truncate font-medium">Profile</span>}
+ 539 |           </button>
+ 540 |         </div>
+ 541 |       </aside>
+ 542 | 
+ 543 |       <main className="flex-1 flex flex-col min-w-0 bg-[#000000] relative transition-all duration-300">
+ 544 | 
+ 545 |         {/* Header */}
+ 546 |         <header className="flex justify-between items-center w-full px-6 h-16 border-b border-[#141414] shrink-0 z-10 bg-black/85 backdrop-blur-md">
+ 547 |           <div className="flex items-center gap-2">
+ 548 |           </div>
+ 549 | 
+ 550 |           {/* Tab Switcher — Chat always left, Flow/Arena only visible when complex task ran */}
+ 551 |           <div className="flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-[2px] rounded-full select-none">
+ 552 |             <button
+ 553 |               id="tab-chat"
+ 554 |               onClick={() => {
+ 555 |                 if (workspaceState === "home") return;
+ 556 |                 setCurrentTab("chat");
+ 557 |               }}
+ 558 |               className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+ 559 |                 currentTab === "chat" || workspaceState === "home"
+ 560 |                   ? "bg-neutral-800 text-white"
+ 561 |                   : "text-neutral-400 hover:text-white"
+ 562 |               }`}
+ 563 |             >
+ 564 |               Chat
+ 565 |             </button>
+ 566 |             {/* Flow tab only shown when complex task (nodes exist) */}
+ 567 |             {workspaceState === "active" && (
+ 568 |               <button
+ 569 |                 id="tab-flow"
+ 570 |                 onClick={() => setCurrentTab("arena")}
+ 571 |                 className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+ 572 |                   currentTab === "arena"
+ 573 |                     ? "bg-neutral-800 text-white"
+ 574 |                     : "text-neutral-400 hover:text-white"
+ 575 |                 }`}
+ 576 |               >
+ 577 |                 <GitFork className="w-3 h-3" />
+ 578 |                 Flow
+ 579 |                 {nodes.length > 0 && (
+ 580 |                   <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse ml-0.5" />
+ 581 |                 )}
+ 582 |               </button>
+ 583 |             )}
+ 584 |           </div>
+ 585 | 
+ 586 |           {/* Right Header Controls */}
+ 587 |           <div className="flex items-center gap-4 select-none">
+ 588 |             <button
+ 589 |               onClick={() => alert("Solospace — AI-powered assistant. Enter any prompt to get a complete, detailed response. For complex tasks, use the Flow tab to inspect the multi-agent pipeline.")}
+ 590 |               className="text-neutral-400 hover:text-white p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer"
+ 591 |             >
+ 592 |               <HelpCircle className="w-4 h-4 stroke-[1.8]" />
+ 593 |             </button>
+ 594 |           </div>
+ 595 |         </header>
+ 596 | 
+ 597 |         {/* View Layout */}
+ 598 |         <div className="flex-1 relative overflow-hidden">
+ 599 | 
+ 600 |           {/* A. HOME SCREEN */}
+ 601 |           {workspaceState === "home" && (
+ 602 |             <div className="absolute inset-0 flex flex-col justify-between overflow-y-auto custom-scrollbar">
+ 603 |               <div />
+ 604 |               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
+ 605 |                 <div className="text-center mb-10 space-y-2 select-none">
+ 606 |                   <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">
+ 607 |                     What&apos;s on your mind?
+ 608 |                   </h1>
+ 609 |                   <p className="text-sm text-neutral-400 font-sans">
+ 610 |                     Ask anything. Get a real, complete answer instantly.
+ 611 |                   </p>
+ 612 |                 </div>
+ 613 | 
+ 614 |                 {/* Search Bar */}
+ 615 |                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
+ 616 |                   <div className="flex items-center gap-3">
+ 617 |                     <button
+ 618 |                       onClick={() => alert("File attachment coming soon.")}
+ 619 |                       className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"
+ 620 |                       title="Attach File"
+ 621 |                     >
+ 622 |                       <UploadCloud className="w-5 h-5 stroke-[1.8]" />
+ 623 |                     </button>
+ 624 |                     <textarea
+ 625 |                       id="home-prompt-input"
+ 626 |                       rows={1}
+ 627 |                       value={userQuery}
+ 628 |                       onChange={(e) => setUserQuery(e.target.value)}
+ 629 |                       onKeyDown={(e) => {
+ 630 |                         if (e.key === "Enter" && !e.shiftKey) {
+ 631 |                           e.preventDefault();
+ 632 |                           if (userQuery.trim()) startOrchestration(userQuery);
+ 633 |                         }
+ 634 |                       }}
+ 635 |                       placeholder="Describe your idea, problem, or question..."
+ 636 |                       className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar"
+ 637 |                       style={{ maxHeight: "150px" }}
+ 638 |                     />
+ 639 |                     <div className="flex items-center gap-1.5 shrink-0">
+ 640 |                       <button
+ 641 |                         onClick={() => alert("Voice input coming soon.")}
+ 642 |                         className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors cursor-pointer"
+ 643 |                         title="Voice Input"
+ 644 |                       >
+ 645 |                         <Mic className="w-5 h-5 stroke-[1.8]" />
+ 646 |                       </button>
+ 647 |                       <button
+ 648 |                         id="home-send-btn"
+ 649 |                         onClick={() => startOrchestration(userQuery)}
+ 650 |                         disabled={!userQuery.trim()}
+ 651 |                         className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"
+ 652 |                         title="Send prompt"
+ 653 |                       >
+ 654 |                         <ArrowRight className="w-4 h-4 text-black stroke-[3]" />
+ 655 |                       </button>
+ 656 |                     </div>
+ 657 |                   </div>
+ 658 |                 </div>
+ 659 | 
+ 660 |                 {/* Mode Selector */}
+ 661 |                 <div className="flex items-center gap-3 mt-5 select-none">
+ 662 |                   <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">Mode:</span>
+ 663 |                   <button
+ 664 |                     onClick={() => setIsAutoMode(true)}
+ 665 |                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${
+ 666 |                       isAutoMode
+ 667 |                         ? "bg-white text-black border-white font-bold"
+ 668 |                         : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"
+ 669 |                     }`}
+ 670 |                   >
+ 671 |                     <Zap className="w-3 h-3 stroke-[2]" />
+ 672 |                     <span>Auto Agent</span>
+ 673 |                   </button>
+ 674 |                   <button
+ 675 |                     onClick={() => setIsAutoMode(false)}
+ 676 |                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${
+ 677 |                       !isAutoMode
+ 678 |                         ? "bg-white text-black border-white font-bold"
+ 679 |                         : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"
+ 680 |                     }`}
+ 681 |                   >
+ 682 |                     <Sliders className="w-3 h-3" />
+ 683 |                     <span>Custom Agent</span>
+ 684 |                   </button>
+ 685 |                 </div>
+ 686 |               </div>
+ 687 |               <div />
+ 688 |             </div>
+ 689 |           )}
+ 690 | 
+ 691 |           {/* B. ACTIVE WORKSPACE */}
+ 692 |           {workspaceState === "active" && (
+ 693 |             <div className="absolute inset-0 flex">
+ 694 | 
+ 695 |               {/* VIEW 1: CHAT (Primary — always shown first) */}
+ 696 |               {currentTab === "chat" && (
+ 697 |                 <div className="flex-1 flex flex-col justify-between overflow-hidden bg-black">
  698 | 
- 699 |                       {chatMessages.map((msg, msgIdx) => (
- 700 |                         <motion.div
- 701 |                           key={msg.id}
- 702 |                           initial={{ opacity: 0, y: 12 }}
- 703 |                           animate={{ opacity: 1, y: 0 }}
- 704 |                           transition={{ duration: 0.3 }}
- 705 |                           className={`flex w-full ${msg.sender === "user" ? "justify-end" : "justify-start"}`}
- 706 |                         >
- 707 |                           {msg.sender === "user" ? (
- 708 |                             <div className="max-w-[72%] rounded-3xl px-5 py-3 bg-[#2f2f2f] text-neutral-100 text-sm leading-relaxed">
- 709 |                               <p className="whitespace-pre-wrap">{msg.text}</p>
- 710 |                             </div>
- 711 |                           ) : (
- 712 |                             <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
- 713 |                               <div className="w-full text-neutral-100 text-sm leading-relaxed px-1 py-2">
- 714 |                                 <MarkdownRenderer content={msg.text || "*Streaming response...*"} />
- 715 |                                 
- 716 |                                 {/* Action Buttons for AI Response */}
- 717 |                                 {msg.text && (
- 718 |                                   <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
- 719 |                                     <button
- 720 |                                       onClick={() => copyToClipboard(msg.text, msg.id)}
- 721 |                                       className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800"
- 722 |                                       title="Copy response"
- 723 |                                     >
- 724 |                                       {copiedMsgId === msg.id ? (
- 725 |                                         <>
- 726 |                                           <Check className="w-3.5 h-3.5 text-emerald-400" />
- 727 |                                           <span className="text-emerald-400 font-medium">Copied</span>
- 728 |                                         </>
- 729 |                                       ) : (
- 730 |                                         <>
- 731 |                                           <Copy className="w-3.5 h-3.5" />
- 732 |                                           <span>Copy</span>
- 733 |                                         </>
- 734 |                                       )}
- 735 |                                     </button>
- 736 |                                     {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && (
- 737 |                                       <button
- 738 |                                         onClick={() => {
- 739 |                                           const lastUser = chatMessages.slice().reverse().find(m => m.sender === "user");
- 740 |                                           if (lastUser) {
- 741 |                                             setChatMessages(prev => {
- 742 |                                               const lastAiIdx = prev.map((m, i) => m.sender === 'ai' ? i : -1).filter(i => i >= 0).pop();
- 743 |                                               if (lastAiIdx !== undefined) {
- 744 |                                                 return prev.filter((_, i) => i !== lastAiIdx);
- 745 |                                               }
- 746 |                                               return prev;
- 747 |                                             });
- 748 |                                             startOrchestration(lastUser.text);
- 749 |                                           }
- 750 |                                         }}
- 751 |                                         className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800"
- 752 |                                         title="Regenerate response"
- 753 |                                       >
- 754 |                                         <Zap className="w-3.5 h-3.5" />
- 755 |                                         <span>Regenerate</span>
- 756 |                                       </button>
- 757 |                                     )}
- 758 |                                   </div>
- 759 |                                 )}
- 760 |                               </div>
- 761 | 
- 762 |                               {/* Collapsible trace block and see flow buttons outside bubble */}
- 763 |                               {msgIdx === chatMessages.length - 1 && (
- 764 |                                 <div className="space-y-3 pt-1 w-full">
- 765 |                                   <AgentTraceBlock
- 766 |                                     logs={agentTalkLogs}
- 767 |                                     thinkingSummary={msg.thinkingSummary}
- 768 |                                   />
- 769 |                                   
- 770 |                                   {!isThinking && !isOrchestrating && nodes.length > 0 && (
- 771 |                                     <div className="flex flex-wrap gap-2 pt-1">
- 772 |                                       <button
- 773 |                                         id="see-flow-btn"
- 774 |                                         onClick={() => setCurrentTab("arena")}
- 775 |                                         className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max select-none"
- 776 |                                       >
- 777 |                                         <GitFork className="w-3.5 h-3.5 text-cyan-400" />
- 778 |                                         <span>See Agent Flow</span>
- 779 |                                         <span className="text-[9px] font-mono text-neutral-600">({nodes.length} agents)</span>
- 780 |                                       </button>
- 781 | 
- 782 |                                       {!isAutoMode && (
- 783 |                                         <button
- 784 |                                           onClick={() => setCurrentTab("arena")}
- 785 |                                           className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-neutral-500 rounded-xl text-xs font-semibold text-neutral-400 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max select-none"
- 786 |                                         >
- 787 |                                           <Sliders className="w-3.5 h-3.5" />
- 788 |                                           <span>Customize Agents</span>
- 789 |                                         </button>
- 790 |                                       )}
- 791 |                                     </div>
- 792 |                                   )}
- 793 | 
- 794 |                                   {!isThinking && !isOrchestrating && followUpSuggestions && followUpSuggestions.length > 0 && (
- 795 |                                     <div className="flex flex-wrap gap-2 pt-2 select-none">
- 796 |                                       <span className="text-[9px] font-mono text-neutral-500 uppercase tracking-wider self-center">Suggestions:</span>
- 797 |                                       {followUpSuggestions.map((suggestion, idx) => (
- 798 |                                         <button
- 799 |                                           key={idx}
- 800 |                                           onClick={() => {
- 801 |                                             setUserQuery(suggestion);
- 802 |                                             startOrchestration(suggestion);
- 803 |                                           }}
- 804 |                                           className="px-3 py-1.5 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/30 rounded-full text-[10px] text-neutral-400 hover:text-white transition-all cursor-pointer animate-fade-in"
- 805 |                                         >
- 806 |                                           {suggestion}
- 807 |                                         </button>
- 808 |                                       ))}
- 809 |                                     </div>
- 810 |                                   )}
- 811 |                                 </div>
- 812 |                               )}
- 813 |                             </div>
- 814 |                           )}
- 815 |                         </motion.div>
- 816 |                       ))}
- 817 | 
- 818 |                       {/* Thinking indicator */}
- 819 |                       <AnimatePresence>
- 820 |                         {isThinking && <ThinkingBubble />}
- 821 |                       </AnimatePresence>
- 822 | 
- 823 |                       {/* Auto-scroll anchor */}
- 824 |                       <div ref={chatEndRef} />
- 825 |                     </div>
- 826 |                     )}
- 827 |                   </div>
- 828 | 
- 829 |                   {/* Bottom input bar */}
- 830 |                   <div className="px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
- 831 |                     {!isAutoMode && workspaceState === "active" && (
- 832 |                       <div className="text-[10px] font-mono text-amber-400 bg-amber-950/30 px-3 py-1 rounded-full self-center border border-amber-500/20 max-w-max select-none">
- 833 |                         Planning Mode – Edit agents in Flow, then click Proceed
- 834 |                       </div>
- 835 |                     )}
- 836 |                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
- 837 |                       <textarea
- 838 |                         ref={textareaRef}
- 839 |                         id="chat-prompt-input"
- 840 |                         rows={1}
- 841 |                         value={userQuery}
- 842 |                         onChange={(e) => setUserQuery(e.target.value)}
- 843 |                         onKeyDown={(e) => {
- 844 |                           if (e.key === "Enter" && !e.shiftKey) {
- 845 |                             e.preventDefault();
- 846 |                             if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery);
- 847 |                           }
- 848 |                         }}
- 849 |                         placeholder={isOrchestrating ? "Streaming response..." : (isAutoMode ? "Ask a follow-up or new question..." : "Enter a new idea to generate agents (no auto-run)...")}
- 850 |                         disabled={isOrchestrating}
- 851 |                         className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar"
- 852 |                       />
- 853 |                       {isOrchestrating ? (
- 854 |                         <button
- 855 |                           onClick={cancelOrchestration}
- 856 |                           className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all font-semibold cursor-pointer shrink-0"
- 857 |                           title="Stop generating"
- 858 |                         >
- 859 |                           <Square className="w-3.5 h-3.5 text-white fill-white" />
- 860 |                         </button>
- 861 |                       ) : (
- 862 |                         <button
- 863 |                           id="chat-send-btn"
- 864 |                           onClick={() => startOrchestration(userQuery)}
- 865 |                           disabled={!userQuery.trim() || isThinking}
- 866 |                           className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer shrink-0"
- 867 |                           title="Send message"
- 868 |                         >
- 869 |                           <ArrowRight className="w-4 h-4 text-black stroke-[3]" />
- 870 |                         </button>
- 871 |                       )}
- 872 |                     </div>
- 873 |                   </div>
- 874 |                 </div>
- 875 |               )}
- 876 | 
- 877 |               {/* VIEW 2: ARENA CANVAS (Optional — Flow inspection/editing) */}
- 878 |               {currentTab === "arena" && (
- 879 |                 <div className="flex-1 relative overflow-hidden bg-[#000000] flex">
- 880 | 
- 881 |                   {/* Back to chat bar at top */}
- 882 |                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#0d0d0d]/90 border border-[#1f1f1f] rounded-full px-4 py-2 backdrop-blur-md shadow-xl pointer-events-auto">
- 883 |                     <button
- 884 |                       onClick={() => setCurrentTab("chat")}
- 885 |                       className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-mono"
- 886 |                     >
- 887 |                       <ChevronLeft className="w-3.5 h-3.5" />
- 888 |                       Back to Chat
- 889 |                     </button>
- 890 |                     <span className="text-neutral-700 text-xs">|</span>
- 891 |                     <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">
- 892 |                       Agent Flow — {nodes.length} active
- 893 |                     </span>
- 894 |                   </div>
- 895 | 
- 896 |                   {/* FLOATING LEFT SIDE Arena Tools Panel */}
- 897 |                   <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col bg-[#0d0d0d]/80 border border-[#1f1f1f] p-1.5 rounded-xl z-20 backdrop-blur-md shadow-2xl">
- 898 |                     <div className="text-[8px] font-mono text-neutral-600 uppercase tracking-widest px-2 pb-2 text-center select-none border-b border-[#141414] mb-2 font-bold">
- 899 |                       Tools
- 900 |                     </div>
- 901 |                     {toolsList.map((tool) => (
- 902 |                       <div
- 903 |                         key={tool.name}
- 904 |                         draggable
- 905 |                         onDragStart={(e) => e.dataTransfer.setData("toolName", tool.name)}
- 906 |                         className="p-2.5 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-900 transition-all cursor-grab active:cursor-grabbing flex items-center justify-center relative group"
- 907 |                       >
- 908 |                         {tool.icon}
- 909 |                         <div className="absolute left-12 bg-[#0c0c0c] border border-[#1f1f1f] p-2.5 rounded-lg text-left hidden group-hover:block w-40 z-30 shadow-2xl pointer-events-none">
- 910 |                           <h4 className="text-[10px] font-bold text-white">{tool.name}</h4>
- 911 |                           <p className="text-[9px] text-neutral-400 mt-0.5 leading-relaxed">{tool.desc}</p>
- 912 |                           <span className="text-[8px] font-mono text-neutral-600 block mt-1.5 italic">Drag onto agent node</span>
- 913 |                         </div>
- 914 |                       </div>
- 915 |                     ))}
- 916 |                   </div>
- 917 | 
- 918 |                   {/* Flow Arena */}
- 919 |                   <FlowArena />
- 920 | 
- 921 |                   {/* Bottom controls — Proceed & Return to Chat */}
- 922 |                   <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 pointer-events-auto flex items-center gap-3 font-semibold select-none">
- 923 |                     <button
- 924 |                       disabled={isOrchestrating}
- 925 |                       onClick={async () => {
- 926 |                         if (isOrchestrating) return;
- 927 |                         // Bug 11: Immediately set orchestrating to prevent double-fire before async fn sets it
- 928 |                         useWorkflowStore.setState({ isOrchestrating: true });
- 929 |                         setCurrentTab("chat"); // Switch back to chat to see the output stream
- 930 |                         const triggerCustomExecution = useWorkflowStore.getState().triggerCustomExecution;
- 931 |                         await triggerCustomExecution();
- 932 |                       }}
- 933 |                       className="bg-white hover:bg-neutral-200 disabled:bg-neutral-800 disabled:text-neutral-500 text-black font-bold text-xs h-10 px-6 rounded-[24px] shadow-2xl flex items-center gap-1.5 cursor-pointer shrink-0 transition-all active:scale-95 disabled:scale-100 disabled:cursor-not-allowed"
- 934 |                     >
- 935 |                       {isOrchestrating ? (
- 936 |                         <>
- 937 |                           <div className="w-3.5 h-3.5 border-2 border-neutral-500 border-t-neutral-200 rounded-full animate-spin" />
- 938 |                           <span>Running Flow...</span>
- 939 |                         </>
- 940 |                       ) : (
- 941 |                         <>
- 942 |                           <Zap className="w-3.5 h-3.5 text-black fill-black" />
- 943 |                           <span>Proceed with Agents</span>
- 944 |                         </>
- 945 |                       )}
- 946 |                     </button>
- 947 |                     <button
- 948 |                       onClick={() => setCurrentTab("chat")}
- 949 |                       className="h-10 px-4 rounded-[24px] border border-[#1f1f1f] hover:border-neutral-600 bg-black/80 backdrop-blur-md text-neutral-400 hover:text-white text-xs font-semibold transition-all cursor-pointer shadow-2xl"
+ 699 |                   {/* Chat messages */}
+ 700 |                   <div
+ 701 |                     ref={chatContainerRef}
+ 702 |                     onScroll={handleScroll}
+ 703 |                     className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4"
+ 704 |                   >
+ 705 |                     {isLoadingSession ? (
+ 706 |                       <div className="flex items-center justify-center h-full">
+ 707 |                         <div className="flex flex-col items-center gap-3 text-neutral-500">
+ 708 |                           <div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
+ 709 |                           <span className="text-xs font-semibold">Loading Session...</span>
+ 710 |                         </div>
+ 711 |                       </div>
+ 712 |                     ) : (
+ 713 |                       <div className="max-w-5xl mx-auto space-y-4 select-text">
+ 714 | 
+ 715 |                       {chatMessages.map((msg, msgIdx) => (
+ 716 |                         <motion.div
+ 717 |                           key={msg.id}
+ 718 |                           initial={{ opacity: 0, y: 12 }}
+ 719 |                           animate={{ opacity: 1, y: 0 }}
+ 720 |                           transition={{ duration: 0.3 }}
+ 721 |                           className={`flex w-full ${msg.sender === "user" ? "justify-end" : "justify-start"}`}
+ 722 |                         >
+ 723 |                           {msg.sender === "user" ? (
+ 724 |                             <div className="max-w-[72%] rounded-3xl px-5 py-3 bg-[#2f2f2f] text-neutral-100 text-sm leading-relaxed">
+ 725 |                               <p className="whitespace-pre-wrap">{msg.text}</p>
+ 726 |                             </div>
+ 727 |                           ) : (
+ 728 |                             <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
+ 729 |                               <div className="w-full text-neutral-100 text-sm leading-relaxed px-1 py-2">
+ 730 |                                 <MarkdownRenderer content={msg.text || "*Streaming response...*"} />
+ 731 |                                 
+ 732 |                                 {/* Action Buttons for AI Response */}
+ 733 |                                 {msg.text && (
+ 734 |                                   <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
+ 735 |                                     <button
+ 736 |                                       onClick={() => copyToClipboard(msg.text, msg.id)}
+ 737 |                                       className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800"
+ 738 |                                       title="Copy response"
+ 739 |                                     >
+ 740 |                                       {copiedMsgId === msg.id ? (
+ 741 |                                         <>
+ 742 |                                           <Check className="w-3.5 h-3.5 text-emerald-400" />
+ 743 |                                           <span className="text-emerald-400 font-medium">Copied</span>
+ 744 |                                         </>
+ 745 |                                       ) : (
+ 746 |                                         <>
+ 747 |                                           <Copy className="w-3.5 h-3.5" />
+ 748 |                                           <span>Copy</span>
+ 749 |                                         </>
+ 750 |                                       )}
+ 751 |                                     </button>
+ 752 |                                     {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && (
+ 753 |                                       <button
+ 754 |                                         onClick={() => {
+ 755 |                                           const lastUser = chatMessages.slice().reverse().find(m => m.sender === "user");
+ 756 |                                           if (lastUser) {
+ 757 |                                             setChatMessages(prev => {
+ 758 |                                               const lastAiIdx = prev.map((m, i) => m.sender === 'ai' ? i : -1).filter(i => i >= 0).pop();
+ 759 |                                               if (lastAiIdx !== undefined) {
+ 760 |                                                 return prev.filter((_, i) => i !== lastAiIdx);
+ 761 |                                               }
+ 762 |                                               return prev;
+ 763 |                                             });
+ 764 |                                             startOrchestration(lastUser.text);
+ 765 |                                           }
+ 766 |                                         }}
+ 767 |                                         className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800"
+ 768 |                                         title="Regenerate response"
+ 769 |                                       >
+ 770 |                                         <Zap className="w-3.5 h-3.5" />
+ 771 |                                         <span>Regenerate</span>
+ 772 |                                       </button>
+ 773 |                                     )}
+ 774 |                                   </div>
+ 775 |                                 )}
+ 776 |                               </div>
+ 777 | 
+ 778 |                               {/* Collapsible trace block and see flow buttons outside bubble */}
+ 779 |                               {msgIdx === chatMessages.length - 1 && (
+ 780 |                                 <div className="space-y-3 pt-1 w-full">
+ 781 |                                   <AgentTraceBlock
+ 782 |                                     logs={agentTalkLogs}
+ 783 |                                     thinkingSummary={msg.thinkingSummary}
+ 784 |                                   />
+ 785 |                                   
+ 786 |                                   {!isThinking && !isOrchestrating && nodes.length > 0 && (
+ 787 |                                     <div className="flex flex-wrap gap-2 pt-1">
+ 788 |                                       <button
+ 789 |                                         id="see-flow-btn"
+ 790 |                                         onClick={() => setCurrentTab("arena")}
+ 791 |                                         className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max select-none"
+ 792 |                                       >
+ 793 |                                         <GitFork className="w-3.5 h-3.5 text-cyan-400" />
+ 794 |                                         <span>See Agent Flow</span>
+ 795 |                                         <span className="text-[9px] font-mono text-neutral-600">({nodes.length} agents)</span>
+ 796 |                                       </button>
+ 797 | 
+ 798 |                                       {!isAutoMode && (
+ 799 |                                         <button
+ 800 |                                           onClick={() => setCurrentTab("arena")}
+ 801 |                                           className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-neutral-500 rounded-xl text-xs font-semibold text-neutral-400 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max select-none"
+ 802 |                                         >
+ 803 |                                           <Sliders className="w-3.5 h-3.5" />
+ 804 |                                           <span>Customize Agents</span>
+ 805 |                                         </button>
+ 806 |                                       )}
+ 807 |                                     </div>
+ 808 |                                   )}
+ 809 | 
+ 810 |                                   {!isThinking && !isOrchestrating && followUpSuggestions && followUpSuggestions.length > 0 && (
+ 811 |                                     <div className="flex flex-wrap gap-2 pt-2 select-none">
+ 812 |                                       <span className="text-[9px] font-mono text-neutral-500 uppercase tracking-wider self-center">Suggestions:</span>
+ 813 |                                       {followUpSuggestions.map((suggestion, idx) => (
+ 814 |                                         <button
+ 815 |                                           key={idx}
+ 816 |                                           onClick={() => {
+ 817 |                                             setUserQuery(suggestion);
+ 818 |                                             startOrchestration(suggestion);
+ 819 |                                           }}
+ 820 |                                           className="px-3 py-1.5 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/30 rounded-full text-[10px] text-neutral-400 hover:text-white transition-all cursor-pointer animate-fade-in"
+ 821 |                                         >
+ 822 |                                           {suggestion}
+ 823 |                                         </button>
+ 824 |                                       ))}
+ 825 |                                     </div>
+ 826 |                                   )}
+ 827 |                                 </div>
+ 828 |                               )}
+ 829 |                             </div>
+ 830 |                           )}
+ 831 |                         </motion.div>
+ 832 |                       ))}
+ 833 | 
+ 834 |                       {/* Thinking indicator */}
+ 835 |                       <AnimatePresence>
+ 836 |                         {isThinking && <ThinkingBubble />}
+ 837 |                       </AnimatePresence>
+ 838 | 
+ 839 |                       {/* Auto-scroll anchor */}
+ 840 |                       <div ref={chatEndRef} />
+ 841 |                     </div>
+ 842 |                     )}
+ 843 |                   </div>
+ 844 | 
+ 845 |                   {/* Bottom input bar */}
+ 846 |                   <div className="px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
+ 847 |                     {!isAutoMode && workspaceState === "active" && (
+ 848 |                       <div className="text-[10px] font-mono text-amber-400 bg-amber-950/30 px-3 py-1 rounded-full self-center border border-amber-500/20 max-w-max select-none">
+ 849 |                         Planning Mode – Edit agents in Flow, then click Proceed
+ 850 |                       </div>
+ 851 |                     )}
+ 852 |                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
+ 853 |                       <textarea
+ 854 |                         ref={textareaRef}
+ 855 |                         id="chat-prompt-input"
+ 856 |                         rows={1}
+ 857 |                         value={userQuery}
+ 858 |                         onChange={(e) => setUserQuery(e.target.value)}
+ 859 |                         onKeyDown={(e) => {
+ 860 |                           if (e.key === "Enter" && !e.shiftKey) {
+ 861 |                             e.preventDefault();
+ 862 |                             if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery);
+ 863 |                           }
+ 864 |                         }}
+ 865 |                         placeholder={isOrchestrating ? "Streaming response..." : (isAutoMode ? "Ask a follow-up or new question..." : "Enter a new idea to generate agents (no auto-run)...")}
+ 866 |                         disabled={isOrchestrating}
+ 867 |                         className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar"
+ 868 |                       />
+ 869 |                       {isOrchestrating ? (
+ 870 |                         <button
+ 871 |                           onClick={cancelOrchestration}
+ 872 |                           className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all font-semibold cursor-pointer shrink-0"
+ 873 |                           title="Stop generating"
+ 874 |                         >
+ 875 |                           <Square className="w-3.5 h-3.5 text-white fill-white" />
+ 876 |                         </button>
+ 877 |                       ) : (
+ 878 |                         <button
+ 879 |                           id="chat-send-btn"
+ 880 |                           onClick={() => startOrchestration(userQuery)}
+ 881 |                           disabled={!userQuery.trim() || isThinking}
+ 882 |                           className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer shrink-0"
+ 883 |                           title="Send message"
+ 884 |                         >
+ 885 |                           <ArrowRight className="w-4 h-4 text-black stroke-[3]" />
+ 886 |                         </button>
+ 887 |                       )}
+ 888 |                     </div>
+ 889 |                   </div>
+ 890 |                 </div>
+ 891 |               )}
+ 892 | 
+ 893 |               {/* VIEW 2: ARENA CANVAS (Optional — Flow inspection/editing) */}
+ 894 |               {currentTab === "arena" && (
+ 895 |                 <div className="flex-1 relative overflow-hidden bg-[#000000] flex">
+ 896 | 
+ 897 |                   {/* Back to chat bar at top */}
+ 898 |                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#0d0d0d]/90 border border-[#1f1f1f] rounded-full px-4 py-2 backdrop-blur-md shadow-xl pointer-events-auto">
+ 899 |                     <button
+ 900 |                       onClick={() => setCurrentTab("chat")}
+ 901 |                       className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-mono"
+ 902 |                     >
+ 903 |                       <ChevronLeft className="w-3.5 h-3.5" />
+ 904 |                       Back to Chat
+ 905 |                     </button>
+ 906 |                     <span className="text-neutral-700 text-xs">|</span>
+ 907 |                     <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">
+ 908 |                       Agent Flow — {nodes.length} active
+ 909 |                     </span>
+ 910 |                   </div>
+ 911 | 
+ 912 |                   {/* FLOATING LEFT SIDE Arena Tools Panel */}
+ 913 |                   <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col bg-[#0d0d0d]/80 border border-[#1f1f1f] p-1.5 rounded-xl z-20 backdrop-blur-md shadow-2xl">
+ 914 |                     <div className="text-[8px] font-mono text-neutral-600 uppercase tracking-widest px-2 pb-2 text-center select-none border-b border-[#141414] mb-2 font-bold">
+ 915 |                       Tools
+ 916 |                     </div>
+ 917 |                     {toolsList.map((tool) => (
+ 918 |                       <div
+ 919 |                         key={tool.name}
+ 920 |                         draggable
+ 921 |                         onDragStart={(e) => e.dataTransfer.setData("toolName", tool.name)}
+ 922 |                         className="p-2.5 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-900 transition-all cursor-grab active:cursor-grabbing flex items-center justify-center relative group"
+ 923 |                       >
+ 924 |                         {tool.icon}
+ 925 |                         <div className="absolute left-12 bg-[#0c0c0c] border border-[#1f1f1f] p-2.5 rounded-lg text-left hidden group-hover:block w-40 z-30 shadow-2xl pointer-events-none">
+ 926 |                           <h4 className="text-[10px] font-bold text-white">{tool.name}</h4>
+ 927 |                           <p className="text-[9px] text-neutral-400 mt-0.5 leading-relaxed">{tool.desc}</p>
+ 928 |                           <span className="text-[8px] font-mono text-neutral-600 block mt-1.5 italic">Drag onto agent node</span>
+ 929 |                         </div>
+ 930 |                       </div>
+ 931 |                     ))}
+ 932 |                   </div>
+ 933 | 
+ 934 |                   {/* Flow Arena */}
+ 935 |                   <FlowArena />
+ 936 | 
+ 937 |                   {/* Bottom controls — Proceed & Return to Chat */}
+ 938 |                   <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 pointer-events-auto flex items-center gap-3 font-semibold select-none">
+ 939 |                     <button
+ 940 |                       disabled={isOrchestrating}
+ 941 |                       onClick={async () => {
+ 942 |                         if (isOrchestrating) return;
+ 943 |                         // Bug 11: Immediately set orchestrating to prevent double-fire before async fn sets it
+ 944 |                         useWorkflowStore.setState({ isOrchestrating: true });
+ 945 |                         setCurrentTab("chat"); // Switch back to chat to see the output stream
+ 946 |                         const triggerCustomExecution = useWorkflowStore.getState().triggerCustomExecution;
+ 947 |                         await triggerCustomExecution();
+ 948 |                       }}
+ 949 |                       className="bg-white hover:bg-neutral-200 disabled:bg-neutral-800 disabled:text-neutral-500 text-black font-bold text-xs h-10 px-6 rounded-[24px] shadow-2xl flex items-center gap-1.5 cursor-pointer shrink-0 transition-all active:scale-95 disabled:scale-100 disabled:cursor-not-allowed"
  950 |                     >
- 951 |                       Return to Chat
- 952 |                     </button>
- 953 |                   </div>
- 954 |                 </div>
- 955 |               )}
- 956 |             </div>
- 957 |           )}
- 958 |         </div>
- 959 |       </main>
- 960 | 
- 961 |       {/* 3. RIGHT Sliding Configuration Edit Panel */}
- 962 |       {currentTab === "arena" && (
- 963 |         <div
- 964 |           className={`fixed top-0 right-0 h-full w-80 bg-[#0c0c0c]/95 border-l border-[#1f1f1f] z-40 flex flex-col justify-between shadow-2xl transition-transform duration-300 right-panel select-none ${
- 965 |             isConfigPanelOpen ? "translate-x-0" : "translate-x-full"
- 966 |           }`}
- 967 |         >
- 968 |         <button
- 969 |           onClick={handleCloseConfigPanel}
- 970 |           className="absolute -left-8 top-1/2 -translate-y-1/2 w-8 h-16 bg-[#0c0c0c]/95 border border-[#1f1f1f] border-r-0 rounded-l-xl flex items-center justify-center text-neutral-400 hover:text-white transition-colors cursor-pointer"
- 971 |         >
- 972 |           {isConfigPanelOpen ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
- 973 |         </button>
- 974 | 
- 975 |         {activeNodeDetail ? (
- 976 |           <div className="flex-1 flex flex-col h-full overflow-hidden">
- 977 |             <div className="p-5 border-b border-[#1f1f1f] flex justify-between items-center bg-[#0d0d0d]">
- 978 |               <div>
- 979 |                 <h3 className="text-sm font-bold text-white uppercase tracking-wider">{activeNodeDetail.data.name}</h3>
- 980 |                 <span className="text-[8px] font-mono text-neutral-500 uppercase tracking-widest block mt-0.5">{activeNodeDetail.data.tag}</span>
- 981 |               </div>
- 982 |               <button onClick={handleCloseConfigPanel} className="text-neutral-500 hover:text-white cursor-pointer">
- 983 |                 <X className="w-4 h-4" />
- 984 |               </button>
- 985 |             </div>
- 986 | 
- 987 |             <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
- 988 |               {/* Enable/Disable toggle */}
- 989 |               <div className="flex items-center justify-between bg-[#070707] border border-[#1f1f1f] p-3 rounded-xl">
- 990 |                 <div className="flex flex-col">
- 991 |                   <span className="text-[10px] font-bold text-white uppercase tracking-wider">Active</span>
- 992 |                   <span className="text-[9px] text-neutral-500 mt-0.5">Disable to exclude from pipeline</span>
- 993 |                 </div>
- 994 |                 <button
- 995 |                   onClick={() => updateNodeField(activeNodeDetail.id, { enabled: !activeNodeDetail.data.enabled })}
- 996 |                   className={`w-10 h-5 rounded-full p-0.5 transition-all duration-200 cursor-pointer ${activeNodeDetail.data.enabled ? "bg-white" : "bg-neutral-800"}`}
- 997 |                 >
- 998 |                   <div className={`w-4 h-4 rounded-full transition-transform ${activeNodeDetail.data.enabled ? "bg-black translate-x-5" : "bg-neutral-600 translate-x-0"}`} />
- 999 |                 </button>
-1000 |               </div>
-1001 | 
-1002 |               {/* Priority Slider */}
-1003 |               <div className="space-y-1 bg-[#070707] border border-[#1f1f1f] p-3 rounded-xl">
-1004 |                 <div className="flex justify-between items-center text-[9px] font-mono uppercase text-neutral-400 font-bold">
-1005 |                   <span>Priority</span>
-1006 |                   <span className="text-white">Level {activeNodeDetail.data.priority}</span>
-1007 |                 </div>
-1008 |                 <input
-1009 |                   type="range" min="1" max="10" step="1"
-1010 |                   value={activeNodeDetail.data.priority}
-1011 |                   onChange={(e) => updateNodeField(activeNodeDetail.id, { priority: parseInt(e.target.value) })}
-1012 |                   className="w-full accent-white h-1 bg-[#1f1f1f] rounded-lg appearance-none cursor-pointer mt-2"
-1013 |                 />
-1014 |               </div>
-1015 | 
-1016 |               {/* Name */}
-1017 |               <div className="space-y-1.5">
-1018 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Agent Name</label>
-1019 |                 <input
-1020 |                   type="text" value={activeNodeDetail.data.name}
-1021 |                   onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })}
-1022 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
-1023 |                 />
-1024 |               </div>
-1025 | 
-1026 |               {/* Personality */}
-1027 |               <div className="space-y-1.5">
-1028 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Personality</label>
-1029 |                 <input
-1030 |                   type="text" value={activeNodeDetail.data.personality}
-1031 |                   onChange={(e) => updateNodeField(activeNodeDetail.id, { personality: e.target.value })}
-1032 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
-1033 |                 />
-1034 |               </div>
-1035 | 
-1036 |               {/* System Prompt */}
-1037 |               <div className="space-y-1.5">
-1038 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label>
-1039 |                 <textarea
-1040 |                   value={activeNodeDetail.data.systemPrompt}
-1041 |                   onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })}
-1042 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed"
-1043 |                 />
-1044 |               </div>
-1045 | 
-1046 |               {/* Goal Objective */}
-1047 |               <div className="space-y-1.5">
-1048 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Objective</label>
-1049 |                 <textarea
-1050 |                   value={activeNodeDetail.data.objective}
-1051 |                   onChange={(e) => updateNodeField(activeNodeDetail.id, { objective: e.target.value })}
-1052 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[60px] resize-none leading-relaxed"
-1053 |                 />
-1054 |               </div>
-1055 | 
-1056 |               {/* Rules */}
-1057 |               <div className="space-y-2">
-1058 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold block">Rules</label>
-1059 |                 <div className="space-y-1.5">
-1060 |                   {activeNodeDetail.data.rules && activeNodeDetail.data.rules.map((rule: any, idx: number) => (
-1061 |                     <div key={idx} className="flex gap-2 items-center bg-[#050505] border border-[#1f1f1f] p-2 rounded-lg justify-between">
-1062 |                       <span className="text-[10px] text-neutral-300 leading-normal flex-1 pr-2">{rule}</span>
-1063 |                       <button onClick={() => handleDeleteRule(idx)} className="text-neutral-500 hover:text-red-400 transition-colors shrink-0 cursor-pointer">
-1064 |                         <Trash2 className="w-3.5 h-3.5" />
-1065 |                       </button>
-1066 |                     </div>
-1067 |                   ))}
-1068 |                 </div>
-1069 |                 <div className="flex gap-2">
-1070 |                   <input
-1071 |                     type="text" value={newRuleText}
-1072 |                     onChange={(e) => setNewRuleText(e.target.value)}
-1073 |                     placeholder="Add constraint..."
-1074 |                     className="flex-1 bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
-1075 |                   />
-1076 |                   <button onClick={handleAddRule} className="bg-white text-black font-bold text-xs px-3 rounded-lg hover:bg-neutral-200 cursor-pointer">Add</button>
-1077 |                 </div>
-1078 |               </div>
-1079 | 
-1080 |               {/* Sliders */}
-1081 |               <div className="space-y-4 pt-3 border-t border-[#141414]">
-1082 |                 {[
-1083 |                   { label: "Creativity", key: "temp", min: 0, max: 1, step: 0.05, display: (v: number) => v.toString() },
-1084 |                   { label: "Logic / Depth", key: "logic", min: 10, max: 100, step: 5, display: (v: number) => `${v}%` },
-1085 |                   { label: "Empathy", key: "empathy", min: 0, max: 100, step: 5, display: (v: number) => `${v}%` }
-1086 |                 ].map(({ label, key, min, max, step, display }) => (
-1087 |                   <div key={key} className="space-y-1">
-1088 |                     <div className="flex justify-between items-center text-[9px] font-mono uppercase text-neutral-400 font-bold">
-1089 |                       <span>{label}</span>
-1090 |                       <span className="text-white">{display(activeNodeDetail.data[key])}</span>
-1091 |                     </div>
-1092 |                     <input
-1093 |                       type="range" min={min} max={max} step={step}
-1094 |                       value={activeNodeDetail.data[key]}
-1095 |                       onChange={(e) => updateNodeField(activeNodeDetail.id, { [key]: key === "temp" ? parseFloat(e.target.value) : parseInt(e.target.value) })}
-1096 |                       className="w-full accent-white h-1 bg-[#1f1f1f] rounded-lg appearance-none cursor-pointer"
-1097 |                     />
-1098 |                   </div>
-1099 |                 ))}
-1100 |               </div>
-1101 | 
-1102 |               {/* Tool Integrations */}
-1103 |               <div className="pt-5 border-t border-[#141414] space-y-4">
-1104 |                 <div className="flex justify-between items-center">
-1105 |                   <label className="text-[10px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Tools</label>
-1106 |                   <span className="text-[8px] font-mono text-neutral-500 uppercase">Attached: {activeNodeDetail.data.tools?.length || 0}</span>
-1107 |                 </div>
-1108 |                 <select
-1109 |                   id="tool-selector-dropdown"
-1110 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-neutral-300 outline-none focus:border-neutral-500"
-1111 |                   defaultValue=""
-1112 |                   onChange={(e) => {
-1113 |                     const toolName = e.target.value;
-1114 |                     if (!toolName) return;
-1115 |                     const currentTools = activeNodeDetail.data.tools || [];
-1116 |                     if (!currentTools.includes(toolName)) {
-1117 |                       const updatedTools = [...currentTools, toolName];
-1118 |                       const permissions = activeNodeDetail.data.toolPermissions || {};
-1119 |                       const updatedPerms = { ...permissions, [toolName]: permissions[toolName] || "ALLOWED" };
-1120 |                       updateNodeField(activeNodeDetail.id, { tools: updatedTools, toolPermissions: updatedPerms });
-1121 |                     }
-1122 |                     e.target.value = "";
-1123 |                   }}
-1124 |                 >
-1125 |                   <option value="" disabled>+ Attach tool...</option>
-1126 |                   {["Web Search", "Browser", "Memory", "File Upload", "Code Executor", "Vision", "Voice", "API Connector"]
-1127 |                     .filter(tool => !(activeNodeDetail.data.tools || []).includes(tool))
-1128 |                     .map((tool: string) => (
-1129 |                       <option key={tool} value={tool}>{tool}</option>
-1130 |                     ))}
-1131 |                 </select>
-1132 | 
-1133 |                 <div className="space-y-3">
-1134 |                   {(!activeNodeDetail.data.tools || activeNodeDetail.data.tools.length === 0) ? (
-1135 |                     <div className="bg-[#050505] border border-dashed border-[#1f1f1f] p-4 text-center rounded-xl">
-1136 |                       <p className="text-[10px] text-neutral-500">No tools attached.</p>
-1137 |                     </div>
-1138 |                   ) : (
-1139 |                     activeNodeDetail.data.tools.map((tool: any) => {
-1140 |                       const currentPermissions = activeNodeDetail.data.toolPermissions || {};
-1141 |                       const permission = currentPermissions[tool] || "ALLOWED";
-1142 |                       return (
-1143 |                         <div key={tool} className="bg-[#050505] border border-[#1f1f1f] p-3 rounded-xl space-y-2">
-1144 |                           <div className="flex justify-between items-center">
-1145 |                             <span className="text-xs font-bold text-white flex items-center gap-1.5">
-1146 |                               <span className={`w-1.5 h-1.5 rounded-full ${permission === "ALLOWED" ? "bg-emerald-500 animate-pulse" : permission === "ASK" ? "bg-amber-500" : "bg-rose-500"}`} />
-1147 |                               {tool}
-1148 |                             </span>
-1149 |                             <button
-1150 |                               onClick={() => {
-1151 |                                 const updatedTools = (activeNodeDetail.data.tools || []).filter((t: string) => t !== tool);
-1152 |                                 const updatedPerms = { ...(activeNodeDetail.data.toolPermissions || {}) };
-1153 |                                 delete updatedPerms[tool];
-1154 |                                 updateNodeField(activeNodeDetail.id, { tools: updatedTools, toolPermissions: updatedPerms });
-1155 |                               }}
-1156 |                               className="text-neutral-500 hover:text-red-400 p-1 transition-colors cursor-pointer"
-1157 |                             >
-1158 |                               <Trash2 className="w-3.5 h-3.5" />
-1159 |                             </button>
-1160 |                           </div>
-1161 |                           <div className="grid grid-cols-3 gap-1 pt-1">
-1162 |                             {(["ALLOWED", "ASK", "DENIED"] as const).map((level) => (
-1163 |                               <button
-1164 |                                 key={level}
-1165 |                                 onClick={() => {
-1166 |                                   const updatedPerms = { ...(activeNodeDetail.data.toolPermissions || {}), [tool]: level };
-1167 |                                   updateNodeField(activeNodeDetail.id, { toolPermissions: updatedPerms });
-1168 |                                 }}
-1169 |                                 className={`py-1 text-[9px] font-mono font-bold rounded-md border transition-all cursor-pointer ${
-1170 |                                   permission === level
-1171 |                                     ? level === "ALLOWED" ? "bg-emerald-950/40 text-emerald-400 border-emerald-500/50"
-1172 |                                     : level === "ASK" ? "bg-amber-950/40 text-amber-400 border-amber-500/50"
-1173 |                                     : "bg-rose-950/40 text-rose-400 border-rose-500/50"
-1174 |                                     : "bg-transparent text-neutral-500 border-[#1f1f1f] hover:text-neutral-300"
-1175 |                                 }`}
-1176 |                               >
-1177 |                                 {level === "ALLOWED" ? "ALLOW" : level === "ASK" ? "ASK" : "DENY"}
-1178 |                               </button>
-1179 |                             ))}
-1180 |                           </div>
-1181 |                         </div>
-1182 |                       );
-1183 |                     })
-1184 |                   )}
-1185 |                 </div>
-1186 |               </div>
-1187 | 
-1188 |               {/* Connections */}
-1189 |               <div className="pt-5 border-t border-[#141414] space-y-4">
-1190 |                 <div className="flex justify-between items-center">
-1191 |                   <label className="text-[10px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Connections</label>
-1192 |                   <span className="text-[8px] font-mono text-neutral-500 uppercase">
-1193 |                     Links: {edges.filter(c => c.source === activeNodeDetail.id || c.target === activeNodeDetail.id).length}
-1194 |                   </span>
-1195 |                 </div>
-1196 |                 <select
-1197 |                   id="connection-selector-dropdown"
-1198 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-neutral-300 outline-none focus:border-neutral-500"
-1199 |                   defaultValue=""
-1200 |                   onChange={(e) => {
-1201 |                     const targetId = e.target.value;
-1202 |                     if (!targetId) return;
-1203 |                     const exists = edges.some(c =>
-1204 |                       (c.source === activeNodeDetail.id && c.target === targetId) ||
-1205 |                       (c.source === targetId && c.target === activeNodeDetail.id)
-1206 |                     );
-1207 |                     if (!exists) {
-1208 |                       setEdges(prev => [...prev, {
-1209 |                         id: `e-${activeNodeDetail.id}-${targetId}`,
-1210 |                         source: activeNodeDetail.id,
-1211 |                         target: targetId,
-1212 |                         animated: true,
-1213 |                         type: 'custom'
-1214 |                       }]);
-1215 |                       // Bug 1: Sync dependency — the target node now depends on this (source) node
-1216 |                       const targetNode = nodes.find(n => n.id === targetId);
-1217 |                       if (targetNode) {
-1218 |                         const currentDeps = (targetNode.data as any).dependencies || [];
-1219 |                         if (!currentDeps.includes(activeNodeDetail.id)) {
-1220 |                           updateNodeField(targetId, {
-1221 |                             dependencies: [...currentDeps, activeNodeDetail.id]
-1222 |                           });
-1223 |                         }
-1224 |                       }
-1225 |                     }
-1226 |                     e.target.value = "";
-1227 |                   }}
-1228 |                 >
-1229 |                   <option value="" disabled>+ Connect to agent...</option>
-1230 |                   {nodes.filter(n => n.id !== activeNodeDetail.id && n.type === 'custom').map(node => (
-1231 |                     <option key={node.id} value={node.id}>{(node.data as any).name}</option>
-1232 |                   ))}
-1233 |                 </select>
-1234 |                 <div className="space-y-1.5">
-1235 |                   {(() => {
-1236 |                     const linkedConns = edges.filter(c => c.source === activeNodeDetail.id || c.target === activeNodeDetail.id);
-1237 |                     if (linkedConns.length === 0) {
-1238 |                       return (
-1239 |                         <div className="bg-[#050505] border border-dashed border-[#1f1f1f] p-3 text-center rounded-xl">
-1240 |                           <p className="text-[10px] text-neutral-500">No connections.</p>
-1241 |                         </div>
-1242 |                       );
-1243 |                     }
-1244 |                     return linkedConns.map((conn, index) => {
-1245 |                       const otherNodeId = conn.source === activeNodeDetail.id ? conn.target : conn.source;
-1246 |                       const otherNode = nodes.find(n => n.id === otherNodeId);
-1247 |                       return (
-1248 |                         <div key={index} className="flex gap-2 items-center bg-[#050505] border border-[#1f1f1f] p-2 rounded-lg justify-between">
-1249 |                           <span className="text-[10px] text-neutral-300 leading-normal flex-1 pr-2">
-1250 |                             {otherNode ? (otherNode.data as any).name : otherNodeId}
-1251 |                           </span>
-1252 |                           <button onClick={() => deleteEdge(conn.id)} className="text-neutral-500 hover:text-red-400 transition-colors shrink-0 cursor-pointer">
-1253 |                             <Trash2 className="w-3.5 h-3.5" />
-1254 |                           </button>
-1255 |                         </div>
-1256 |                       );
-1257 |                     });
-1258 |                   })()}
-1259 |                 </div>
-1260 |               </div>
-1261 | 
-1262 |               {/* Execution Logs */}
-1263 |               <div className="pt-5 border-t border-[#141414] space-y-3">
-1264 |                 <div className="flex justify-between items-center">
-1265 |                   <label className="text-[10px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Execution Log</label>
-1266 |                   <button
-1267 |                     onClick={() => updateNodeField(activeNodeDetail.id, { toolLogs: [] })}
-1268 |                     className="text-[8px] font-mono text-neutral-500 hover:text-white uppercase transition-colors cursor-pointer"
-1269 |                   >
-1270 |                     Clear
-1271 |                   </button>
-1272 |                 </div>
-1273 |                 <div className="bg-black border border-[#1f1f1f] rounded-xl p-3 h-44 overflow-y-auto font-mono text-[9px] space-y-1.5 custom-scrollbar">
-1274 |                   {(!activeNodeDetail.data.toolLogs || activeNodeDetail.data.toolLogs.length === 0) ? (
-1275 |                     <div className="h-full flex items-center justify-center text-neutral-600 text-center">
-1276 |                       <span>No logs recorded.</span>
-1277 |                     </div>
-1278 |                   ) : (
-1279 |                     activeNodeDetail.data.toolLogs.map((log: any) => (
-1280 |                       <div key={log.id} className="flex gap-1.5 items-start leading-normal text-neutral-300">
-1281 |                         <span className="text-neutral-500 shrink-0 select-none">[{log.timestamp}]</span>
-1282 |                         <div className="flex-1">
-1283 |                           <span className="font-bold text-white uppercase mr-1">[{log.tool}]</span>
-1284 |                           <span>{log.detail}</span>
-1285 |                         </div>
-1286 |                         <span className={`shrink-0 font-bold px-1 rounded-sm text-[8px] ${
-1287 |                           log.status === "SUCCESS" ? "bg-emerald-950 text-emerald-400" :
-1288 |                           log.status === "PENDING" ? "bg-amber-950 text-amber-400 animate-pulse" :
-1289 |                           log.status === "BLOCKED" ? "bg-rose-950 text-rose-400" : "bg-neutral-800 text-neutral-400"
-1290 |                         }`}>
-1291 |                           {log.status}
-1292 |                         </span>
-1293 |                       </div>
-1294 |                     ))
-1295 |                   )}
-1296 |                 </div>
-1297 | 
-1298 |               </div>
-1299 |             </div>
-1300 | 
-1301 |             {/* Footer */}
-1302 |             <div className="p-4 border-t border-[#1f1f1f] bg-[#0d0d0d] grid grid-cols-2 gap-3">
-1303 |               <button
-1304 |                 onClick={() => { handleCloseConfigPanel(); }}
-1305 |                 className="py-2.5 border border-[#1f1f1f] text-xs font-semibold text-neutral-400 hover:text-white rounded-lg transition-colors font-mono cursor-pointer"
-1306 |               >
-1307 |                 Close
-1308 |               </button>
-1309 |               <button
-1310 |                 onClick={() => {
-1311 |                   alert("Agent configuration saved.");
-1312 |                   handleCloseConfigPanel();
-1313 |                 }}
-1314 |                 className="py-2.5 bg-white hover:bg-neutral-100 text-black text-xs font-bold rounded-lg transition-all font-mono cursor-pointer"
-1315 |               >
-1316 |                 Save Config
-1317 |               </button>
-1318 |             </div>
-1319 |           </div>
-1320 |         ) : (
-1321 |           <div className="flex-1 flex flex-col items-center justify-center p-6 text-center select-none">
-1322 |             <Bot className="w-12 h-12 text-neutral-700 mb-3 animate-pulse" />
-1323 |             <p className="text-xs text-neutral-500">Click any agent node in the Flow to edit its configuration.</p>
-1324 |           </div>
-1325 |         )}
-1326 |         </div>
-1327 |       )}
-1328 | 
-1329 |       {/* 4. Modals & Overlays */}
-1330 |       <AnimatePresence>
-1331 | 
-1332 |         {/* BYOK MODAL */}
-1333 |         {isSecretOpen && (
-1334 |           <motion.div
-1335 |             initial={{ opacity: 0 }}
-1336 |             animate={{ opacity: 1 }}
-1337 |             exit={{ opacity: 0 }}
-1338 |             className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
-1339 |           >
-1340 |             <motion.div
-1341 |               initial={{ scale: 0.95 }}
-1342 |               animate={{ scale: 1 }}
-1343 |               exit={{ scale: 0.95 }}
-1344 |               className="w-full max-w-md bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl"
-1345 |             >
-1346 |               <button onClick={() => setIsSecretOpen(false)} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer">
-1347 |                 <X className="w-5 h-5" />
-1348 |               </button>
-1349 |               <div className="flex gap-4 items-center mb-6">
-1350 |                 <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
-1351 |                   <Key className="w-6 h-6 text-white" />
-1352 |                 </div>
-1353 |                 <div>
-1354 |                   <h3 className="text-sm font-bold text-white">AI Engine Settings</h3>
-1355 |                   <p className="text-xs text-neutral-400 font-sans mt-0.5">Select your AI provider and configure keys.</p>
-1356 |                 </div>
-1357 |               </div>
-1358 |               <div className="space-y-4">
-1359 |                 {/* 1. Provider Selector */}
-1360 |                 <div className="space-y-1.5">
-1361 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Provider</label>
-1362 |                   <select
-1363 |                     value={selectedProvider}
-1364 |                     onChange={(e) => setSelectedProvider(e.target.value)}
-1365 |                     className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
-1366 |                   >
-1367 |                     {Object.keys(availableProviders).length > 0 ? (
-1368 |                       Object.entries(availableProviders).map(([pid, cfg]: [string, any]) => (
-1369 |                         <option key={pid} value={pid}>{cfg.name}</option>
-1370 |                       ))
-1371 |                     ) : (
-1372 |                       <option value="gemini">Google Gemini</option>
-1373 |                     )}
-1374 |                   </select>
-1375 |                 </div>
-1376 | 
-1377 |                 {/* 2. Model Selector */}
-1378 |                 <div className="space-y-1.5">
-1379 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Model</label>
-1380 |                   {availableProviders[selectedProvider]?.models?.length > 0 ? (
-1381 |                     <select
-1382 |                       value={selectedModel}
-1383 |                       onChange={(e) => setSelectedModel(e.target.value)}
-1384 |                       className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
-1385 |                     >
-1386 |                       {availableProviders[selectedProvider].models.map((m: any) => (
-1387 |                         <option key={m.id} value={m.id}>{m.name} ({m.tier})</option>
-1388 |                       ))}
-1389 |                     </select>
-1390 |                   ) : (
-1391 |                     <input
-1392 |                       type="text"
-1393 |                       placeholder="e.g. llama3, qwen2.5, my-fine-tune"
-1394 |                       value={selectedModel}
-1395 |                       onChange={(e) => setSelectedModel(e.target.value)}
-1396 |                       className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
-1397 |                     />
-1398 |                   )}
-1399 |                 </div>
-1400 | 
-1401 |                 {/* 3. API Key Input */}
-1402 |                 <div className="space-y-1.5">
-1403 |                   <div className="flex justify-between items-center">
-1404 |                     <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
-1405 |                       {selectedProvider.toUpperCase()}_API_KEY
-1406 |                     </label>
-1407 |                     {availableProviders[selectedProvider]?.key_url && (
-1408 |                       <a
-1409 |                         href={availableProviders[selectedProvider].key_url}
-1410 |                         target="_blank"
-1411 |                         rel="noreferrer"
-1412 |                         className="text-[9px] text-cyan-400 hover:underline"
-1413 |                       >
-1414 |                         Get key ↗
-1415 |                       </a>
-1416 |                     )}
-1417 |                   </div>
-1418 |                   <input
-1419 |                     id="api-key-input"
-1420 |                     type="password"
-1421 |                     placeholder={
-1422 |                       availableProviders[selectedProvider]
-1423 |                         ? `Enter key (starts with ${availableProviders[selectedProvider].key_hint || "sk-..."})`
-1424 |                         : "Enter API key"
-1425 |                     }
-1426 |                     value={apiKeyInput}
-1427 |                     onChange={(e) => setApiKeyInput(e.target.value)}
-1428 |                     className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
-1429 |                   />
-1430 |                   <p className="text-[9px] text-neutral-500 font-mono leading-normal">
-1431 |                     {availableProviders[selectedProvider]?.description || "Configure key for custom models. Key is stored locally in-memory."}
-1432 |                   </p>
-1433 |                 </div>
-1434 | 
-1435 |                 {/* 4. Save and Cancel Buttons */}
-1436 |                 <div className="pt-4 flex gap-3">
-1437 |                   <button
-1438 |                     id="save-api-key-btn"
-1439 |                     onClick={() => {
-1440 |                       setProvider(selectedProvider);
-1441 |                       setModel(selectedModel);
-1442 |                       setProviderApiKey(selectedProvider, apiKeyInput.trim());
-1443 |                       setIsSecretOpen(false);
-1444 |                     }}
-1445 |                     className="flex-1 py-2.5 bg-white hover:bg-neutral-100 text-black font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
-1446 |                   >
-1447 |                     Save Settings
-1448 |                   </button>
-1449 |                   <button
-1450 |                     onClick={() => setIsSecretOpen(false)}
-1451 |                     className="px-5 py-2.5 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-xl text-xs font-mono transition-colors cursor-pointer"
-1452 |                   >
-1453 |                     Cancel
-1454 |                   </button>
-1455 |                 </div>
-1456 |               </div>
-1457 |             </motion.div>
-1458 |           </motion.div>
-1459 |         )}
-1460 | 
-1461 |         {/* USER PROFILE MODAL */}
-1462 |         {isProfileOpen && (
-1463 |           <motion.div
-1464 |             initial={{ opacity: 0 }}
-1465 |             animate={{ opacity: 1 }}
-1466 |             exit={{ opacity: 0 }}
-1467 |             className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
-1468 |           >
-1469 |             <motion.div
-1470 |               initial={{ scale: 0.95 }}
-1471 |               animate={{ scale: 1 }}
-1472 |               exit={{ scale: 0.95 }}
-1473 |               className="w-full max-w-sm bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl"
-1474 |             >
-1475 |               <button onClick={() => setIsProfileOpen(false)} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer">
-1476 |                 <X className="w-5 h-5" />
-1477 |               </button>
-1478 |               <div className="flex flex-col items-center text-center space-y-4 py-4">
-1479 |                 <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-[#1f1f1f] flex items-center justify-center bg-neutral-900">
-1480 |                   <User className="w-8 h-8 text-neutral-500" />
-1481 |                 </div>
-1482 |                 <div>
-1483 |                   <h3 className="text-sm font-bold text-white uppercase tracking-wider">User Profile</h3>
-1484 |                   <span className="text-xs text-neutral-400 font-mono">solospace_user@gmail.com</span>
-1485 |                 </div>
-1486 |                 <div className="w-full pt-4 space-y-2 border-t border-[#141414]">
-1487 |                   <div className="flex justify-between items-center bg-black py-2 px-3 rounded text-[10px] border border-[#141414] font-mono">
-1488 |                     <span className="text-neutral-500">Plan:</span>
-1489 |                     <span className="text-white font-bold">Pro</span>
-1490 |                   </div>
-1491 |                   <div className="flex justify-between items-center bg-black py-2 px-3 rounded text-[10px] border border-[#141414] font-mono">
-1492 |                     <span className="text-neutral-500">Sessions:</span>
-1493 |                     <span className="text-white font-bold">{Object.values(sessions).length}</span>
-1494 |                   </div>
-1495 |                 </div>
-1496 |                 <button
-1497 |                   onClick={() => setIsProfileOpen(false)}
-1498 |                   className="w-full py-2.5 bg-neutral-900 hover:bg-neutral-800 border border-[#1f1f1f] text-neutral-300 hover:text-white font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
-1499 |                 >
-1500 |                   Close
-1501 |                 </button>
-1502 |               </div>
-1503 |             </motion.div>
-1504 |           </motion.div>
-1505 |         )}
-1506 | 
-1507 |         {/* TOOL APPROVAL TOAST */}
-1508 |         {pendingApproval && (
-1509 |           <div className="fixed bottom-6 right-6 w-96 bg-[#0d0d0d] border border-amber-500/50 shadow-[0_0_50px_rgba(245,158,11,0.15)] rounded-2xl p-5 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300 select-none">
-1510 |             <div className="flex gap-4 items-start">
-1511 |               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 shrink-0">
-1512 |                 <Sliders className="w-5 h-5 animate-pulse" />
-1513 |               </div>
-1514 |               <div className="flex-1 space-y-2">
-1515 |                 <div className="flex justify-between items-center">
-1516 |                   <span className="text-[10px] font-bold text-amber-500 font-mono tracking-widest uppercase">Permission Required</span>
-1517 |                   <span className="text-[9px] text-neutral-500 font-mono">Agent Tool</span>
-1518 |                 </div>
-1519 |                 <h4 className="text-xs font-bold text-white">
-1520 |                   &apos;{(nodes.find(n => n.id === pendingApproval.nodeId)?.data as any)?.name}&apos; wants to use <span className="text-amber-400 font-mono">[{pendingApproval.toolName}]</span>
-1521 |                 </h4>
-1522 |                 <p className="text-[10px] text-neutral-400 leading-normal">
-1523 |                   Action: <span className="text-white font-semibold">{pendingApproval.action}</span> — {pendingApproval.detail}
-1524 |                 </p>
-1525 |                 <div className="pt-3 flex gap-2">
-1526 |                   <button
-1527 |                     onClick={() => {
-1528 |                       const sessId = pendingApproval.sessionId || activeSessionId || "";
-1529 |                       fetch("/api/gemini/approve", {
-1530 |                         method: "POST",
-1531 |                         headers: { "Content-Type": "application/json" },
-1532 |                         body: JSON.stringify({
-1533 |                           sessionId: sessId,
-1534 |                           nodeId: pendingApproval.nodeId,
-1535 |                           toolName: pendingApproval.toolName,
-1536 |                           action: "approve"
-1537 |                         })
-1538 |                       }).catch(e => console.error("Failed to approve tool:", e));
-1539 | 
-1540 |                       const node = nodes.find(n => n.id === pendingApproval.nodeId);
-1541 |                       if (node) {
-1542 |                         const updatedLogs = ((node.data as any).toolLogs || []).map((log: any) => {
-1543 |                           if (log.id === pendingApproval.logId) {
-1544 |                             return { ...log, status: "SUCCESS" as const, detail: `Approved: ${pendingApproval.detail}` };
-1545 |                           }
-1546 |                           return log;
-1547 |                         });
-1548 |                         updateNodeField(pendingApproval.nodeId, { toolLogs: updatedLogs });
-1549 |                       }
-1550 |                       useWorkflowStore.setState({ pendingApproval: null });
-1551 |                     }}
-1552 |                     className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg text-[10px] font-mono transition-colors cursor-pointer"
-1553 |                   >
-1554 |                     Approve
-1555 |                   </button>
-1556 |                   <button
-1557 |                     onClick={() => {
-1558 |                       const sessId = pendingApproval.sessionId || activeSessionId || "";
-1559 |                       fetch("/api/gemini/approve", {
-1560 |                         method: "POST",
-1561 |                         headers: { "Content-Type": "application/json" },
-1562 |                         body: JSON.stringify({
-1563 |                           sessionId: sessId,
-1564 |                           nodeId: pendingApproval.nodeId,
-1565 |                           toolName: pendingApproval.toolName,
-1566 |                           action: "deny"
-1567 |                         })
-1568 |                       }).catch(e => console.error("Failed to deny tool:", e));
-1569 | 
-1570 |                       const node = nodes.find(n => n.id === pendingApproval.nodeId);
-1571 |                       if (node) {
-1572 |                         const updatedLogs = ((node.data as any).toolLogs || []).map((log: any) => {
-1573 |                           if (log.id === pendingApproval.logId) {
-1574 |                             return { ...log, status: "BLOCKED" as const, detail: `Denied: ${pendingApproval.detail}` };
-1575 |                           }
-1576 |                           return log;
-1577 |                         });
-1578 |                         updateNodeField(pendingApproval.nodeId, { toolLogs: updatedLogs });
-1579 |                       }
-1580 |                       useWorkflowStore.setState({ pendingApproval: null });
-1581 |                     }}
-1582 |                     className="px-4 py-2 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-lg text-[10px] font-mono transition-colors cursor-pointer"
-1583 |                   >
-1584 |                     Deny
-1585 |                   </button>
-1586 |                 </div>
-1587 |               </div>
-1588 |             </div>
-1589 |           </div>
-1590 |         )}
-1591 | 
-1592 |       </AnimatePresence>
-1593 |     </div>
-1594 |   );
-1595 | }
-1596 |
+ 951 |                       {isOrchestrating ? (
+ 952 |                         <>
+ 953 |                           <div className="w-3.5 h-3.5 border-2 border-neutral-500 border-t-neutral-200 rounded-full animate-spin" />
+ 954 |                           <span>Running Flow...</span>
+ 955 |                         </>
+ 956 |                       ) : (
+ 957 |                         <>
+ 958 |                           <Zap className="w-3.5 h-3.5 text-black fill-black" />
+ 959 |                           <span>Proceed with Agents</span>
+ 960 |                         </>
+ 961 |                       )}
+ 962 |                     </button>
+ 963 |                     <button
+ 964 |                       onClick={() => setCurrentTab("chat")}
+ 965 |                       className="h-10 px-4 rounded-[24px] border border-[#1f1f1f] hover:border-neutral-600 bg-black/80 backdrop-blur-md text-neutral-400 hover:text-white text-xs font-semibold transition-all cursor-pointer shadow-2xl"
+ 966 |                     >
+ 967 |                       Return to Chat
+ 968 |                     </button>
+ 969 |                   </div>
+ 970 |                 </div>
+ 971 |               )}
+ 972 |             </div>
+ 973 |           )}
+ 974 |         </div>
+ 975 |       </main>
+ 976 | 
+ 977 |       {/* 3. RIGHT Sliding Configuration Edit Panel */}
+ 978 |       {currentTab === "arena" && (
+ 979 |         <div
+ 980 |           className={`fixed top-0 right-0 h-full w-80 bg-[#0c0c0c]/95 border-l border-[#1f1f1f] z-40 flex flex-col justify-between shadow-2xl transition-transform duration-300 right-panel select-none ${
+ 981 |             isConfigPanelOpen ? "translate-x-0" : "translate-x-full"
+ 982 |           }`}
+ 983 |         >
+ 984 |         <button
+ 985 |           onClick={handleCloseConfigPanel}
+ 986 |           className="absolute -left-8 top-1/2 -translate-y-1/2 w-8 h-16 bg-[#0c0c0c]/95 border border-[#1f1f1f] border-r-0 rounded-l-xl flex items-center justify-center text-neutral-400 hover:text-white transition-colors cursor-pointer"
+ 987 |         >
+ 988 |           {isConfigPanelOpen ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+ 989 |         </button>
+ 990 | 
+ 991 |         {activeNodeDetail ? (
+ 992 |           <div className="flex-1 flex flex-col h-full overflow-hidden">
+ 993 |             <div className="p-5 border-b border-[#1f1f1f] flex justify-between items-center bg-[#0d0d0d]">
+ 994 |               <div>
+ 995 |                 <h3 className="text-sm font-bold text-white uppercase tracking-wider">{activeNodeDetail.data.name}</h3>
+ 996 |                 <span className="text-[8px] font-mono text-neutral-500 uppercase tracking-widest block mt-0.5">{activeNodeDetail.data.tag}</span>
+ 997 |               </div>
+ 998 |               <button onClick={handleCloseConfigPanel} className="text-neutral-500 hover:text-white cursor-pointer">
+ 999 |                 <X className="w-4 h-4" />
+1000 |               </button>
+1001 |             </div>
+1002 | 
+1003 |             <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
+1004 |               {/* Enable/Disable toggle */}
+1005 |               <div className="flex items-center justify-between bg-[#070707] border border-[#1f1f1f] p-3 rounded-xl">
+1006 |                 <div className="flex flex-col">
+1007 |                   <span className="text-[10px] font-bold text-white uppercase tracking-wider">Active</span>
+1008 |                   <span className="text-[9px] text-neutral-500 mt-0.5">Disable to exclude from pipeline</span>
+1009 |                 </div>
+1010 |                 <button
+1011 |                   onClick={() => updateNodeField(activeNodeDetail.id, { enabled: !activeNodeDetail.data.enabled })}
+1012 |                   className={`w-10 h-5 rounded-full p-0.5 transition-all duration-200 cursor-pointer ${activeNodeDetail.data.enabled ? "bg-white" : "bg-neutral-800"}`}
+1013 |                 >
+1014 |                   <div className={`w-4 h-4 rounded-full transition-transform ${activeNodeDetail.data.enabled ? "bg-black translate-x-5" : "bg-neutral-600 translate-x-0"}`} />
+1015 |                 </button>
+1016 |               </div>
+1017 | 
+1018 |               {/* Priority Slider */}
+1019 |               <div className="space-y-1 bg-[#070707] border border-[#1f1f1f] p-3 rounded-xl">
+1020 |                 <div className="flex justify-between items-center text-[9px] font-mono uppercase text-neutral-400 font-bold">
+1021 |                   <span>Priority</span>
+1022 |                   <span className="text-white">Level {activeNodeDetail.data.priority}</span>
+1023 |                 </div>
+1024 |                 <input
+1025 |                   type="range" min="1" max="10" step="1"
+1026 |                   value={activeNodeDetail.data.priority}
+1027 |                   onChange={(e) => updateNodeField(activeNodeDetail.id, { priority: parseInt(e.target.value) })}
+1028 |                   className="w-full accent-white h-1 bg-[#1f1f1f] rounded-lg appearance-none cursor-pointer mt-2"
+1029 |                 />
+1030 |               </div>
+1031 | 
+1032 |               {/* Name */}
+1033 |               <div className="space-y-1.5">
+1034 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Agent Name</label>
+1035 |                 <input
+1036 |                   type="text" value={activeNodeDetail.data.name}
+1037 |                   onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })}
+1038 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
+1039 |                 />
+1040 |               </div>
+1041 | 
+1042 |               {/* Personality */}
+1043 |               <div className="space-y-1.5">
+1044 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Personality</label>
+1045 |                 <input
+1046 |                   type="text" value={activeNodeDetail.data.personality}
+1047 |                   onChange={(e) => updateNodeField(activeNodeDetail.id, { personality: e.target.value })}
+1048 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
+1049 |                 />
+1050 |               </div>
+1051 | 
+1052 |               {/* System Prompt */}
+1053 |               <div className="space-y-1.5">
+1054 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label>
+1055 |                 <textarea
+1056 |                   value={activeNodeDetail.data.systemPrompt}
+1057 |                   onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })}
+1058 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed"
+1059 |                 />
+1060 |               </div>
+1061 | 
+1062 |               {/* Goal Objective */}
+1063 |               <div className="space-y-1.5">
+1064 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Objective</label>
+1065 |                 <textarea
+1066 |                   value={activeNodeDetail.data.objective}
+1067 |                   onChange={(e) => updateNodeField(activeNodeDetail.id, { objective: e.target.value })}
+1068 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[60px] resize-none leading-relaxed"
+1069 |                 />
+1070 |               </div>
+1071 | 
+1072 |               {/* Rules */}
+1073 |               <div className="space-y-2">
+1074 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold block">Rules</label>
+1075 |                 <div className="space-y-1.5">
+1076 |                   {activeNodeDetail.data.rules && activeNodeDetail.data.rules.map((rule: any, idx: number) => (
+1077 |                     <div key={idx} className="flex gap-2 items-center bg-[#050505] border border-[#1f1f1f] p-2 rounded-lg justify-between">
+1078 |                       <span className="text-[10px] text-neutral-300 leading-normal flex-1 pr-2">{rule}</span>
+1079 |                       <button onClick={() => handleDeleteRule(idx)} className="text-neutral-500 hover:text-red-400 transition-colors shrink-0 cursor-pointer">
+1080 |                         <Trash2 className="w-3.5 h-3.5" />
+1081 |                       </button>
+1082 |                     </div>
+1083 |                   ))}
+1084 |                 </div>
+1085 |                 <div className="flex gap-2">
+1086 |                   <input
+1087 |                     type="text" value={newRuleText}
+1088 |                     onChange={(e) => setNewRuleText(e.target.value)}
+1089 |                     placeholder="Add constraint..."
+1090 |                     className="flex-1 bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
+1091 |                   />
+1092 |                   <button onClick={handleAddRule} className="bg-white text-black font-bold text-xs px-3 rounded-lg hover:bg-neutral-200 cursor-pointer">Add</button>
+1093 |                 </div>
+1094 |               </div>
+1095 | 
+1096 |               {/* Sliders */}
+1097 |               <div className="space-y-4 pt-3 border-t border-[#141414]">
+1098 |                 {[
+1099 |                   { label: "Creativity", key: "temp", min: 0, max: 1, step: 0.05, display: (v: number) => v.toString() },
+1100 |                   { label: "Logic / Depth", key: "logic", min: 10, max: 100, step: 5, display: (v: number) => `${v}%` },
+1101 |                   { label: "Empathy", key: "empathy", min: 0, max: 100, step: 5, display: (v: number) => `${v}%` }
+1102 |                 ].map(({ label, key, min, max, step, display }) => (
+1103 |                   <div key={key} className="space-y-1">
+1104 |                     <div className="flex justify-between items-center text-[9px] font-mono uppercase text-neutral-400 font-bold">
+1105 |                       <span>{label}</span>
+1106 |                       <span className="text-white">{display(activeNodeDetail.data[key])}</span>
+1107 |                     </div>
+1108 |                     <input
+1109 |                       type="range" min={min} max={max} step={step}
+1110 |                       value={activeNodeDetail.data[key]}
+1111 |                       onChange={(e) => updateNodeField(activeNodeDetail.id, { [key]: key === "temp" ? parseFloat(e.target.value) : parseInt(e.target.value) })}
+1112 |                       className="w-full accent-white h-1 bg-[#1f1f1f] rounded-lg appearance-none cursor-pointer"
+1113 |                     />
+1114 |                   </div>
+1115 |                 ))}
+1116 |               </div>
+1117 | 
+1118 |               {/* Tool Integrations */}
+1119 |               <div className="pt-5 border-t border-[#141414] space-y-4">
+1120 |                 <div className="flex justify-between items-center">
+1121 |                   <label className="text-[10px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Tools</label>
+1122 |                   <span className="text-[8px] font-mono text-neutral-500 uppercase">Attached: {activeNodeDetail.data.tools?.length || 0}</span>
+1123 |                 </div>
+1124 |                 <select
+1125 |                   id="tool-selector-dropdown"
+1126 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-neutral-300 outline-none focus:border-neutral-500"
+1127 |                   defaultValue=""
+1128 |                   onChange={(e) => {
+1129 |                     const toolName = e.target.value;
+1130 |                     if (!toolName) return;
+1131 |                     const currentTools = activeNodeDetail.data.tools || [];
+1132 |                     if (!currentTools.includes(toolName)) {
+1133 |                       const updatedTools = [...currentTools, toolName];
+1134 |                       const permissions = activeNodeDetail.data.toolPermissions || {};
+1135 |                       const updatedPerms = { ...permissions, [toolName]: permissions[toolName] || "ALLOWED" };
+1136 |                       updateNodeField(activeNodeDetail.id, { tools: updatedTools, toolPermissions: updatedPerms });
+1137 |                     }
+1138 |                     e.target.value = "";
+1139 |                   }}
+1140 |                 >
+1141 |                   <option value="" disabled>+ Attach tool...</option>
+1142 |                   {["Web Search", "Browser", "Memory", "File Upload", "Code Executor", "Vision", "Voice", "API Connector"]
+1143 |                     .filter(tool => !(activeNodeDetail.data.tools || []).includes(tool))
+1144 |                     .map((tool: string) => (
+1145 |                       <option key={tool} value={tool}>{tool}</option>
+1146 |                     ))}
+1147 |                 </select>
+1148 | 
+1149 |                 <div className="space-y-3">
+1150 |                   {(!activeNodeDetail.data.tools || activeNodeDetail.data.tools.length === 0) ? (
+1151 |                     <div className="bg-[#050505] border border-dashed border-[#1f1f1f] p-4 text-center rounded-xl">
+1152 |                       <p className="text-[10px] text-neutral-500">No tools attached.</p>
+1153 |                     </div>
+1154 |                   ) : (
+1155 |                     activeNodeDetail.data.tools.map((tool: any) => {
+1156 |                       const currentPermissions = activeNodeDetail.data.toolPermissions || {};
+1157 |                       const permission = currentPermissions[tool] || "ALLOWED";
+1158 |                       return (
+1159 |                         <div key={tool} className="bg-[#050505] border border-[#1f1f1f] p-3 rounded-xl space-y-2">
+1160 |                           <div className="flex justify-between items-center">
+1161 |                             <span className="text-xs font-bold text-white flex items-center gap-1.5">
+1162 |                               <span className={`w-1.5 h-1.5 rounded-full ${permission === "ALLOWED" ? "bg-emerald-500 animate-pulse" : permission === "ASK" ? "bg-amber-500" : "bg-rose-500"}`} />
+1163 |                               {tool}
+1164 |                             </span>
+1165 |                             <button
+1166 |                               onClick={() => {
+1167 |                                 const updatedTools = (activeNodeDetail.data.tools || []).filter((t: string) => t !== tool);
+1168 |                                 const updatedPerms = { ...(activeNodeDetail.data.toolPermissions || {}) };
+1169 |                                 delete updatedPerms[tool];
+1170 |                                 updateNodeField(activeNodeDetail.id, { tools: updatedTools, toolPermissions: updatedPerms });
+1171 |                               }}
+1172 |                               className="text-neutral-500 hover:text-red-400 p-1 transition-colors cursor-pointer"
+1173 |                             >
+1174 |                               <Trash2 className="w-3.5 h-3.5" />
+1175 |                             </button>
+1176 |                           </div>
+1177 |                           <div className="grid grid-cols-3 gap-1 pt-1">
+1178 |                             {(["ALLOWED", "ASK", "DENIED"] as const).map((level) => (
+1179 |                               <button
+1180 |                                 key={level}
+1181 |                                 onClick={() => {
+1182 |                                   const updatedPerms = { ...(activeNodeDetail.data.toolPermissions || {}), [tool]: level };
+1183 |                                   updateNodeField(activeNodeDetail.id, { toolPermissions: updatedPerms });
+1184 |                                 }}
+1185 |                                 className={`py-1 text-[9px] font-mono font-bold rounded-md border transition-all cursor-pointer ${
+1186 |                                   permission === level
+1187 |                                     ? level === "ALLOWED" ? "bg-emerald-950/40 text-emerald-400 border-emerald-500/50"
+1188 |                                     : level === "ASK" ? "bg-amber-950/40 text-amber-400 border-amber-500/50"
+1189 |                                     : "bg-rose-950/40 text-rose-400 border-rose-500/50"
+1190 |                                     : "bg-transparent text-neutral-500 border-[#1f1f1f] hover:text-neutral-300"
+1191 |                                 }`}
+1192 |                               >
+1193 |                                 {level === "ALLOWED" ? "ALLOW" : level === "ASK" ? "ASK" : "DENY"}
+1194 |                               </button>
+1195 |                             ))}
+1196 |                           </div>
+1197 |                         </div>
+1198 |                       );
+1199 |                     })
+1200 |                   )}
+1201 |                 </div>
+1202 |               </div>
+1203 | 
+1204 |               {/* Connections */}
+1205 |               <div className="pt-5 border-t border-[#141414] space-y-4">
+1206 |                 <div className="flex justify-between items-center">
+1207 |                   <label className="text-[10px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Connections</label>
+1208 |                   <span className="text-[8px] font-mono text-neutral-500 uppercase">
+1209 |                     Links: {edges.filter(c => c.source === activeNodeDetail.id || c.target === activeNodeDetail.id).length}
+1210 |                   </span>
+1211 |                 </div>
+1212 |                 <select
+1213 |                   id="connection-selector-dropdown"
+1214 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-neutral-300 outline-none focus:border-neutral-500"
+1215 |                   defaultValue=""
+1216 |                   onChange={(e) => {
+1217 |                     const targetId = e.target.value;
+1218 |                     if (!targetId) return;
+1219 |                     const exists = edges.some(c =>
+1220 |                       (c.source === activeNodeDetail.id && c.target === targetId) ||
+1221 |                       (c.source === targetId && c.target === activeNodeDetail.id)
+1222 |                     );
+1223 |                     if (!exists) {
+1224 |                       setEdges(prev => [...prev, {
+1225 |                         id: `e-${activeNodeDetail.id}-${targetId}`,
+1226 |                         source: activeNodeDetail.id,
+1227 |                         target: targetId,
+1228 |                         animated: true,
+1229 |                         type: 'custom'
+1230 |                       }]);
+1231 |                       // Bug 1: Sync dependency — the target node now depends on this (source) node
+1232 |                       const targetNode = nodes.find(n => n.id === targetId);
+1233 |                       if (targetNode) {
+1234 |                         const currentDeps = (targetNode.data as any).dependencies || [];
+1235 |                         if (!currentDeps.includes(activeNodeDetail.id)) {
+1236 |                           updateNodeField(targetId, {
+1237 |                             dependencies: [...currentDeps, activeNodeDetail.id]
+1238 |                           });
+1239 |                         }
+1240 |                       }
+1241 |                     }
+1242 |                     e.target.value = "";
+1243 |                   }}
+1244 |                 >
+1245 |                   <option value="" disabled>+ Connect to agent...</option>
+1246 |                   {nodes.filter(n => n.id !== activeNodeDetail.id && n.type === 'custom').map(node => (
+1247 |                     <option key={node.id} value={node.id}>{(node.data as any).name}</option>
+1248 |                   ))}
+1249 |                 </select>
+1250 |                 <div className="space-y-1.5">
+1251 |                   {(() => {
+1252 |                     const linkedConns = edges.filter(c => c.source === activeNodeDetail.id || c.target === activeNodeDetail.id);
+1253 |                     if (linkedConns.length === 0) {
+1254 |                       return (
+1255 |                         <div className="bg-[#050505] border border-dashed border-[#1f1f1f] p-3 text-center rounded-xl">
+1256 |                           <p className="text-[10px] text-neutral-500">No connections.</p>
+1257 |                         </div>
+1258 |                       );
+1259 |                     }
+1260 |                     return linkedConns.map((conn, index) => {
+1261 |                       const otherNodeId = conn.source === activeNodeDetail.id ? conn.target : conn.source;
+1262 |                       const otherNode = nodes.find(n => n.id === otherNodeId);
+1263 |                       return (
+1264 |                         <div key={index} className="flex gap-2 items-center bg-[#050505] border border-[#1f1f1f] p-2 rounded-lg justify-between">
+1265 |                           <span className="text-[10px] text-neutral-300 leading-normal flex-1 pr-2">
+1266 |                             {otherNode ? (otherNode.data as any).name : otherNodeId}
+1267 |                           </span>
+1268 |                           <button onClick={() => deleteEdge(conn.id)} className="text-neutral-500 hover:text-red-400 transition-colors shrink-0 cursor-pointer">
+1269 |                             <Trash2 className="w-3.5 h-3.5" />
+1270 |                           </button>
+1271 |                         </div>
+1272 |                       );
+1273 |                     });
+1274 |                   })()}
+1275 |                 </div>
+1276 |               </div>
+1277 | 
+1278 |               {/* Execution Logs */}
+1279 |               <div className="pt-5 border-t border-[#141414] space-y-3">
+1280 |                 <div className="flex justify-between items-center">
+1281 |                   <label className="text-[10px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Execution Log</label>
+1282 |                   <button
+1283 |                     onClick={() => updateNodeField(activeNodeDetail.id, { toolLogs: [] })}
+1284 |                     className="text-[8px] font-mono text-neutral-500 hover:text-white uppercase transition-colors cursor-pointer"
+1285 |                   >
+1286 |                     Clear
+1287 |                   </button>
+1288 |                 </div>
+1289 |                 <div className="bg-black border border-[#1f1f1f] rounded-xl p-3 h-44 overflow-y-auto font-mono text-[9px] space-y-1.5 custom-scrollbar">
+1290 |                   {(!activeNodeDetail.data.toolLogs || activeNodeDetail.data.toolLogs.length === 0) ? (
+1291 |                     <div className="h-full flex items-center justify-center text-neutral-600 text-center">
+1292 |                       <span>No logs recorded.</span>
+1293 |                     </div>
+1294 |                   ) : (
+1295 |                     activeNodeDetail.data.toolLogs.map((log: any) => (
+1296 |                       <div key={log.id} className="flex gap-1.5 items-start leading-normal text-neutral-300">
+1297 |                         <span className="text-neutral-500 shrink-0 select-none">[{log.timestamp}]</span>
+1298 |                         <div className="flex-1">
+1299 |                           <span className="font-bold text-white uppercase mr-1">[{log.tool}]</span>
+1300 |                           <span>{log.detail}</span>
+1301 |                         </div>
+1302 |                         <span className={`shrink-0 font-bold px-1 rounded-sm text-[8px] ${
+1303 |                           log.status === "SUCCESS" ? "bg-emerald-950 text-emerald-400" :
+1304 |                           log.status === "PENDING" ? "bg-amber-950 text-amber-400 animate-pulse" :
+1305 |                           log.status === "BLOCKED" ? "bg-rose-950 text-rose-400" : "bg-neutral-800 text-neutral-400"
+1306 |                         }`}>
+1307 |                           {log.status}
+1308 |                         </span>
+1309 |                       </div>
+1310 |                     ))
+1311 |                   )}
+1312 |                 </div>
+1313 | 
+1314 |               </div>
+1315 |             </div>
+1316 | 
+1317 |             {/* Footer */}
+1318 |             <div className="p-4 border-t border-[#1f1f1f] bg-[#0d0d0d] grid grid-cols-2 gap-3">
+1319 |               <button
+1320 |                 onClick={() => { handleCloseConfigPanel(); }}
+1321 |                 className="py-2.5 border border-[#1f1f1f] text-xs font-semibold text-neutral-400 hover:text-white rounded-lg transition-colors font-mono cursor-pointer"
+1322 |               >
+1323 |                 Close
+1324 |               </button>
+1325 |               <button
+1326 |                 onClick={() => {
+1327 |                   alert("Agent configuration saved.");
+1328 |                   handleCloseConfigPanel();
+1329 |                 }}
+1330 |                 className="py-2.5 bg-white hover:bg-neutral-100 text-black text-xs font-bold rounded-lg transition-all font-mono cursor-pointer"
+1331 |               >
+1332 |                 Save Config
+1333 |               </button>
+1334 |             </div>
+1335 |           </div>
+1336 |         ) : (
+1337 |           <div className="flex-1 flex flex-col items-center justify-center p-6 text-center select-none">
+1338 |             <Bot className="w-12 h-12 text-neutral-700 mb-3 animate-pulse" />
+1339 |             <p className="text-xs text-neutral-500">Click any agent node in the Flow to edit its configuration.</p>
+1340 |           </div>
+1341 |         )}
+1342 |         </div>
+1343 |       )}
+1344 | 
+1345 |       {/* 4. Modals & Overlays */}
+1346 |       <AnimatePresence>
+1347 | 
+1348 |         {/* BYOK MODAL */}
+1349 |         {isSecretOpen && (
+1350 |           <motion.div
+1351 |             initial={{ opacity: 0 }}
+1352 |             animate={{ opacity: 1 }}
+1353 |             exit={{ opacity: 0 }}
+1354 |             className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
+1355 |           >
+1356 |             <motion.div
+1357 |               initial={{ scale: 0.95 }}
+1358 |               animate={{ scale: 1 }}
+1359 |               exit={{ scale: 0.95 }}
+1360 |               className="w-full max-w-md bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl"
+1361 |             >
+1362 |               <button onClick={() => setIsSecretOpen(false)} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer">
+1363 |                 <X className="w-5 h-5" />
+1364 |               </button>
+1365 |               <div className="flex gap-4 items-center mb-6">
+1366 |                 <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
+1367 |                   <Key className="w-6 h-6 text-white" />
+1368 |                 </div>
+1369 |                 <div>
+1370 |                   <h3 className="text-sm font-bold text-white">AI Engine Settings</h3>
+1371 |                   <p className="text-xs text-neutral-400 font-sans mt-0.5">Select your AI provider and configure keys.</p>
+1372 |                 </div>
+1373 |               </div>
+1374 |               <div className="space-y-4">
+1375 |                 {/* 1. Provider Selector */}
+1376 |                 <div className="space-y-1.5">
+1377 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Provider</label>
+1378 |                   <select
+1379 |                     value={selectedProvider}
+1380 |                     onChange={(e) => setSelectedProvider(e.target.value)}
+1381 |                     className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
+1382 |                   >
+1383 |                     {Object.keys(availableProviders).length > 0 ? (
+1384 |                       Object.entries(availableProviders).map(([pid, cfg]: [string, any]) => (
+1385 |                         <option key={pid} value={pid}>{cfg.name}</option>
+1386 |                       ))
+1387 |                     ) : (
+1388 |                       <option value="gemini">Google Gemini</option>
+1389 |                     )}
+1390 |                   </select>
+1391 |                 </div>
+1392 | 
+1393 |                 {/* 1.5 Base URL Selector (conditionally displayed) */}
+1394 |                 {availableProviders[selectedProvider]?.requires_base_url && (
+1395 |                   <div className="space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+1396 |                     <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Base URL</label>
+1397 |                     <input
+1398 |                       type="text"
+1399 |                       placeholder={availableProviders[selectedProvider]?.is_local ? "http://localhost:11434/v1" : "https://YOUR_RESOURCE.openai.azure.com/openai/deployments"}
+1400 |                       value={baseUrlInput}
+1401 |                       onChange={(e) => setBaseUrlInput(e.target.value)}
+1402 |                       className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
+1403 |                     />
+1404 |                   </div>
+1405 |                 )}
+1406 | 
+1407 |                 {/* 2. Model Selector */}
+1408 |                 <div className="space-y-1.5">
+1409 |                   <div className="flex justify-between items-center">
+1410 |                     <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Model</label>
+1411 |                     {availableProviders[selectedProvider] && (
+1412 |                       <button
+1413 |                         onClick={async () => {
+1414 |                           setIsFetchingModels(true);
+1415 |                           setModelsFetchStatus("Connecting...");
+1416 |                           try {
+1417 |                             setProviderApiKey(selectedProvider, apiKeyInput.trim());
+1418 |                             setProviderBaseUrl(selectedProvider, baseUrlInput.trim());
+1419 |                             await fetchProviderModels(selectedProvider);
+1420 |                             setModelsFetchStatus("Models loaded successfully!");
+1421 |                           } catch (e) {
+1422 |                             setModelsFetchStatus("Failed to query models endpoint.");
+1423 |                           } finally {
+1424 |                             setIsFetchingModels(false);
+1425 |                           }
+1426 |                         }}
+1427 |                         disabled={isFetchingModels}
+1428 |                         className="text-[9px] text-cyan-400 hover:underline cursor-pointer disabled:opacity-50 font-mono"
+1429 |                       >
+1430 |                         {isFetchingModels ? "Fetching..." : "Fetch Models ↻"}
+1431 |                       </button>
+1432 |                     )}
+1433 |                   </div>
+1434 |                   {(providerModels[selectedProvider] || availableProviders[selectedProvider]?.models)?.length > 0 ? (
+1435 |                     <select
+1436 |                       value={selectedModel}
+1437 |                       onChange={(e) => setSelectedModel(e.target.value)}
+1438 |                       className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
+1439 |                     >
+1440 |                       {(providerModels[selectedProvider] || availableProviders[selectedProvider].models).map((m: any) => (
+1441 |                         <option key={m.id} value={m.id}>{m.name || m.id} {m.tier ? `(${m.tier})` : ""}</option>
+1442 |                       ))}
+1443 |                     </select>
+1444 |                   ) : (
+1445 |                     <input
+1446 |                       type="text"
+1447 |                       placeholder="e.g. gpt-4o, llama3, custom-deployment-id"
+1448 |                       value={selectedModel}
+1449 |                       onChange={(e) => setSelectedModel(e.target.value)}
+1450 |                       className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
+1451 |                     />
+1452 |                   )}
+1453 |                   {modelsFetchStatus && (
+1454 |                     <p className={`text-[8px] font-mono ${modelsFetchStatus.toLowerCase().includes("failed") ? "text-red-400" : "text-emerald-400"}`}>
+1455 |                       {modelsFetchStatus}
+1456 |                     </p>
+1457 |                   )}
+1458 |                 </div>
+1459 | 
+1460 |                 {/* 3. API Key Input */}
+1461 |                 <div className="space-y-1.5">
+1462 |                   <div className="flex justify-between items-center">
+1463 |                     <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
+1464 |                       {selectedProvider.toUpperCase()}_API_KEY
+1465 |                     </label>
+1466 |                     {availableProviders[selectedProvider]?.key_url && (
+1467 |                       <a
+1468 |                         href={availableProviders[selectedProvider].key_url}
+1469 |                         target="_blank"
+1470 |                         rel="noreferrer"
+1471 |                         className="text-[9px] text-cyan-400 hover:underline"
+1472 |                       >
+1473 |                         Get key ↗
+1474 |                       </a>
+1475 |                     )}
+1476 |                   </div>
+1477 |                   <input
+1478 |                     id="api-key-input"
+1479 |                     type="password"
+1480 |                     placeholder={
+1481 |                       availableProviders[selectedProvider]
+1482 |                         ? `Enter key (starts with ${availableProviders[selectedProvider].key_hint || "sk-..."})`
+1483 |                         : "Enter API key"
+1484 |                     }
+1485 |                     value={apiKeyInput}
+1486 |                     onChange={(e) => setApiKeyInput(e.target.value)}
+1487 |                     className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
+1488 |                   />
+1489 |                   <p className="text-[9px] text-neutral-500 font-mono leading-normal">
+1490 |                     {availableProviders[selectedProvider]?.description || "Configure key for custom models. Key is stored locally in-memory."}
+1491 |                   </p>
+1492 |                 </div>
+1493 | 
+1494 |                 {/* 3.5 Fallback Provider */}
+1495 |                 <div className="space-y-1.5">
+1496 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Fallback Provider (Optional)</label>
+1497 |                   <select
+1498 |                     value={fallbackProviderInput}
+1499 |                     onChange={(e) => setFallbackProviderInput(e.target.value)}
+1500 |                     className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
+1501 |                   >
+1502 |                     <option value="">None (Disabled)</option>
+1503 |                     {Object.entries(availableProviders)
+1504 |                       .filter(([pid]) => pid !== selectedProvider)
+1505 |                       .map(([pid, cfg]: [string, any]) => (
+1506 |                         <option key={pid} value={pid}>{cfg.name}</option>
+1507 |                       ))}
+1508 |                   </select>
+1509 |                 </div>
+1510 | 
+1511 |                 {/* 4. Save and Cancel Buttons */}
+1512 |                 <div className="pt-4 flex gap-3">
+1513 |                   <button
+1514 |                     id="save-api-key-btn"
+1515 |                     onClick={() => {
+1516 |                       setProvider(selectedProvider);
+1517 |                       setModel(selectedModel);
+1518 |                       setProviderApiKey(selectedProvider, apiKeyInput.trim());
+1519 |                       setProviderBaseUrl(selectedProvider, baseUrlInput.trim());
+1520 |                       setFallbackProvider(fallbackProviderInput);
+1521 |                       setIsSecretOpen(false);
+1522 |                     }}
+1523 |                     className="flex-1 py-2.5 bg-white hover:bg-neutral-100 text-black font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
+1524 |                   >
+1525 |                     Save Settings
+1526 |                   </button>
+1527 |                   <button
+1528 |                     onClick={() => setIsSecretOpen(false)}
+1529 |                     className="px-5 py-2.5 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-xl text-xs font-mono transition-colors cursor-pointer"
+1530 |                   >
+1531 |                     Cancel
+1532 |                   </button>
+1533 |                 </div>
+1534 |               </div>
+1535 |             </motion.div>
+1536 |           </motion.div>
+1537 |         )}
+1538 | 
+1539 |         {/* USER PROFILE MODAL */}
+1540 |         {isProfileOpen && (
+1541 |           <motion.div
+1542 |             initial={{ opacity: 0 }}
+1543 |             animate={{ opacity: 1 }}
+1544 |             exit={{ opacity: 0 }}
+1545 |             className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
+1546 |           >
+1547 |             <motion.div
+1548 |               initial={{ scale: 0.95 }}
+1549 |               animate={{ scale: 1 }}
+1550 |               exit={{ scale: 0.95 }}
+1551 |               className="w-full max-w-sm bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl"
+1552 |             >
+1553 |               <button onClick={() => setIsProfileOpen(false)} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer">
+1554 |                 <X className="w-5 h-5" />
+1555 |               </button>
+1556 |               <div className="flex flex-col items-center text-center space-y-4 py-4">
+1557 |                 <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-[#1f1f1f] flex items-center justify-center bg-neutral-900">
+1558 |                   <User className="w-8 h-8 text-neutral-500" />
+1559 |                 </div>
+1560 |                 <div>
+1561 |                   <h3 className="text-sm font-bold text-white uppercase tracking-wider">User Profile</h3>
+1562 |                   <span className="text-xs text-neutral-400 font-mono">solospace_user@gmail.com</span>
+1563 |                 </div>
+1564 |                 <div className="w-full pt-4 space-y-2 border-t border-[#141414]">
+1565 |                   <div className="flex justify-between items-center bg-black py-2 px-3 rounded text-[10px] border border-[#141414] font-mono">
+1566 |                     <span className="text-neutral-500">Plan:</span>
+1567 |                     <span className="text-white font-bold">Pro</span>
+1568 |                   </div>
+1569 |                   <div className="flex justify-between items-center bg-black py-2 px-3 rounded text-[10px] border border-[#141414] font-mono">
+1570 |                     <span className="text-neutral-500">Sessions:</span>
+1571 |                     <span className="text-white font-bold">{Object.values(sessions).length}</span>
+1572 |                   </div>
+1573 |                 </div>
+1574 |                 <button
+1575 |                   onClick={() => setIsProfileOpen(false)}
+1576 |                   className="w-full py-2.5 bg-neutral-900 hover:bg-neutral-800 border border-[#1f1f1f] text-neutral-300 hover:text-white font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
+1577 |                 >
+1578 |                   Close
+1579 |                 </button>
+1580 |               </div>
+1581 |             </motion.div>
+1582 |           </motion.div>
+1583 |         )}
+1584 | 
+1585 |         {/* TOOL APPROVAL TOAST */}
+1586 |         {pendingApproval && (
+1587 |           <div className="fixed bottom-6 right-6 w-96 bg-[#0d0d0d] border border-amber-500/50 shadow-[0_0_50px_rgba(245,158,11,0.15)] rounded-2xl p-5 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300 select-none">
+1588 |             <div className="flex gap-4 items-start">
+1589 |               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 shrink-0">
+1590 |                 <Sliders className="w-5 h-5 animate-pulse" />
+1591 |               </div>
+1592 |               <div className="flex-1 space-y-2">
+1593 |                 <div className="flex justify-between items-center">
+1594 |                   <span className="text-[10px] font-bold text-amber-500 font-mono tracking-widest uppercase">Permission Required</span>
+1595 |                   <span className="text-[9px] text-neutral-500 font-mono">Agent Tool</span>
+1596 |                 </div>
+1597 |                 <h4 className="text-xs font-bold text-white">
+1598 |                   &apos;{(nodes.find(n => n.id === pendingApproval.nodeId)?.data as any)?.name}&apos; wants to use <span className="text-amber-400 font-mono">[{pendingApproval.toolName}]</span>
+1599 |                 </h4>
+1600 |                 <p className="text-[10px] text-neutral-400 leading-normal">
+1601 |                   Action: <span className="text-white font-semibold">{pendingApproval.action}</span> — {pendingApproval.detail}
+1602 |                 </p>
+1603 |                 <div className="pt-3 flex gap-2">
+1604 |                   <button
+1605 |                     onClick={() => {
+1606 |                       const sessId = pendingApproval.sessionId || activeSessionId || "";
+1607 |                       fetch("/api/gemini/approve", {
+1608 |                         method: "POST",
+1609 |                         headers: { "Content-Type": "application/json" },
+1610 |                         body: JSON.stringify({
+1611 |                           sessionId: sessId,
+1612 |                           nodeId: pendingApproval.nodeId,
+1613 |                           toolName: pendingApproval.toolName,
+1614 |                           action: "approve"
+1615 |                         })
+1616 |                       }).catch(e => console.error("Failed to approve tool:", e));
+1617 | 
+1618 |                       const node = nodes.find(n => n.id === pendingApproval.nodeId);
+1619 |                       if (node) {
+1620 |                         const updatedLogs = ((node.data as any).toolLogs || []).map((log: any) => {
+1621 |                           if (log.id === pendingApproval.logId) {
+1622 |                             return { ...log, status: "SUCCESS" as const, detail: `Approved: ${pendingApproval.detail}` };
+1623 |                           }
+1624 |                           return log;
+1625 |                         });
+1626 |                         updateNodeField(pendingApproval.nodeId, { toolLogs: updatedLogs });
+1627 |                       }
+1628 |                       useWorkflowStore.setState({ pendingApproval: null });
+1629 |                     }}
+1630 |                     className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg text-[10px] font-mono transition-colors cursor-pointer"
+1631 |                   >
+1632 |                     Approve
+1633 |                   </button>
+1634 |                   <button
+1635 |                     onClick={() => {
+1636 |                       const sessId = pendingApproval.sessionId || activeSessionId || "";
+1637 |                       fetch("/api/gemini/approve", {
+1638 |                         method: "POST",
+1639 |                         headers: { "Content-Type": "application/json" },
+1640 |                         body: JSON.stringify({
+1641 |                           sessionId: sessId,
+1642 |                           nodeId: pendingApproval.nodeId,
+1643 |                           toolName: pendingApproval.toolName,
+1644 |                           action: "deny"
+1645 |                         })
+1646 |                       }).catch(e => console.error("Failed to deny tool:", e));
+1647 | 
+1648 |                       const node = nodes.find(n => n.id === pendingApproval.nodeId);
+1649 |                       if (node) {
+1650 |                         const updatedLogs = ((node.data as any).toolLogs || []).map((log: any) => {
+1651 |                           if (log.id === pendingApproval.logId) {
+1652 |                             return { ...log, status: "BLOCKED" as const, detail: `Denied: ${pendingApproval.detail}` };
+1653 |                           }
+1654 |                           return log;
+1655 |                         });
+1656 |                         updateNodeField(pendingApproval.nodeId, { toolLogs: updatedLogs });
+1657 |                       }
+1658 |                       useWorkflowStore.setState({ pendingApproval: null });
+1659 |                     }}
+1660 |                     className="px-4 py-2 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-lg text-[10px] font-mono transition-colors cursor-pointer"
+1661 |                   >
+1662 |                     Deny
+1663 |                   </button>
+1664 |                 </div>
+1665 |               </div>
+1666 |             </div>
+1667 |           </div>
+1668 |         )}
+1669 | 
+1670 |       </AnimatePresence>
+1671 |     </div>
+1672 |   );
+1673 | }
+1674 |
 ```
 
 ### File: `Frontend/components/edges/CustomEdge.tsx`
@@ -6136,978 +6736,1023 @@ SoloSpace/
 
 ### File: `Frontend/store/workflowStore.ts`
 
-> 969 lines | 30.2 KB
+> 1014 lines | 31.9 KB
 
 ```typescript
-  1 | import { create } from 'zustand';
-  2 | import {
-  3 |   Node,
-  4 |   Edge,
-  5 |   OnNodesChange,
-  6 |   OnEdgesChange,
-  7 |   OnConnect,
-  8 |   applyNodeChanges,
-  9 |   applyEdgeChanges,
- 10 |   addEdge,
- 11 |   Connection
- 12 | } from '@xyflow/react';
- 13 | 
- 14 | export interface ToolLog {
- 15 |   id: string;
- 16 |   timestamp: string;
- 17 |   tool: string;
- 18 |   action: string;
- 19 |   status: 'SUCCESS' | 'PENDING' | 'BLOCKED' | 'ERROR';
- 20 |   detail: string;
- 21 | }
- 22 | 
- 23 | export interface CanvasNodeData {
- 24 |   name: string;
- 25 |   tag: string;
- 26 |   status: 'IDLE' | 'ACTIVE' | 'SCANNING WEB' | 'AUDITING' | 'QUEUED' | 'WAITING' | 'PROCESSING' | 'STANDBY' | 'DISABLED' | 'ERROR';
- 27 |   metricLabel: string;
- 28 |   metricVal: string;
- 29 |   icon: string;
- 30 |   objective: string;
- 31 |   personality: string;
- 32 |   systemPrompt: string;
- 33 |   rules: string[];
- 34 |   tools: string[];
- 35 |   temp: number;
- 36 |   logic: number;
- 37 |   empathy: number;
- 38 |   context: string;
- 39 |   enabled: boolean;
- 40 |   priority: number;
- 41 |   toolPermissions?: Record<string, 'ALLOWED' | 'ASK' | 'DENIED'>;
- 42 |   toolLogs?: ToolLog[];
- 43 |   [key: string]: any;
- 44 | }
- 45 | 
- 46 | export interface ChatMessage {
- 47 |   id: string;
- 48 |   sender: 'user' | 'ai';
- 49 |   text: string;
- 50 |   thinkingSummary?: string;
- 51 |   timestamp: string;
- 52 | }
- 53 | 
- 54 | export interface AgentTalkLog {
- 55 |   id: string;
- 56 |   senderId: string;
- 57 |   senderName: string;
- 58 |   senderIcon: string;
- 59 |   text: string;
- 60 |   timestamp: string;
- 61 | }
- 62 | 
- 63 | export interface PendingApproval {
- 64 |   sessionId?: string;
- 65 |   nodeId: string;
- 66 |   toolName: string;
- 67 |   action: string;
- 68 |   detail: string;
- 69 |   logId: string;
- 70 | }
- 71 | 
- 72 | export interface ChatSession {
- 73 |   id: string;
- 74 |   title: string;
- 75 |   prompt: string;
- 76 |   mode: 'auto' | 'custom';
- 77 |   nodes: Node[];
- 78 |   edges: Edge[];
- 79 |   chatMessages: ChatMessage[];
- 80 |   agentTalkLogs: AgentTalkLog[];
- 81 |   executionState: 'setup' | 'running' | 'paused';
- 82 |   statusMessage: string;
- 83 |   followUpSuggestions?: string[];
- 84 | }
- 85 | 
- 86 | export interface WorkflowState {
- 87 |   sessions: Record<string, ChatSession>;
- 88 |   activeSessionId: string | null;
- 89 |   nodes: Node[];
- 90 |   edges: Edge[];
- 91 |   selectedNodeId: string | null;
- 92 |   executionState: 'setup' | 'running' | 'paused';
- 93 |   isOrchestrating: boolean;
- 94 |   isThinking: boolean;
- 95 |   statusMessage: string;
- 96 |   chatMessages: ChatMessage[];
- 97 |   agentTalkLogs: AgentTalkLog[];
- 98 |   pendingApproval: PendingApproval | null;
- 99 |   apiKey: string | null;
-100 |   setApiKey: (key: string | null) => void;
-101 |   provider: string;
-102 |   model: string;
-103 |   apiKeys: Record<string, string>;
-104 |   availableProviders: Record<string, any>;
-105 |   setProvider: (provider: string) => void;
-106 |   setModel: (model: string) => void;
-107 |   setProviderApiKey: (provider: string, key: string) => void;
-108 |   fetchAvailableProviders: () => Promise<void>;
-109 |   followUpSuggestions: string[];
-110 |   liveThoughts: string;
-111 |   abortController: AbortController | null;
-112 |   cancelOrchestration: () => void;
-113 | 
-114 |   // Actions
-115 |   setNodes: (nodes: Node[] | ((nds: Node[]) => Node[])) => void;
-116 |   setEdges: (edges: Edge[] | ((eds: Edge[]) => Edge[])) => void;
-117 |   onNodesChange: OnNodesChange<Node>;
-118 |   onEdgesChange: OnEdgesChange;
-119 |   onConnect: OnConnect;
-120 |   setSelectedNodeId: (id: string | null) => void;
-121 |   updateNodeField: (nodeId: string, updates: Partial<CanvasNodeData>) => void;
-122 |   addNode: (node: Node) => void;
-123 |   deleteNode: (nodeId: string) => void;
-124 |   deleteEdge: (edgeId: string) => void;
-125 |   addRule: (nodeId: string, rule: string) => void;
-126 |   deleteRule: (nodeId: string, ruleIndex: number) => void;
-127 |   simulateToolExecution?: never;
-128 |   setExecutionState: (state: 'setup' | 'running' | 'paused') => void;
-129 |   setIsOrchestrating: (val: boolean) => void;
-130 |   setIsThinking: (val: boolean) => void;
-131 |   setStatusMessage: (msg: string) => void;
-132 |   setChatMessages: (msgs: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
-133 |   setAgentTalkLogs: (logs: AgentTalkLog[] | ((prev: AgentTalkLog[]) => AgentTalkLog[])) => void;
-134 |   setPendingApproval: (val: PendingApproval | null) => void;
-135 | 
-136 |   // Session Actions
-137 |   createSession: (prompt: string, mode: 'auto' | 'custom') => string;
-138 |   switchSession: (sessionId: string) => void;
-139 |   saveCurrentSession: () => void;
-140 |   fetchSessions: () => Promise<void>;
-141 |   loadSessionFromDb: (sessionId: string) => Promise<void>;
-142 |   deleteSessionFromDb: (sessionId: string) => Promise<void>;
-143 | 
-144 |   triggerSteerOrchestration: (promptText: string, execute?: boolean) => void;
-145 |   triggerCustomExecution: () => Promise<void>;
-146 | }
-147 | 
-148 | let saveTimeout: any = null;
-149 | const debounceSave = (currentSessionId: string, get: any, set: any) => {
-150 |   if (saveTimeout) clearTimeout(saveTimeout);
-151 |   saveTimeout = setTimeout(() => {
-152 |     // Re-verify the session is still active before saving to prevent stale writes
-153 |     const activeId = get().activeSessionId;
-154 |     if (activeId !== currentSessionId) return;
-155 | 
-156 |     set((state: any) => {
-157 |       // Only save if the session still exists
-158 |       if (!state.sessions[currentSessionId]) return state;
-159 | 
-160 |       const currentSession = {
-161 |         id: currentSessionId,
-162 |         title: state.sessions[currentSessionId]?.title || "Chat",
-163 |         prompt: state.sessions[currentSessionId]?.prompt || "",
-164 |         mode: state.sessions[currentSessionId]?.mode || "auto",
-165 |         nodes: state.nodes,
-166 |         edges: state.edges,
-167 |         chatMessages: state.chatMessages,
-168 |         agentTalkLogs: state.agentTalkLogs,
-169 |         executionState: state.executionState,
-170 |         statusMessage: state.statusMessage,
-171 |         followUpSuggestions: state.followUpSuggestions
-172 |       };
-173 |       return { sessions: { ...state.sessions, [currentSessionId]: currentSession } };
-174 |     });
-175 |   }, 500);
-176 | };
-177 | 
-178 | export const useWorkflowStore = create<WorkflowState>((set, get) => ({
-179 |   sessions: {},
-180 |   activeSessionId: null,
-181 |   nodes: [],
-182 |   edges: [],
-183 |   selectedNodeId: null,
-184 |   executionState: 'setup',
-185 |   isOrchestrating: false,
-186 |   isThinking: false,
-187 |   statusMessage: '',
-188 |   chatMessages: [],
-189 |   agentTalkLogs: [],
-190 |   pendingApproval: null,
-191 |   apiKey: null,
-192 |   setApiKey: (key) => set({ apiKey: key }),
-193 |   provider: "gemini",
-194 |   model: "gemini-2.5-flash",
-195 |   apiKeys: {},
-196 |   availableProviders: {},
-197 |   setProvider: (provider) => set({ provider }),
-198 |   setModel: (model) => set({ model }),
-199 |   setProviderApiKey: (provider, key) => set((state) => ({ apiKeys: { ...state.apiKeys, [provider]: key } })),
-200 |   fetchAvailableProviders: async () => {
-201 |     try {
-202 |       const resp = await fetch("/api/gemini/providers");
-203 |       if (resp.ok) {
-204 |         const data = await resp.json();
-205 |         set({ availableProviders: data });
-206 |       }
-207 |     } catch (e) {
-208 |       console.error("Failed to fetch available providers", e);
-209 |     }
-210 |   },
-211 |   followUpSuggestions: [],
-212 |   liveThoughts: '',
-213 |   abortController: null,
-214 |   cancelOrchestration: () => {
-215 |     const controller = get().abortController;
-216 |     if (controller) {
-217 |       controller.abort();
-218 |       set({ abortController: null, isOrchestrating: false, isThinking: false });
-219 |     }
-220 |   },
-221 | 
-222 |   setNodes: (newNodes) => {
-223 |     set((state) => ({
-224 |       nodes: typeof newNodes === 'function' ? newNodes(state.nodes) : newNodes
-225 |     }));
-226 |     get().saveCurrentSession();
-227 |   },
-228 | 
-229 |   setEdges: (newEdges) => {
-230 |     set((state) => ({
-231 |       edges: typeof newEdges === 'function' ? newEdges(state.edges) : newEdges
-232 |     }));
-233 |     get().saveCurrentSession();
-234 |   },
-235 | 
-236 |   onNodesChange: (changes) => {
-237 |     set((state) => ({
-238 |       nodes: applyNodeChanges(changes, state.nodes)
-239 |     }));
-240 |     get().saveCurrentSession();
-241 |   },
-242 | 
-243 |   onEdgesChange: (changes) => {
-244 |     set((state) => ({
-245 |       edges: applyEdgeChanges(changes, state.edges)
-246 |     }));
-247 |     get().saveCurrentSession();
-248 |   },
-249 | 
-250 |   onConnect: (connection) => {
-251 |     set((state) => {
-252 |       const edge: Edge = {
-253 |         ...connection,
-254 |         id: `e-${connection.source}-${connection.target}`,
-255 |         animated: true,
-256 |         type: 'custom',
-257 |         style: { stroke: '#06b6d4', strokeWidth: 2 }
-258 |       };
-259 | 
-260 |       // Sync dependency: target node depends on source node
-261 |       const updatedNodes = state.nodes.map(node => {
-262 |         if (node.id === connection.target) {
-263 |           const currentDeps = (node.data as any).dependencies || [];
-264 |           if (!currentDeps.includes(connection.source)) {
-265 |             return {
-266 |               ...node,
-267 |               data: { ...node.data, dependencies: [...currentDeps, connection.source] }
-268 |             };
-269 |           }
-270 |         }
-271 |         return node;
-272 |       });
-273 | 
-274 |       return { edges: addEdge(edge, state.edges), nodes: updatedNodes };
-275 |     });
-276 |     get().saveCurrentSession();
-277 |   },
-278 | 
-279 |   setSelectedNodeId: (id) => set({ selectedNodeId: id }),
-280 | 
-281 |   updateNodeField: (nodeId, updates) => {
-282 |     set((state) => ({
-283 |       nodes: state.nodes.map((node) => {
-284 |         if (node.id === nodeId) {
-285 |           return { ...node, data: { ...node.data, ...updates } };
-286 |         }
-287 |         return node;
-288 |       })
-289 |     }));
-290 |     get().saveCurrentSession();
-291 |   },
-292 | 
-293 |   addNode: (node) => {
-294 |     set((state) => ({ nodes: [...state.nodes, node] }));
-295 |     get().saveCurrentSession();
-296 |   },
-297 | 
-298 |   deleteNode: (nodeId) => {
-299 |     set((state) => ({
-300 |       nodes: state.nodes.filter((node) => node.id !== nodeId),
-301 |       edges: state.edges.filter((edge) => edge.source !== nodeId && edge.target !== nodeId),
-302 |       selectedNodeId: state.selectedNodeId === nodeId ? null : state.selectedNodeId
-303 |     }));
-304 |     get().saveCurrentSession();
-305 |   },
-306 | 
-307 |   deleteEdge: (edgeId) => {
-308 |     set((state) => {
-309 |       const edge = state.edges.find(e => e.id === edgeId);
-310 |       let updatedNodes = state.nodes;
-311 | 
-312 |       // Sync dependency: remove source from target's dependencies when edge deleted
-313 |       if (edge) {
-314 |         updatedNodes = state.nodes.map(node => {
-315 |           if (node.id === edge.target) {
-316 |             const currentDeps = (node.data as any).dependencies || [];
-317 |             return {
-318 |               ...node,
-319 |               data: { ...node.data, dependencies: currentDeps.filter((d: string) => d !== edge.source) }
-320 |             };
-321 |           }
-322 |           return node;
-323 |         });
-324 |       }
-325 | 
-326 |       return {
-327 |         edges: state.edges.filter(e => e.id !== edgeId),
-328 |         nodes: updatedNodes
-329 |       };
-330 |     });
-331 |     get().saveCurrentSession();
-332 |   },
-333 | 
-334 |   addRule: (nodeId, rule) => {
-335 |     set((state) => ({
-336 |       nodes: state.nodes.map((node) => {
-337 |         if (node.id === nodeId) {
-338 |           return {
-339 |             ...node,
-340 |             data: { ...node.data, rules: [...((node.data as any).rules || []), rule] }
-341 |           };
-342 |         }
-343 |         return node;
-344 |       })
-345 |     }));
-346 |     get().saveCurrentSession();
-347 |   },
-348 | 
-349 |   deleteRule: (nodeId, ruleIndex) => {
-350 |     set((state) => ({
-351 |       nodes: state.nodes.map((node) => {
-352 |         if (node.id === nodeId) {
-353 |           return {
-354 |             ...node,
-355 |             data: {
-356 |               ...node.data,
-357 |               rules: ((node.data as any).rules || []).filter((_: any, idx: number) => idx !== ruleIndex)
-358 |             }
-359 |           };
-360 |         }
-361 |         return node;
-362 |       })
-363 |     }));
-364 |     get().saveCurrentSession();
-365 |   },
-366 | 
-367 |   // (simulateToolExecution removed — backend runs real tools)
-368 | 
-369 |   // State modifiers
-370 |   setExecutionState: (state) => {
-371 |     set({ executionState: state });
-372 |     get().saveCurrentSession();
-373 |   },
-374 |   setIsOrchestrating: (val) => set({ isOrchestrating: val }),
-375 |   setIsThinking: (val) => set({ isThinking: val }),
-376 |   setStatusMessage: (msg) => {
-377 |     set({ statusMessage: msg });
-378 |     get().saveCurrentSession();
-379 |   },
-380 |   setChatMessages: (msgs) => {
-381 |     set((state) => ({
-382 |       chatMessages: typeof msgs === 'function' ? msgs(state.chatMessages) : msgs
-383 |     }));
-384 |     get().saveCurrentSession();
-385 |   },
-386 |   setAgentTalkLogs: (logs) => {
-387 |     set((state) => ({
-388 |       agentTalkLogs: typeof logs === 'function' ? logs(state.agentTalkLogs) : logs
-389 |     }));
-390 |     get().saveCurrentSession();
-391 |   },
-392 |   setPendingApproval: (val) => set({ pendingApproval: val }),
-393 | 
-394 |   // Session Actions
-395 |   createSession: (prompt, mode) => {
-396 |     const sessionId = Date.now().toString();
-397 |     const newSession: ChatSession = {
-398 |       id: sessionId,
-399 |       title: prompt.length > 40 ? prompt.substring(0, 40) + "..." : prompt,
-400 |       prompt: prompt,
-401 |       mode: mode,
-402 |       nodes: [],
-403 |       edges: [],
-404 |       chatMessages: [],
-405 |       agentTalkLogs: [],
-406 |       executionState: "setup",
-407 |       statusMessage: "",
-408 |       followUpSuggestions: []
-409 |     };
-410 | 
-411 |     set((state) => ({
-412 |       sessions: { ...state.sessions, [sessionId]: newSession },
-413 |       activeSessionId: sessionId,
-414 |       nodes: [],
-415 |       edges: [],
-416 |       chatMessages: [],
-417 |       agentTalkLogs: [],
-418 |       executionState: "setup",
-419 |       statusMessage: "",
-420 |       followUpSuggestions: []
-421 |     }));
-422 | 
-423 |     return sessionId;
-424 |   },
-425 | 
-426 |   switchSession: (sessionId) => {
-427 |     const currentSessionId = get().activeSessionId;
-428 |     if (currentSessionId) {
-429 |       const currentSession: ChatSession = {
-430 |         id: currentSessionId,
-431 |         title: get().sessions[currentSessionId]?.title || "Chat",
-432 |         prompt: get().sessions[currentSessionId]?.prompt || "",
-433 |         mode: get().sessions[currentSessionId]?.mode || "auto",
-434 |         nodes: get().nodes,
-435 |         edges: get().edges,
-436 |         chatMessages: get().chatMessages,
-437 |         agentTalkLogs: get().agentTalkLogs,
-438 |         executionState: get().executionState,
-439 |         statusMessage: get().statusMessage,
-440 |         followUpSuggestions: get().followUpSuggestions
-441 |       };
-442 |       set((state) => ({
-443 |         sessions: { ...state.sessions, [currentSessionId]: currentSession }
-444 |       }));
-445 |     }
-446 | 
-447 |     const newSession = get().sessions[sessionId];
-448 |     if (newSession) {
-449 |       set({
-450 |         activeSessionId: sessionId,
-451 |         nodes: newSession.nodes,
-452 |         edges: newSession.edges,
-453 |         chatMessages: newSession.chatMessages,
-454 |         agentTalkLogs: newSession.agentTalkLogs,
-455 |         executionState: newSession.executionState,
-456 |         statusMessage: newSession.statusMessage,
-457 |         followUpSuggestions: newSession.followUpSuggestions || [],
-458 |         selectedNodeId: null
-459 |       });
-460 |     }
-461 |   },
-462 | 
-463 |   saveCurrentSession: () => {
-464 |     const currentSessionId = get().activeSessionId;
-465 |     if (!currentSessionId) return;
-466 |     debounceSave(currentSessionId, get, set);
-467 |   },
-468 | 
-469 |   fetchSessions: async () => {
-470 |     try {
-471 |       const response = await fetch("/api/gemini/sessions");
-472 |       if (response.ok) {
-473 |         const list = await response.json();
-474 |         const updatedSessions: Record<string, ChatSession> = { ...get().sessions };
-475 |         for (const s of list) {
-476 |           if (!updatedSessions[s.session_id]) {
-477 |             updatedSessions[s.session_id] = {
-478 |               id: s.session_id,
-479 |               title: s.title,
-480 |               prompt: s.prompt,
-481 |               mode: s.mode,
-482 |               nodes: [],
-483 |               edges: [],
-484 |               chatMessages: [],
-485 |               agentTalkLogs: [],
-486 |               executionState: s.execution_state,
-487 |               statusMessage: s.status_message,
-488 |               followUpSuggestions: []
-489 |             };
-490 |           }
-491 |         }
-492 |         set({ sessions: updatedSessions });
-493 |       }
-494 |     } catch (e) {
-495 |       console.error("Failed to fetch sessions from DB", e);
-496 |     }
-497 |   },
-498 | 
-499 |   loadSessionFromDb: async (sessionId: string) => {
-500 |     try {
-501 |       const response = await fetch(`/api/gemini/sessions?id=${sessionId}`);
-502 |       if (response.ok) {
-503 |         const fullSession = await response.json();
-504 |         const session: ChatSession = {
-505 |           id: fullSession.session_id,
-506 |           title: fullSession.title,
-507 |           prompt: fullSession.prompt,
-508 |           mode: fullSession.mode,
-509 |           nodes: fullSession.nodes,
-510 |           edges: fullSession.edges,
-511 |           chatMessages: fullSession.chat_messages,
-512 |           agentTalkLogs: fullSession.agent_talk_logs,
-513 |           executionState: fullSession.execution_state,
-514 |           statusMessage: fullSession.status_message,
-515 |           followUpSuggestions: fullSession.follow_up_suggestions
-516 |         };
-517 |         
-518 |         set((state) => ({
-519 |           sessions: { ...state.sessions, [sessionId]: session },
-520 |           activeSessionId: sessionId,
-521 |           nodes: session.nodes,
-522 |           edges: session.edges,
-523 |           chatMessages: session.chatMessages,
-524 |           agentTalkLogs: session.agentTalkLogs,
-525 |           executionState: session.executionState,
-526 |           statusMessage: session.statusMessage,
-527 |           followUpSuggestions: session.followUpSuggestions || [],
-528 |           selectedNodeId: null
-529 |         }));
-530 |       }
-531 |     } catch (e) {
-532 |       console.error("Failed to load session from DB", e);
-533 |     }
-534 |   },
-535 | 
-536 |   deleteSessionFromDb: async (sessionId: string) => {
-537 |     // Abort orchestration if deleting the currently active session
-538 |     if (get().activeSessionId === sessionId) {
-539 |       const ctrl = get().abortController;
-540 |       if (ctrl) ctrl.abort();
-541 |     }
-542 | 
-543 |     try {
-544 |       const response = await fetch(`/api/gemini/sessions?id=${sessionId}`, {
-545 |         method: "DELETE"
-546 |       });
-547 |       if (response.ok) {
-548 |         set((state) => {
-549 |           const updated = { ...state.sessions };
-550 |           delete updated[sessionId];
-551 |           const newActiveId = state.activeSessionId === sessionId ? null : state.activeSessionId;
-552 |           return {
-553 |             sessions: updated,
-554 |             activeSessionId: newActiveId,
-555 |             abortController: state.activeSessionId === sessionId ? null : state.abortController,
-556 |             isOrchestrating: state.activeSessionId === sessionId ? false : state.isOrchestrating,
-557 |             isThinking: state.activeSessionId === sessionId ? false : state.isThinking,
-558 |             ...(newActiveId ? {} : {
-559 |               nodes: [],
-560 |               edges: [],
-561 |               chatMessages: [],
-562 |               agentTalkLogs: [],
-563 |               executionState: "setup",
-564 |               statusMessage: "",
-565 |               followUpSuggestions: []
-566 |             })
-567 |           };
-568 |         });
-569 |       }
-570 |     } catch (e) {
-571 |       console.error("Failed to delete session", e);
-572 |     }
-573 |   },
-574 | 
-575 |   triggerSteerOrchestration: async (promptText, execute = true) => {
-576 |     if (!promptText.trim()) return;
-577 | 
-578 |     // Abort any active orchestration
-579 |     const currentController = get().abortController;
-580 |     if (currentController) {
-581 |       currentController.abort();
-582 |     }
-583 | 
-584 |     const controller = new AbortController();
-585 | 
-586 |     const userMsg: ChatMessage = {
-587 |       id: Date.now().toString(),
-588 |       sender: "user",
-589 |       text: promptText,
-590 |       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-591 |     };
-592 | 
-593 |     set((state) => ({
-594 |       chatMessages: [...state.chatMessages, userMsg],
-595 |       isOrchestrating: true,
-596 |       isThinking: true,
-597 |       statusMessage: "",
-598 |       liveThoughts: "",
-599 |       agentTalkLogs: [],
-600 |       followUpSuggestions: [],
-601 |       abortController: controller
-602 |     }));
-603 |     get().saveCurrentSession();
-604 | 
-605 |     // Create target AI message placeholder
-606 |     const aiMsgId = (Date.now() + 1).toString();
-607 |     set((state) => ({
-608 |       chatMessages: [
-609 |         ...state.chatMessages,
-610 |         {
-611 |           id: aiMsgId,
-612 |           sender: "ai",
-613 |           text: "",
-614 |           thinkingSummary: "",
-615 |           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-616 |         }
-617 |       ]
-618 |     }));
-619 |     get().saveCurrentSession();
-620 | 
-621 |     try {
-622 |       const response = await fetch("/api/gemini/orchestrate", {
-623 |         method: "POST",
-624 |         headers: { "Content-Type": "application/json" },
-625 |         body: JSON.stringify({
-626 |           prompt: promptText,
-627 |           history: get().chatMessages
-628 |             .filter(m => m.id !== aiMsgId) // Exclude current empty prompt placeholder
-629 |             .map(m => ({ sender: m.sender, text: m.text })),
-630 |           api_key: get().apiKeys[get().provider] || get().apiKey || "",
-631 |           session_id: get().activeSessionId || "",
-632 |           execute_agents: execute,
-633 |           provider: get().provider,
-634 |           model: get().model
-635 |         }),
-636 |         signal: controller.signal
-637 |       });
-638 | 
-639 |       if (!response.ok) {
-640 |         const errData = await response.json().catch(() => ({ detail: "Orchestration failed." }));
-641 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
-642 |       }
-643 | 
-644 |       const reader = response.body?.getReader();
-645 |       const decoder = new TextDecoder();
-646 |       if (!reader) throw new Error("No response stream body reader.");
-647 | 
-648 |       let assistantResponse = "";
-649 |       let thinkingSummary = "";
-650 |       let buffer = "";
-651 | 
-652 |       while (true) {
-653 |         const { done, value } = await reader.read();
-654 |         if (done) break;
-655 | 
-656 |         buffer += decoder.decode(value, { stream: true });
-657 |         
-658 |         const parts = buffer.split("\n\n");
-659 |         buffer = parts.pop() || "";
-660 | 
-661 |         for (const part of parts) {
-662 |           if (!part.trim()) continue;
-663 | 
-664 |           const lines = part.split("\n");
-665 |           let eventType = "text";
-666 |           let dataLines: string[] = [];
-667 | 
-668 |           for (const line of lines) {
-669 |             if (line.startsWith("event: ")) {
-670 |               eventType = line.slice(7);
-671 |             } else if (line.startsWith("data: ")) {
-672 |               dataLines.push(line.slice(6));
-673 |             } else if (line.startsWith("data:")) {
-674 |               dataLines.push(line.slice(5));
-675 |             }
-676 |           }
-677 | 
-678 |           const dataContent = dataLines.join("\n");
-679 | 
-680 |           if (eventType === "text") {
-681 |             try {
-682 |               const textVal = JSON.parse(dataContent);
-683 |               assistantResponse += textVal;
-684 |               set((state) => ({
-685 |                 isThinking: false, // Turn off thinking dots on first text token
-686 |                 chatMessages: state.chatMessages.map(m =>
-687 |                   m.id === aiMsgId ? { ...m, text: assistantResponse } : m
-688 |                 )
-689 |               }));
-690 |             } catch (e) {
-691 |               console.error("Text SSE parse error", e);
-692 |             }
-693 |           } else if (eventType === "thinking") {
-694 |             try {
-695 |               const thoughtVal = JSON.parse(dataContent);
-696 |               thinkingSummary += thoughtVal;
-697 |               set((state) => ({
-698 |                 liveThoughts: thinkingSummary,
-699 |                 chatMessages: state.chatMessages.map(m =>
-700 |                   m.id === aiMsgId ? { ...m, thinkingSummary: thinkingSummary } : m
-701 |                 )
-702 |               }));
-703 |             } catch (e) {
-704 |               console.error("Thinking SSE parse error", e);
-705 |             }
-706 |           } else if (eventType === "status") {
-707 |             try {
-708 |               const statusVal = JSON.parse(dataContent);
-709 |               set({ statusMessage: typeof statusVal === "string" ? statusVal : "" });
-710 |             } catch (e) {
-711 |               console.error("Status SSE parse error", e);
-712 |             }
-713 |           } else if (eventType === "metadata") {
-714 |             try {
-715 |               const meta = JSON.parse(dataContent);
-716 |               set({
-717 |                 nodes: meta.nodes || [],
-718 |                 edges: meta.edges || [],
-719 |                 agentTalkLogs: meta.agent_talk || [],
-720 |                 followUpSuggestions: meta.follow_up_suggestions || []  // Bug 2: populate suggestions
-721 |               });
-722 |             } catch (e) {
-723 |               console.error("Metadata SSE parse error", e);
-724 |             }
-725 |           } else if (eventType === "tool_approval") {
-726 |             try {
-727 |               const approval = JSON.parse(dataContent);
-728 |               set({ pendingApproval: approval });
-729 |             } catch (e) {
-730 |               console.error("Tool approval SSE parse error", e);
-731 |             }
-732 |           }
-733 |         }
-734 |       }
-735 | 
-736 |       if (!assistantResponse) {
-737 |         const fallbackMsg = "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again.";
-738 |         set((state) => ({
-739 |           chatMessages: state.chatMessages.map(m =>
-740 |             m.id === aiMsgId ? { ...m, text: fallbackMsg } : m
-741 |           )
-742 |         }));
-743 |       }
-744 | 
-745 |       set({ abortController: null });
-746 |       get().saveCurrentSession();
-747 |     } catch (err: any) {
-748 |       if (err.name === 'AbortError') {
-749 |         console.log("Steer Orchestration manually aborted.");
-750 |         set((state) => ({
-751 |           chatMessages: state.chatMessages.map(m =>
-752 |             m.id === aiMsgId && !m.text ? { ...m, text: "*Generation stopped by user.*" } : m
-753 |           )
-754 |         }));
-755 |       } else {
-756 |         console.error("Steer Orchestration stream error:", err);
-757 |         const errorMsg = `**Connection Error.**\n\n${err.message || "Failed to parse stream event source. Check backend logs."}`;
-758 |         set((state) => ({
-759 |           chatMessages: state.chatMessages.map(m =>
-760 |             m.id === aiMsgId ? { ...m, text: errorMsg } : m
-761 |           ),
-762 |           nodes: [],
-763 |           edges: [],
-764 |           followUpSuggestions: []
-765 |         }));
-766 |       }
-767 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
-768 |       get().saveCurrentSession();
-769 |     } finally {
-770 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
-771 |       get().saveCurrentSession();
-772 |     }
-773 |   },
-774 | 
-775 |   triggerCustomExecution: async () => {
-776 |     const currentController = get().abortController;
-777 |     if (currentController) {
-778 |       currentController.abort();
-779 |     }
-780 | 
-781 |     const controller = new AbortController();
-782 | 
-783 |     const sessionId = get().activeSessionId;
-784 |     if (!sessionId) return;
-785 | 
-786 |     const prompt = get().chatMessages.findLast(m => m.sender === 'user')?.text || "";
-787 | 
-788 |     set((state) => ({
-789 |       isOrchestrating: true,
-790 |       isThinking: true,
-791 |       statusMessage: "Running custom orchestration loop...",
-792 |       liveThoughts: "",
-793 |       agentTalkLogs: [],
-794 |       followUpSuggestions: [],
-795 |       abortController: controller
-796 |     }));
-797 |     get().saveCurrentSession();
-798 | 
-799 |     const aiMsgId = Date.now().toString();
-800 |     set((state) => ({
-801 |       chatMessages: [
-802 |         ...state.chatMessages,
-803 |         {
-804 |           id: aiMsgId,
-805 |           sender: "ai",
-806 |           text: "",
-807 |           thinkingSummary: "",
-808 |           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-809 |         }
-810 |       ]
-811 |     }));
-812 |     get().saveCurrentSession();
-813 | 
-814 |     try {
-815 |       const response = await fetch("/api/gemini/execute_custom", {
-816 |         method: "POST",
-817 |         headers: { "Content-Type": "application/json" },
-818 |         body: JSON.stringify({
-819 |           session_id: sessionId,
-820 |           prompt: prompt,
-821 |           history: get().chatMessages
-822 |             .filter(m => m.id !== aiMsgId)
-823 |             .map(m => ({ sender: m.sender, text: m.text })),
-824 |           api_key: get().apiKeys[get().provider] || get().apiKey || "",
-825 |           nodes: get().nodes,
-826 |           edges: get().edges,
-827 |           provider: get().provider,
-828 |           model: get().model
-829 |         }),
-830 |         signal: controller.signal
-831 |       });
-832 | 
-833 |       if (!response.ok) {
-834 |         const errData = await response.json().catch(() => ({ detail: "Execution failed." }));
-835 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
-836 |       }
-837 | 
-838 |       const reader = response.body?.getReader();
-839 |       const decoder = new TextDecoder();
-840 |       if (!reader) throw new Error("No response stream body reader.");
-841 | 
-842 |       let assistantResponse = "";
-843 |       let thinkingSummary = "";
-844 |       let buffer = "";
-845 | 
-846 |       while (true) {
-847 |         const { done, value } = await reader.read();
-848 |         if (done) break;
-849 | 
-850 |         buffer += decoder.decode(value, { stream: true });
-851 |         
-852 |         const parts = buffer.split("\n\n");
-853 |         buffer = parts.pop() || "";
-854 | 
-855 |         for (const part of parts) {
-856 |           if (!part.trim()) continue;
-857 | 
-858 |           const lines = part.split("\n");
-859 |           let eventType = "text";
-860 |           let dataLines: string[] = [];
-861 | 
-862 |           for (const line of lines) {
-863 |             if (line.startsWith("event: ")) {
-864 |               eventType = line.slice(7);
-865 |             } else if (line.startsWith("data: ")) {
-866 |               dataLines.push(line.slice(6));
-867 |             } else if (line.startsWith("data:")) {
-868 |               dataLines.push(line.slice(5));
-869 |             }
-870 |           }
-871 | 
-872 |           const dataContent = dataLines.join("\n");
-873 | 
-874 |           if (eventType === "text") {
-875 |             try {
-876 |               const textVal = JSON.parse(dataContent);
-877 |               assistantResponse += textVal;
-878 |               set((state) => ({
-879 |                 isThinking: false,
-880 |                 chatMessages: state.chatMessages.map(m =>
-881 |                   m.id === aiMsgId ? { ...m, text: assistantResponse } : m
-882 |                 )
-883 |               }));
-884 |             } catch (e) {
-885 |               console.error("Text SSE parse error", e);
-886 |             }
-887 |           } else if (eventType === "thinking") {
-888 |             try {
-889 |               const thoughtVal = JSON.parse(dataContent);
-890 |               thinkingSummary += thoughtVal;
-891 |               set((state) => ({
-892 |                 liveThoughts: thinkingSummary,
-893 |                 chatMessages: state.chatMessages.map(m =>
-894 |                   m.id === aiMsgId ? { ...m, thinkingSummary: thinkingSummary } : m
-895 |                 )
-896 |               }));
-897 |             } catch (e) {
-898 |               console.error("Thinking SSE parse error", e);
-899 |             }
-900 |           } else if (eventType === "status") {
-901 |             try {
-902 |               const statusVal = JSON.parse(dataContent);
-903 |               set({ statusMessage: typeof statusVal === "string" ? statusVal : "" });
-904 |             } catch (e) {
-905 |               console.error("Status SSE parse error", e);
-906 |             }
-907 |           } else if (eventType === "metadata") {
-908 |             try {
-909 |               const meta = JSON.parse(dataContent);
-910 |               set({
-911 |                 nodes: meta.nodes || [],
-912 |                 edges: meta.edges || [],
-913 |                 agentTalkLogs: meta.agent_talk || [],
-914 |                 followUpSuggestions: meta.follow_up_suggestions || []  // Bug 2: populate suggestions
-915 |               });
-916 |             } catch (e) {
-917 |               console.error("Metadata SSE parse error", e);
-918 |             }
-919 |           } else if (eventType === "tool_approval") {
-920 |             try {
-921 |               const approval = JSON.parse(dataContent);
-922 |               set({ pendingApproval: approval });
-923 |             } catch (e) {
-924 |               console.error("Tool approval SSE parse error", e);
-925 |             }
-926 |           }
-927 |         }
-928 |       }
-929 | 
-930 |       if (!assistantResponse) {
-931 |         const fallbackMsg = "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again.";
-932 |         set((state) => ({
-933 |           chatMessages: state.chatMessages.map(m =>
-934 |             m.id === aiMsgId ? { ...m, text: fallbackMsg } : m
-935 |           )
-936 |         }));
-937 |       }
-938 | 
-939 |       set({ abortController: null });
-940 |       get().saveCurrentSession();
-941 |     } catch (err: any) {
-942 |       if (err.name === 'AbortError') {
-943 |         console.log("Steer Orchestration manually aborted.");
-944 |         set((state) => ({
-945 |           chatMessages: state.chatMessages.map(m =>
-946 |             m.id === aiMsgId && !m.text ? { ...m, text: "*Generation stopped by user.*" } : m
-947 |           )
-948 |         }));
-949 |       } else {
-950 |         console.error("Steer Orchestration stream error:", err);
-951 |         const errorMsg = `**Connection Error.**\n\n${err.message || "Failed to parse stream event source. Check backend logs."}`;
-952 |         set((state) => ({
-953 |           chatMessages: state.chatMessages.map(m =>
-954 |             m.id === aiMsgId ? { ...m, text: errorMsg } : m
-955 |           ),
-956 |           nodes: [],
-957 |           edges: [],
-958 |           followUpSuggestions: []
-959 |         }));
-960 |       }
-961 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
-962 |       get().saveCurrentSession();
-963 |     } finally {
-964 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
-965 |       get().saveCurrentSession();
-966 |     }
-967 |   }
-968 | }));
-969 |
+   1 | import { create } from 'zustand';
+   2 | import {
+   3 |   Node,
+   4 |   Edge,
+   5 |   OnNodesChange,
+   6 |   OnEdgesChange,
+   7 |   OnConnect,
+   8 |   applyNodeChanges,
+   9 |   applyEdgeChanges,
+  10 |   addEdge,
+  11 |   Connection
+  12 | } from '@xyflow/react';
+  13 | 
+  14 | export interface ToolLog {
+  15 |   id: string;
+  16 |   timestamp: string;
+  17 |   tool: string;
+  18 |   action: string;
+  19 |   status: 'SUCCESS' | 'PENDING' | 'BLOCKED' | 'ERROR';
+  20 |   detail: string;
+  21 | }
+  22 | 
+  23 | export interface CanvasNodeData {
+  24 |   name: string;
+  25 |   tag: string;
+  26 |   status: 'IDLE' | 'ACTIVE' | 'SCANNING WEB' | 'AUDITING' | 'QUEUED' | 'WAITING' | 'PROCESSING' | 'STANDBY' | 'DISABLED' | 'ERROR';
+  27 |   metricLabel: string;
+  28 |   metricVal: string;
+  29 |   icon: string;
+  30 |   objective: string;
+  31 |   personality: string;
+  32 |   systemPrompt: string;
+  33 |   rules: string[];
+  34 |   tools: string[];
+  35 |   temp: number;
+  36 |   logic: number;
+  37 |   empathy: number;
+  38 |   context: string;
+  39 |   enabled: boolean;
+  40 |   priority: number;
+  41 |   toolPermissions?: Record<string, 'ALLOWED' | 'ASK' | 'DENIED'>;
+  42 |   toolLogs?: ToolLog[];
+  43 |   [key: string]: any;
+  44 | }
+  45 | 
+  46 | export interface ChatMessage {
+  47 |   id: string;
+  48 |   sender: 'user' | 'ai';
+  49 |   text: string;
+  50 |   thinkingSummary?: string;
+  51 |   timestamp: string;
+  52 | }
+  53 | 
+  54 | export interface AgentTalkLog {
+  55 |   id: string;
+  56 |   senderId: string;
+  57 |   senderName: string;
+  58 |   senderIcon: string;
+  59 |   text: string;
+  60 |   timestamp: string;
+  61 | }
+  62 | 
+  63 | export interface PendingApproval {
+  64 |   sessionId?: string;
+  65 |   nodeId: string;
+  66 |   toolName: string;
+  67 |   action: string;
+  68 |   detail: string;
+  69 |   logId: string;
+  70 | }
+  71 | 
+  72 | export interface ChatSession {
+  73 |   id: string;
+  74 |   title: string;
+  75 |   prompt: string;
+  76 |   mode: 'auto' | 'custom';
+  77 |   nodes: Node[];
+  78 |   edges: Edge[];
+  79 |   chatMessages: ChatMessage[];
+  80 |   agentTalkLogs: AgentTalkLog[];
+  81 |   executionState: 'setup' | 'running' | 'paused';
+  82 |   statusMessage: string;
+  83 |   followUpSuggestions?: string[];
+  84 | }
+  85 | 
+  86 | export interface WorkflowState {
+  87 |   sessions: Record<string, ChatSession>;
+  88 |   activeSessionId: string | null;
+  89 |   nodes: Node[];
+  90 |   edges: Edge[];
+  91 |   selectedNodeId: string | null;
+  92 |   executionState: 'setup' | 'running' | 'paused';
+  93 |   isOrchestrating: boolean;
+  94 |   isThinking: boolean;
+  95 |   statusMessage: string;
+  96 |   chatMessages: ChatMessage[];
+  97 |   agentTalkLogs: AgentTalkLog[];
+  98 |   pendingApproval: PendingApproval | null;
+  99 |   apiKey: string | null;
+ 100 |   setApiKey: (key: string | null) => void;
+ 101 |   provider: string;
+ 102 |   model: string;
+ 103 |   apiKeys: Record<string, string>;
+ 104 |   availableProviders: Record<string, any>;
+ 105 |   setProvider: (provider: string) => void;
+ 106 |   setModel: (model: string) => void;
+ 107 |   setProviderApiKey: (provider: string, key: string) => void;
+ 108 |   fetchAvailableProviders: () => Promise<void>;
+ 109 |   fallbackProvider: string;
+ 110 |   setFallbackProvider: (provider: string) => void;
+ 111 |   providerBaseUrls: Record<string, string>;
+ 112 |   setProviderBaseUrl: (provider: string, url: string) => void;
+ 113 |   providerModels: Record<string, any[]>;
+ 114 |   fetchProviderModels: (providerId: string) => Promise<void>;
+ 115 |   followUpSuggestions: string[];
+ 116 |   liveThoughts: string;
+ 117 |   abortController: AbortController | null;
+ 118 |   cancelOrchestration: () => void;
+ 119 | 
+ 120 |   // Actions
+ 121 |   setNodes: (nodes: Node[] | ((nds: Node[]) => Node[])) => void;
+ 122 |   setEdges: (edges: Edge[] | ((eds: Edge[]) => Edge[])) => void;
+ 123 |   onNodesChange: OnNodesChange<Node>;
+ 124 |   onEdgesChange: OnEdgesChange;
+ 125 |   onConnect: OnConnect;
+ 126 |   setSelectedNodeId: (id: string | null) => void;
+ 127 |   updateNodeField: (nodeId: string, updates: Partial<CanvasNodeData>) => void;
+ 128 |   addNode: (node: Node) => void;
+ 129 |   deleteNode: (nodeId: string) => void;
+ 130 |   deleteEdge: (edgeId: string) => void;
+ 131 |   addRule: (nodeId: string, rule: string) => void;
+ 132 |   deleteRule: (nodeId: string, ruleIndex: number) => void;
+ 133 |   simulateToolExecution?: never;
+ 134 |   setExecutionState: (state: 'setup' | 'running' | 'paused') => void;
+ 135 |   setIsOrchestrating: (val: boolean) => void;
+ 136 |   setIsThinking: (val: boolean) => void;
+ 137 |   setStatusMessage: (msg: string) => void;
+ 138 |   setChatMessages: (msgs: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
+ 139 |   setAgentTalkLogs: (logs: AgentTalkLog[] | ((prev: AgentTalkLog[]) => AgentTalkLog[])) => void;
+ 140 |   setPendingApproval: (val: PendingApproval | null) => void;
+ 141 | 
+ 142 |   // Session Actions
+ 143 |   createSession: (prompt: string, mode: 'auto' | 'custom') => string;
+ 144 |   switchSession: (sessionId: string) => void;
+ 145 |   saveCurrentSession: () => void;
+ 146 |   fetchSessions: () => Promise<void>;
+ 147 |   loadSessionFromDb: (sessionId: string) => Promise<void>;
+ 148 |   deleteSessionFromDb: (sessionId: string) => Promise<void>;
+ 149 | 
+ 150 |   triggerSteerOrchestration: (promptText: string, execute?: boolean) => void;
+ 151 |   triggerCustomExecution: () => Promise<void>;
+ 152 | }
+ 153 | 
+ 154 | let saveTimeout: any = null;
+ 155 | const debounceSave = (currentSessionId: string, get: any, set: any) => {
+ 156 |   if (saveTimeout) clearTimeout(saveTimeout);
+ 157 |   saveTimeout = setTimeout(() => {
+ 158 |     // Re-verify the session is still active before saving to prevent stale writes
+ 159 |     const activeId = get().activeSessionId;
+ 160 |     if (activeId !== currentSessionId) return;
+ 161 | 
+ 162 |     set((state: any) => {
+ 163 |       // Only save if the session still exists
+ 164 |       if (!state.sessions[currentSessionId]) return state;
+ 165 | 
+ 166 |       const currentSession = {
+ 167 |         id: currentSessionId,
+ 168 |         title: state.sessions[currentSessionId]?.title || "Chat",
+ 169 |         prompt: state.sessions[currentSessionId]?.prompt || "",
+ 170 |         mode: state.sessions[currentSessionId]?.mode || "auto",
+ 171 |         nodes: state.nodes,
+ 172 |         edges: state.edges,
+ 173 |         chatMessages: state.chatMessages,
+ 174 |         agentTalkLogs: state.agentTalkLogs,
+ 175 |         executionState: state.executionState,
+ 176 |         statusMessage: state.statusMessage,
+ 177 |         followUpSuggestions: state.followUpSuggestions
+ 178 |       };
+ 179 |       return { sessions: { ...state.sessions, [currentSessionId]: currentSession } };
+ 180 |     });
+ 181 |   }, 500);
+ 182 | };
+ 183 | 
+ 184 | export const useWorkflowStore = create<WorkflowState>((set, get) => ({
+ 185 |   sessions: {},
+ 186 |   activeSessionId: null,
+ 187 |   nodes: [],
+ 188 |   edges: [],
+ 189 |   selectedNodeId: null,
+ 190 |   executionState: 'setup',
+ 191 |   isOrchestrating: false,
+ 192 |   isThinking: false,
+ 193 |   statusMessage: '',
+ 194 |   chatMessages: [],
+ 195 |   agentTalkLogs: [],
+ 196 |   pendingApproval: null,
+ 197 |   apiKey: null,
+ 198 |   setApiKey: (key) => set({ apiKey: key }),
+ 199 |   provider: "gemini",
+ 200 |   model: "gemini-2.5-flash",
+ 201 |   apiKeys: {},
+ 202 |   availableProviders: {},
+ 203 |   setProvider: (provider) => set({ provider }),
+ 204 |   setModel: (model) => set({ model }),
+ 205 |   setProviderApiKey: (provider, key) => set((state) => ({ apiKeys: { ...state.apiKeys, [provider]: key } })),
+ 206 |   fetchAvailableProviders: async () => {
+ 207 |     try {
+ 208 |       const resp = await fetch("/api/gemini/providers");
+ 209 |       if (resp.ok) {
+ 210 |         const data = await resp.json();
+ 211 |         set({ availableProviders: data });
+ 212 |       }
+ 213 |     } catch (e) {
+ 214 |       console.error("Failed to fetch available providers", e);
+ 215 |     }
+ 216 |   },
+ 217 |   fallbackProvider: "",
+ 218 |   setFallbackProvider: (provider) => set({ fallbackProvider: provider }),
+ 219 |   providerBaseUrls: {},
+ 220 |   setProviderBaseUrl: (provider, url) => set((state) => ({ providerBaseUrls: { ...state.providerBaseUrls, [provider]: url } })),
+ 221 |   providerModels: {},
+ 222 |   fetchProviderModels: async (providerId: string) => {
+ 223 |     try {
+ 224 |       const state = get();
+ 225 |       const apiKey = state.apiKeys[providerId] || state.apiKey || "";
+ 226 |       const baseUrl = state.providerBaseUrls[providerId] || "";
+ 227 |       const resp = await fetch("/api/gemini/models", {
+ 228 |         method: "POST",
+ 229 |         headers: { "Content-Type": "application/json" },
+ 230 |         body: JSON.stringify({
+ 231 |           provider: providerId,
+ 232 |           api_key: apiKey,
+ 233 |           api_keys: state.apiKeys,
+ 234 |           base_url: baseUrl
+ 235 |         })
+ 236 |       });
+ 237 |       if (resp.ok) {
+ 238 |         const data = await resp.json();
+ 239 |         set((state) => ({
+ 240 |           providerModels: {
+ 241 |             ...state.providerModels,
+ 242 |             [providerId]: data.models || []
+ 243 |           }
+ 244 |         }));
+ 245 |       }
+ 246 |     } catch (e) {
+ 247 |       console.error(`Failed to fetch models for provider ${providerId}`, e);
+ 248 |     }
+ 249 |   },
+ 250 |   followUpSuggestions: [],
+ 251 |   liveThoughts: '',
+ 252 |   abortController: null,
+ 253 |   cancelOrchestration: () => {
+ 254 |     const controller = get().abortController;
+ 255 |     if (controller) {
+ 256 |       controller.abort();
+ 257 |       set({ abortController: null, isOrchestrating: false, isThinking: false });
+ 258 |     }
+ 259 |   },
+ 260 | 
+ 261 |   setNodes: (newNodes) => {
+ 262 |     set((state) => ({
+ 263 |       nodes: typeof newNodes === 'function' ? newNodes(state.nodes) : newNodes
+ 264 |     }));
+ 265 |     get().saveCurrentSession();
+ 266 |   },
+ 267 | 
+ 268 |   setEdges: (newEdges) => {
+ 269 |     set((state) => ({
+ 270 |       edges: typeof newEdges === 'function' ? newEdges(state.edges) : newEdges
+ 271 |     }));
+ 272 |     get().saveCurrentSession();
+ 273 |   },
+ 274 | 
+ 275 |   onNodesChange: (changes) => {
+ 276 |     set((state) => ({
+ 277 |       nodes: applyNodeChanges(changes, state.nodes)
+ 278 |     }));
+ 279 |     get().saveCurrentSession();
+ 280 |   },
+ 281 | 
+ 282 |   onEdgesChange: (changes) => {
+ 283 |     set((state) => ({
+ 284 |       edges: applyEdgeChanges(changes, state.edges)
+ 285 |     }));
+ 286 |     get().saveCurrentSession();
+ 287 |   },
+ 288 | 
+ 289 |   onConnect: (connection) => {
+ 290 |     set((state) => {
+ 291 |       const edge: Edge = {
+ 292 |         ...connection,
+ 293 |         id: `e-${connection.source}-${connection.target}`,
+ 294 |         animated: true,
+ 295 |         type: 'custom',
+ 296 |         style: { stroke: '#06b6d4', strokeWidth: 2 }
+ 297 |       };
+ 298 | 
+ 299 |       // Sync dependency: target node depends on source node
+ 300 |       const updatedNodes = state.nodes.map(node => {
+ 301 |         if (node.id === connection.target) {
+ 302 |           const currentDeps = (node.data as any).dependencies || [];
+ 303 |           if (!currentDeps.includes(connection.source)) {
+ 304 |             return {
+ 305 |               ...node,
+ 306 |               data: { ...node.data, dependencies: [...currentDeps, connection.source] }
+ 307 |             };
+ 308 |           }
+ 309 |         }
+ 310 |         return node;
+ 311 |       });
+ 312 | 
+ 313 |       return { edges: addEdge(edge, state.edges), nodes: updatedNodes };
+ 314 |     });
+ 315 |     get().saveCurrentSession();
+ 316 |   },
+ 317 | 
+ 318 |   setSelectedNodeId: (id) => set({ selectedNodeId: id }),
+ 319 | 
+ 320 |   updateNodeField: (nodeId, updates) => {
+ 321 |     set((state) => ({
+ 322 |       nodes: state.nodes.map((node) => {
+ 323 |         if (node.id === nodeId) {
+ 324 |           return { ...node, data: { ...node.data, ...updates } };
+ 325 |         }
+ 326 |         return node;
+ 327 |       })
+ 328 |     }));
+ 329 |     get().saveCurrentSession();
+ 330 |   },
+ 331 | 
+ 332 |   addNode: (node) => {
+ 333 |     set((state) => ({ nodes: [...state.nodes, node] }));
+ 334 |     get().saveCurrentSession();
+ 335 |   },
+ 336 | 
+ 337 |   deleteNode: (nodeId) => {
+ 338 |     set((state) => ({
+ 339 |       nodes: state.nodes.filter((node) => node.id !== nodeId),
+ 340 |       edges: state.edges.filter((edge) => edge.source !== nodeId && edge.target !== nodeId),
+ 341 |       selectedNodeId: state.selectedNodeId === nodeId ? null : state.selectedNodeId
+ 342 |     }));
+ 343 |     get().saveCurrentSession();
+ 344 |   },
+ 345 | 
+ 346 |   deleteEdge: (edgeId) => {
+ 347 |     set((state) => {
+ 348 |       const edge = state.edges.find(e => e.id === edgeId);
+ 349 |       let updatedNodes = state.nodes;
+ 350 | 
+ 351 |       // Sync dependency: remove source from target's dependencies when edge deleted
+ 352 |       if (edge) {
+ 353 |         updatedNodes = state.nodes.map(node => {
+ 354 |           if (node.id === edge.target) {
+ 355 |             const currentDeps = (node.data as any).dependencies || [];
+ 356 |             return {
+ 357 |               ...node,
+ 358 |               data: { ...node.data, dependencies: currentDeps.filter((d: string) => d !== edge.source) }
+ 359 |             };
+ 360 |           }
+ 361 |           return node;
+ 362 |         });
+ 363 |       }
+ 364 | 
+ 365 |       return {
+ 366 |         edges: state.edges.filter(e => e.id !== edgeId),
+ 367 |         nodes: updatedNodes
+ 368 |       };
+ 369 |     });
+ 370 |     get().saveCurrentSession();
+ 371 |   },
+ 372 | 
+ 373 |   addRule: (nodeId, rule) => {
+ 374 |     set((state) => ({
+ 375 |       nodes: state.nodes.map((node) => {
+ 376 |         if (node.id === nodeId) {
+ 377 |           return {
+ 378 |             ...node,
+ 379 |             data: { ...node.data, rules: [...((node.data as any).rules || []), rule] }
+ 380 |           };
+ 381 |         }
+ 382 |         return node;
+ 383 |       })
+ 384 |     }));
+ 385 |     get().saveCurrentSession();
+ 386 |   },
+ 387 | 
+ 388 |   deleteRule: (nodeId, ruleIndex) => {
+ 389 |     set((state) => ({
+ 390 |       nodes: state.nodes.map((node) => {
+ 391 |         if (node.id === nodeId) {
+ 392 |           return {
+ 393 |             ...node,
+ 394 |             data: {
+ 395 |               ...node.data,
+ 396 |               rules: ((node.data as any).rules || []).filter((_: any, idx: number) => idx !== ruleIndex)
+ 397 |             }
+ 398 |           };
+ 399 |         }
+ 400 |         return node;
+ 401 |       })
+ 402 |     }));
+ 403 |     get().saveCurrentSession();
+ 404 |   },
+ 405 | 
+ 406 |   // (simulateToolExecution removed — backend runs real tools)
+ 407 | 
+ 408 |   // State modifiers
+ 409 |   setExecutionState: (state) => {
+ 410 |     set({ executionState: state });
+ 411 |     get().saveCurrentSession();
+ 412 |   },
+ 413 |   setIsOrchestrating: (val) => set({ isOrchestrating: val }),
+ 414 |   setIsThinking: (val) => set({ isThinking: val }),
+ 415 |   setStatusMessage: (msg) => {
+ 416 |     set({ statusMessage: msg });
+ 417 |     get().saveCurrentSession();
+ 418 |   },
+ 419 |   setChatMessages: (msgs) => {
+ 420 |     set((state) => ({
+ 421 |       chatMessages: typeof msgs === 'function' ? msgs(state.chatMessages) : msgs
+ 422 |     }));
+ 423 |     get().saveCurrentSession();
+ 424 |   },
+ 425 |   setAgentTalkLogs: (logs) => {
+ 426 |     set((state) => ({
+ 427 |       agentTalkLogs: typeof logs === 'function' ? logs(state.agentTalkLogs) : logs
+ 428 |     }));
+ 429 |     get().saveCurrentSession();
+ 430 |   },
+ 431 |   setPendingApproval: (val) => set({ pendingApproval: val }),
+ 432 | 
+ 433 |   // Session Actions
+ 434 |   createSession: (prompt, mode) => {
+ 435 |     const sessionId = Date.now().toString();
+ 436 |     const newSession: ChatSession = {
+ 437 |       id: sessionId,
+ 438 |       title: prompt.length > 40 ? prompt.substring(0, 40) + "..." : prompt,
+ 439 |       prompt: prompt,
+ 440 |       mode: mode,
+ 441 |       nodes: [],
+ 442 |       edges: [],
+ 443 |       chatMessages: [],
+ 444 |       agentTalkLogs: [],
+ 445 |       executionState: "setup",
+ 446 |       statusMessage: "",
+ 447 |       followUpSuggestions: []
+ 448 |     };
+ 449 | 
+ 450 |     set((state) => ({
+ 451 |       sessions: { ...state.sessions, [sessionId]: newSession },
+ 452 |       activeSessionId: sessionId,
+ 453 |       nodes: [],
+ 454 |       edges: [],
+ 455 |       chatMessages: [],
+ 456 |       agentTalkLogs: [],
+ 457 |       executionState: "setup",
+ 458 |       statusMessage: "",
+ 459 |       followUpSuggestions: []
+ 460 |     }));
+ 461 | 
+ 462 |     return sessionId;
+ 463 |   },
+ 464 | 
+ 465 |   switchSession: (sessionId) => {
+ 466 |     const currentSessionId = get().activeSessionId;
+ 467 |     if (currentSessionId) {
+ 468 |       const currentSession: ChatSession = {
+ 469 |         id: currentSessionId,
+ 470 |         title: get().sessions[currentSessionId]?.title || "Chat",
+ 471 |         prompt: get().sessions[currentSessionId]?.prompt || "",
+ 472 |         mode: get().sessions[currentSessionId]?.mode || "auto",
+ 473 |         nodes: get().nodes,
+ 474 |         edges: get().edges,
+ 475 |         chatMessages: get().chatMessages,
+ 476 |         agentTalkLogs: get().agentTalkLogs,
+ 477 |         executionState: get().executionState,
+ 478 |         statusMessage: get().statusMessage,
+ 479 |         followUpSuggestions: get().followUpSuggestions
+ 480 |       };
+ 481 |       set((state) => ({
+ 482 |         sessions: { ...state.sessions, [currentSessionId]: currentSession }
+ 483 |       }));
+ 484 |     }
+ 485 | 
+ 486 |     const newSession = get().sessions[sessionId];
+ 487 |     if (newSession) {
+ 488 |       set({
+ 489 |         activeSessionId: sessionId,
+ 490 |         nodes: newSession.nodes,
+ 491 |         edges: newSession.edges,
+ 492 |         chatMessages: newSession.chatMessages,
+ 493 |         agentTalkLogs: newSession.agentTalkLogs,
+ 494 |         executionState: newSession.executionState,
+ 495 |         statusMessage: newSession.statusMessage,
+ 496 |         followUpSuggestions: newSession.followUpSuggestions || [],
+ 497 |         selectedNodeId: null
+ 498 |       });
+ 499 |     }
+ 500 |   },
+ 501 | 
+ 502 |   saveCurrentSession: () => {
+ 503 |     const currentSessionId = get().activeSessionId;
+ 504 |     if (!currentSessionId) return;
+ 505 |     debounceSave(currentSessionId, get, set);
+ 506 |   },
+ 507 | 
+ 508 |   fetchSessions: async () => {
+ 509 |     try {
+ 510 |       const response = await fetch("/api/gemini/sessions");
+ 511 |       if (response.ok) {
+ 512 |         const list = await response.json();
+ 513 |         const updatedSessions: Record<string, ChatSession> = { ...get().sessions };
+ 514 |         for (const s of list) {
+ 515 |           if (!updatedSessions[s.session_id]) {
+ 516 |             updatedSessions[s.session_id] = {
+ 517 |               id: s.session_id,
+ 518 |               title: s.title,
+ 519 |               prompt: s.prompt,
+ 520 |               mode: s.mode,
+ 521 |               nodes: [],
+ 522 |               edges: [],
+ 523 |               chatMessages: [],
+ 524 |               agentTalkLogs: [],
+ 525 |               executionState: s.execution_state,
+ 526 |               statusMessage: s.status_message,
+ 527 |               followUpSuggestions: []
+ 528 |             };
+ 529 |           }
+ 530 |         }
+ 531 |         set({ sessions: updatedSessions });
+ 532 |       }
+ 533 |     } catch (e) {
+ 534 |       console.error("Failed to fetch sessions from DB", e);
+ 535 |     }
+ 536 |   },
+ 537 | 
+ 538 |   loadSessionFromDb: async (sessionId: string) => {
+ 539 |     try {
+ 540 |       const response = await fetch(`/api/gemini/sessions?id=${sessionId}`);
+ 541 |       if (response.ok) {
+ 542 |         const fullSession = await response.json();
+ 543 |         const session: ChatSession = {
+ 544 |           id: fullSession.session_id,
+ 545 |           title: fullSession.title,
+ 546 |           prompt: fullSession.prompt,
+ 547 |           mode: fullSession.mode,
+ 548 |           nodes: fullSession.nodes,
+ 549 |           edges: fullSession.edges,
+ 550 |           chatMessages: fullSession.chat_messages,
+ 551 |           agentTalkLogs: fullSession.agent_talk_logs,
+ 552 |           executionState: fullSession.execution_state,
+ 553 |           statusMessage: fullSession.status_message,
+ 554 |           followUpSuggestions: fullSession.follow_up_suggestions
+ 555 |         };
+ 556 |         
+ 557 |         set((state) => ({
+ 558 |           sessions: { ...state.sessions, [sessionId]: session },
+ 559 |           activeSessionId: sessionId,
+ 560 |           nodes: session.nodes,
+ 561 |           edges: session.edges,
+ 562 |           chatMessages: session.chatMessages,
+ 563 |           agentTalkLogs: session.agentTalkLogs,
+ 564 |           executionState: session.executionState,
+ 565 |           statusMessage: session.statusMessage,
+ 566 |           followUpSuggestions: session.followUpSuggestions || [],
+ 567 |           selectedNodeId: null
+ 568 |         }));
+ 569 |       }
+ 570 |     } catch (e) {
+ 571 |       console.error("Failed to load session from DB", e);
+ 572 |     }
+ 573 |   },
+ 574 | 
+ 575 |   deleteSessionFromDb: async (sessionId: string) => {
+ 576 |     // Abort orchestration if deleting the currently active session
+ 577 |     if (get().activeSessionId === sessionId) {
+ 578 |       const ctrl = get().abortController;
+ 579 |       if (ctrl) ctrl.abort();
+ 580 |     }
+ 581 | 
+ 582 |     try {
+ 583 |       const response = await fetch(`/api/gemini/sessions?id=${sessionId}`, {
+ 584 |         method: "DELETE"
+ 585 |       });
+ 586 |       if (response.ok) {
+ 587 |         set((state) => {
+ 588 |           const updated = { ...state.sessions };
+ 589 |           delete updated[sessionId];
+ 590 |           const newActiveId = state.activeSessionId === sessionId ? null : state.activeSessionId;
+ 591 |           return {
+ 592 |             sessions: updated,
+ 593 |             activeSessionId: newActiveId,
+ 594 |             abortController: state.activeSessionId === sessionId ? null : state.abortController,
+ 595 |             isOrchestrating: state.activeSessionId === sessionId ? false : state.isOrchestrating,
+ 596 |             isThinking: state.activeSessionId === sessionId ? false : state.isThinking,
+ 597 |             ...(newActiveId ? {} : {
+ 598 |               nodes: [],
+ 599 |               edges: [],
+ 600 |               chatMessages: [],
+ 601 |               agentTalkLogs: [],
+ 602 |               executionState: "setup",
+ 603 |               statusMessage: "",
+ 604 |               followUpSuggestions: []
+ 605 |             })
+ 606 |           };
+ 607 |         });
+ 608 |       }
+ 609 |     } catch (e) {
+ 610 |       console.error("Failed to delete session", e);
+ 611 |     }
+ 612 |   },
+ 613 | 
+ 614 |   triggerSteerOrchestration: async (promptText, execute = true) => {
+ 615 |     if (!promptText.trim()) return;
+ 616 | 
+ 617 |     // Abort any active orchestration
+ 618 |     const currentController = get().abortController;
+ 619 |     if (currentController) {
+ 620 |       currentController.abort();
+ 621 |     }
+ 622 | 
+ 623 |     const controller = new AbortController();
+ 624 | 
+ 625 |     const userMsg: ChatMessage = {
+ 626 |       id: Date.now().toString(),
+ 627 |       sender: "user",
+ 628 |       text: promptText,
+ 629 |       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+ 630 |     };
+ 631 | 
+ 632 |     set((state) => ({
+ 633 |       chatMessages: [...state.chatMessages, userMsg],
+ 634 |       isOrchestrating: true,
+ 635 |       isThinking: true,
+ 636 |       statusMessage: "",
+ 637 |       liveThoughts: "",
+ 638 |       agentTalkLogs: [],
+ 639 |       followUpSuggestions: [],
+ 640 |       abortController: controller
+ 641 |     }));
+ 642 |     get().saveCurrentSession();
+ 643 | 
+ 644 |     // Create target AI message placeholder
+ 645 |     const aiMsgId = (Date.now() + 1).toString();
+ 646 |     set((state) => ({
+ 647 |       chatMessages: [
+ 648 |         ...state.chatMessages,
+ 649 |         {
+ 650 |           id: aiMsgId,
+ 651 |           sender: "ai",
+ 652 |           text: "",
+ 653 |           thinkingSummary: "",
+ 654 |           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+ 655 |         }
+ 656 |       ]
+ 657 |     }));
+ 658 |     get().saveCurrentSession();
+ 659 | 
+ 660 |     try {
+ 661 |       const response = await fetch("/api/gemini/orchestrate", {
+ 662 |         method: "POST",
+ 663 |         headers: { "Content-Type": "application/json" },
+ 664 |         body: JSON.stringify({
+ 665 |           prompt: promptText,
+ 666 |           history: get().chatMessages
+ 667 |             .filter(m => m.id !== aiMsgId) // Exclude current empty prompt placeholder
+ 668 |             .map(m => ({ sender: m.sender, text: m.text })),
+ 669 |           api_key: get().apiKeys[get().provider] || get().apiKey || "",
+ 670 |           api_keys: get().apiKeys,
+ 671 |           session_id: get().activeSessionId || "",
+ 672 |           execute_agents: execute,
+ 673 |           provider: get().provider,
+ 674 |           model: get().model,
+ 675 |           fallback_provider: get().fallbackProvider || null,
+ 676 |           base_url: get().providerBaseUrls[get().provider] || null
+ 677 |         }),
+ 678 |         signal: controller.signal
+ 679 |       });
+ 680 | 
+ 681 |       if (!response.ok) {
+ 682 |         const errData = await response.json().catch(() => ({ detail: "Orchestration failed." }));
+ 683 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
+ 684 |       }
+ 685 | 
+ 686 |       const reader = response.body?.getReader();
+ 687 |       const decoder = new TextDecoder();
+ 688 |       if (!reader) throw new Error("No response stream body reader.");
+ 689 | 
+ 690 |       let assistantResponse = "";
+ 691 |       let thinkingSummary = "";
+ 692 |       let buffer = "";
+ 693 | 
+ 694 |       while (true) {
+ 695 |         const { done, value } = await reader.read();
+ 696 |         if (done) break;
+ 697 | 
+ 698 |         buffer += decoder.decode(value, { stream: true });
+ 699 |         
+ 700 |         const parts = buffer.split("\n\n");
+ 701 |         buffer = parts.pop() || "";
+ 702 | 
+ 703 |         for (const part of parts) {
+ 704 |           if (!part.trim()) continue;
+ 705 | 
+ 706 |           const lines = part.split("\n");
+ 707 |           let eventType = "text";
+ 708 |           let dataLines: string[] = [];
+ 709 | 
+ 710 |           for (const line of lines) {
+ 711 |             if (line.startsWith("event: ")) {
+ 712 |               eventType = line.slice(7);
+ 713 |             } else if (line.startsWith("data: ")) {
+ 714 |               dataLines.push(line.slice(6));
+ 715 |             } else if (line.startsWith("data:")) {
+ 716 |               dataLines.push(line.slice(5));
+ 717 |             }
+ 718 |           }
+ 719 | 
+ 720 |           const dataContent = dataLines.join("\n");
+ 721 | 
+ 722 |           if (eventType === "text") {
+ 723 |             try {
+ 724 |               const textVal = JSON.parse(dataContent);
+ 725 |               assistantResponse += textVal;
+ 726 |               set((state) => ({
+ 727 |                 isThinking: false, // Turn off thinking dots on first text token
+ 728 |                 chatMessages: state.chatMessages.map(m =>
+ 729 |                   m.id === aiMsgId ? { ...m, text: assistantResponse } : m
+ 730 |                 )
+ 731 |               }));
+ 732 |             } catch (e) {
+ 733 |               console.error("Text SSE parse error", e);
+ 734 |             }
+ 735 |           } else if (eventType === "thinking") {
+ 736 |             try {
+ 737 |               const thoughtVal = JSON.parse(dataContent);
+ 738 |               thinkingSummary += thoughtVal;
+ 739 |               set((state) => ({
+ 740 |                 liveThoughts: thinkingSummary,
+ 741 |                 chatMessages: state.chatMessages.map(m =>
+ 742 |                   m.id === aiMsgId ? { ...m, thinkingSummary: thinkingSummary } : m
+ 743 |                 )
+ 744 |               }));
+ 745 |             } catch (e) {
+ 746 |               console.error("Thinking SSE parse error", e);
+ 747 |             }
+ 748 |           } else if (eventType === "status") {
+ 749 |             try {
+ 750 |               const statusVal = JSON.parse(dataContent);
+ 751 |               set({ statusMessage: typeof statusVal === "string" ? statusVal : "" });
+ 752 |             } catch (e) {
+ 753 |               console.error("Status SSE parse error", e);
+ 754 |             }
+ 755 |           } else if (eventType === "metadata") {
+ 756 |             try {
+ 757 |               const meta = JSON.parse(dataContent);
+ 758 |               set({
+ 759 |                 nodes: meta.nodes || [],
+ 760 |                 edges: meta.edges || [],
+ 761 |                 agentTalkLogs: meta.agent_talk || [],
+ 762 |                 followUpSuggestions: meta.follow_up_suggestions || []  // Bug 2: populate suggestions
+ 763 |               });
+ 764 |             } catch (e) {
+ 765 |               console.error("Metadata SSE parse error", e);
+ 766 |             }
+ 767 |           } else if (eventType === "tool_approval") {
+ 768 |             try {
+ 769 |               const approval = JSON.parse(dataContent);
+ 770 |               set({ pendingApproval: approval });
+ 771 |             } catch (e) {
+ 772 |               console.error("Tool approval SSE parse error", e);
+ 773 |             }
+ 774 |           }
+ 775 |         }
+ 776 |       }
+ 777 | 
+ 778 |       if (!assistantResponse) {
+ 779 |         const fallbackMsg = "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again.";
+ 780 |         set((state) => ({
+ 781 |           chatMessages: state.chatMessages.map(m =>
+ 782 |             m.id === aiMsgId ? { ...m, text: fallbackMsg } : m
+ 783 |           )
+ 784 |         }));
+ 785 |       }
+ 786 | 
+ 787 |       set({ abortController: null });
+ 788 |       get().saveCurrentSession();
+ 789 |     } catch (err: any) {
+ 790 |       if (err.name === 'AbortError') {
+ 791 |         console.log("Steer Orchestration manually aborted.");
+ 792 |         set((state) => ({
+ 793 |           chatMessages: state.chatMessages.map(m =>
+ 794 |             m.id === aiMsgId && !m.text ? { ...m, text: "*Generation stopped by user.*" } : m
+ 795 |           )
+ 796 |         }));
+ 797 |       } else {
+ 798 |         console.error("Steer Orchestration stream error:", err);
+ 799 |         const errorMsg = `**Connection Error.**\n\n${err.message || "Failed to parse stream event source. Check backend logs."}`;
+ 800 |         set((state) => ({
+ 801 |           chatMessages: state.chatMessages.map(m =>
+ 802 |             m.id === aiMsgId ? { ...m, text: errorMsg } : m
+ 803 |           ),
+ 804 |           nodes: [],
+ 805 |           edges: [],
+ 806 |           followUpSuggestions: []
+ 807 |         }));
+ 808 |       }
+ 809 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
+ 810 |       get().saveCurrentSession();
+ 811 |     } finally {
+ 812 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
+ 813 |       get().saveCurrentSession();
+ 814 |     }
+ 815 |   },
+ 816 | 
+ 817 |   triggerCustomExecution: async () => {
+ 818 |     const currentController = get().abortController;
+ 819 |     if (currentController) {
+ 820 |       currentController.abort();
+ 821 |     }
+ 822 | 
+ 823 |     const controller = new AbortController();
+ 824 | 
+ 825 |     const sessionId = get().activeSessionId;
+ 826 |     if (!sessionId) return;
+ 827 | 
+ 828 |     const prompt = get().chatMessages.findLast(m => m.sender === 'user')?.text || "";
+ 829 | 
+ 830 |     set((state) => ({
+ 831 |       isOrchestrating: true,
+ 832 |       isThinking: true,
+ 833 |       statusMessage: "Running custom orchestration loop...",
+ 834 |       liveThoughts: "",
+ 835 |       agentTalkLogs: [],
+ 836 |       followUpSuggestions: [],
+ 837 |       abortController: controller
+ 838 |     }));
+ 839 |     get().saveCurrentSession();
+ 840 | 
+ 841 |     const aiMsgId = Date.now().toString();
+ 842 |     set((state) => ({
+ 843 |       chatMessages: [
+ 844 |         ...state.chatMessages,
+ 845 |         {
+ 846 |           id: aiMsgId,
+ 847 |           sender: "ai",
+ 848 |           text: "",
+ 849 |           thinkingSummary: "",
+ 850 |           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+ 851 |         }
+ 852 |       ]
+ 853 |     }));
+ 854 |     get().saveCurrentSession();
+ 855 | 
+ 856 |     try {
+ 857 |       const response = await fetch("/api/gemini/execute_custom", {
+ 858 |         method: "POST",
+ 859 |         headers: { "Content-Type": "application/json" },
+ 860 |         body: JSON.stringify({
+ 861 |           session_id: sessionId,
+ 862 |           prompt: prompt,
+ 863 |           history: get().chatMessages
+ 864 |             .filter(m => m.id !== aiMsgId)
+ 865 |             .map(m => ({ sender: m.sender, text: m.text })),
+ 866 |           api_key: get().apiKeys[get().provider] || get().apiKey || "",
+ 867 |           api_keys: get().apiKeys,
+ 868 |           nodes: get().nodes,
+ 869 |           edges: get().edges,
+ 870 |           provider: get().provider,
+ 871 |           model: get().model,
+ 872 |           fallback_provider: get().fallbackProvider || null,
+ 873 |           base_url: get().providerBaseUrls[get().provider] || null
+ 874 |         }),
+ 875 |         signal: controller.signal
+ 876 |       });
+ 877 | 
+ 878 |       if (!response.ok) {
+ 879 |         const errData = await response.json().catch(() => ({ detail: "Execution failed." }));
+ 880 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
+ 881 |       }
+ 882 | 
+ 883 |       const reader = response.body?.getReader();
+ 884 |       const decoder = new TextDecoder();
+ 885 |       if (!reader) throw new Error("No response stream body reader.");
+ 886 | 
+ 887 |       let assistantResponse = "";
+ 888 |       let thinkingSummary = "";
+ 889 |       let buffer = "";
+ 890 | 
+ 891 |       while (true) {
+ 892 |         const { done, value } = await reader.read();
+ 893 |         if (done) break;
+ 894 | 
+ 895 |         buffer += decoder.decode(value, { stream: true });
+ 896 |         
+ 897 |         const parts = buffer.split("\n\n");
+ 898 |         buffer = parts.pop() || "";
+ 899 | 
+ 900 |         for (const part of parts) {
+ 901 |           if (!part.trim()) continue;
+ 902 | 
+ 903 |           const lines = part.split("\n");
+ 904 |           let eventType = "text";
+ 905 |           let dataLines: string[] = [];
+ 906 | 
+ 907 |           for (const line of lines) {
+ 908 |             if (line.startsWith("event: ")) {
+ 909 |               eventType = line.slice(7);
+ 910 |             } else if (line.startsWith("data: ")) {
+ 911 |               dataLines.push(line.slice(6));
+ 912 |             } else if (line.startsWith("data:")) {
+ 913 |               dataLines.push(line.slice(5));
+ 914 |             }
+ 915 |           }
+ 916 | 
+ 917 |           const dataContent = dataLines.join("\n");
+ 918 | 
+ 919 |           if (eventType === "text") {
+ 920 |             try {
+ 921 |               const textVal = JSON.parse(dataContent);
+ 922 |               assistantResponse += textVal;
+ 923 |               set((state) => ({
+ 924 |                 isThinking: false,
+ 925 |                 chatMessages: state.chatMessages.map(m =>
+ 926 |                   m.id === aiMsgId ? { ...m, text: assistantResponse } : m
+ 927 |                 )
+ 928 |               }));
+ 929 |             } catch (e) {
+ 930 |               console.error("Text SSE parse error", e);
+ 931 |             }
+ 932 |           } else if (eventType === "thinking") {
+ 933 |             try {
+ 934 |               const thoughtVal = JSON.parse(dataContent);
+ 935 |               thinkingSummary += thoughtVal;
+ 936 |               set((state) => ({
+ 937 |                 liveThoughts: thinkingSummary,
+ 938 |                 chatMessages: state.chatMessages.map(m =>
+ 939 |                   m.id === aiMsgId ? { ...m, thinkingSummary: thinkingSummary } : m
+ 940 |                 )
+ 941 |               }));
+ 942 |             } catch (e) {
+ 943 |               console.error("Thinking SSE parse error", e);
+ 944 |             }
+ 945 |           } else if (eventType === "status") {
+ 946 |             try {
+ 947 |               const statusVal = JSON.parse(dataContent);
+ 948 |               set({ statusMessage: typeof statusVal === "string" ? statusVal : "" });
+ 949 |             } catch (e) {
+ 950 |               console.error("Status SSE parse error", e);
+ 951 |             }
+ 952 |           } else if (eventType === "metadata") {
+ 953 |             try {
+ 954 |               const meta = JSON.parse(dataContent);
+ 955 |               set({
+ 956 |                 nodes: meta.nodes || [],
+ 957 |                 edges: meta.edges || [],
+ 958 |                 agentTalkLogs: meta.agent_talk || [],
+ 959 |                 followUpSuggestions: meta.follow_up_suggestions || []  // Bug 2: populate suggestions
+ 960 |               });
+ 961 |             } catch (e) {
+ 962 |               console.error("Metadata SSE parse error", e);
+ 963 |             }
+ 964 |           } else if (eventType === "tool_approval") {
+ 965 |             try {
+ 966 |               const approval = JSON.parse(dataContent);
+ 967 |               set({ pendingApproval: approval });
+ 968 |             } catch (e) {
+ 969 |               console.error("Tool approval SSE parse error", e);
+ 970 |             }
+ 971 |           }
+ 972 |         }
+ 973 |       }
+ 974 | 
+ 975 |       if (!assistantResponse) {
+ 976 |         const fallbackMsg = "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again.";
+ 977 |         set((state) => ({
+ 978 |           chatMessages: state.chatMessages.map(m =>
+ 979 |             m.id === aiMsgId ? { ...m, text: fallbackMsg } : m
+ 980 |           )
+ 981 |         }));
+ 982 |       }
+ 983 | 
+ 984 |       set({ abortController: null });
+ 985 |       get().saveCurrentSession();
+ 986 |     } catch (err: any) {
+ 987 |       if (err.name === 'AbortError') {
+ 988 |         console.log("Steer Orchestration manually aborted.");
+ 989 |         set((state) => ({
+ 990 |           chatMessages: state.chatMessages.map(m =>
+ 991 |             m.id === aiMsgId && !m.text ? { ...m, text: "*Generation stopped by user.*" } : m
+ 992 |           )
+ 993 |         }));
+ 994 |       } else {
+ 995 |         console.error("Steer Orchestration stream error:", err);
+ 996 |         const errorMsg = `**Connection Error.**\n\n${err.message || "Failed to parse stream event source. Check backend logs."}`;
+ 997 |         set((state) => ({
+ 998 |           chatMessages: state.chatMessages.map(m =>
+ 999 |             m.id === aiMsgId ? { ...m, text: errorMsg } : m
+1000 |           ),
+1001 |           nodes: [],
+1002 |           edges: [],
+1003 |           followUpSuggestions: []
+1004 |         }));
+1005 |       }
+1006 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
+1007 |       get().saveCurrentSession();
+1008 |     } finally {
+1009 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
+1010 |       get().saveCurrentSession();
+1011 |     }
+1012 |   }
+1013 | }));
+1014 |
 ```
 
 ### File: `Frontend/.eslintrc.json`

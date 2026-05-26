@@ -25,6 +25,8 @@ from providers import (
     get_embedding,
     get_available_providers,
     resolve_api_key,
+    fetch_models_from_provider,
+    get_provider_config,
 )
 
 
@@ -89,6 +91,9 @@ class OrchestrateRequest(BaseModel):
     execute_agents: bool = True
     provider: str = "gemini"
     model: Optional[str] = None
+    fallback_provider: Optional[str] = None
+    api_keys: Optional[Dict[str, str]] = None
+    base_url: Optional[str] = None
 
 class ApprovalRequest(BaseModel):
     sessionId: str
@@ -105,6 +110,9 @@ class ExecuteCustomRequest(BaseModel):
     history: Optional[List[Message]] = []
     provider: str = "gemini"
     model: Optional[str] = None
+    fallback_provider: Optional[str] = None
+    api_keys: Optional[Dict[str, str]] = None
+    base_url: Optional[str] = None
 
 # ─── VECTOR DB MEMORY STORE (Multi-Provider Embeddings + Local Cosine Similarity) ───
 
@@ -627,8 +635,9 @@ def compute_agent_layout(active_agents):
 
 @app.post("/orchestrate")
 async def orchestrate(req: OrchestrateRequest):
-    api_key = resolve_api_key(req.provider, req.api_key)
-    if not api_key:
+    provider_config = get_provider_config(req.provider)
+    api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
+    if not api_key and not provider_config.get("is_local", False):
         raise HTTPException(
             status_code=400,
             detail=f"API Key for provider '{req.provider}' is missing. Please configure BYOK in Settings or set the appropriate environment variable."
@@ -654,7 +663,7 @@ async def orchestrate(req: OrchestrateRequest):
 
     # 3. Semantic caching
     prompt_hash_overall = hashlib.sha256(req.prompt.encode('utf-8')).hexdigest()
-    prompt_embedding = await get_embedding(req.provider, api_key, req.prompt)
+    prompt_embedding = await get_embedding(req.provider, api_key, req.prompt, api_keys=req.api_keys)
     if prompt_embedding:
         all_caches = db.load_all_cached_embeddings()
         for cache in all_caches:
@@ -704,7 +713,10 @@ async def orchestrate(req: OrchestrateRequest):
             system_prompt=ORCHESTRATOR_SYSTEM_INSTRUCTION,
             temperature=0.2,
             json_schema=orchestration_schema,
-            timeout=30.0
+            timeout=30.0,
+            fallback_provider=req.fallback_provider,
+            api_keys=req.api_keys,
+            base_url=req.base_url
         )
     except Exception as e:
         print(f"[ORCHESTRATION WARNING] Planning failed: {str(e)}")
@@ -911,7 +923,12 @@ async def orchestrate(req: OrchestrateRequest):
                 complexity=complexity,
                 capabilities=plan.get("capabilities", []),
                 thinking_summary=plan.get("thinking_summary", ""),
-                follow_up_suggestions=plan.get("follow_up_suggestions", [])
+                follow_up_suggestions=plan.get("follow_up_suggestions", []),
+                provider=req.provider,
+                model=req.model,
+                fallback_provider=req.fallback_provider,
+                api_keys=req.api_keys,
+                base_url=req.base_url
             ),
             media_type="text/event-stream"
         )
@@ -919,6 +936,29 @@ async def orchestrate(req: OrchestrateRequest):
 @app.get("/providers")
 async def get_providers():
     return get_available_providers()
+
+@app.get("/health")
+async def health_check():
+    """Health check for the orchestrator and provider connectivity."""
+    import datetime
+    return {"status": "ok", "timestamp": datetime.datetime.now().isoformat()}
+
+class ModelsRequest(BaseModel):
+    provider: str
+    api_key: Optional[str] = None
+    api_keys: Optional[Dict[str, str]] = None
+    base_url: Optional[str] = None
+
+@app.post("/models")
+async def get_models(req: ModelsRequest):
+    """Fetch available models for a provider dynamically."""
+    models = await fetch_models_from_provider(
+        provider=req.provider,
+        api_key=req.api_key,
+        api_keys=req.api_keys,
+        base_url=req.base_url
+    )
+    return {"provider": req.provider, "models": models}
 
 # Session persistence APIs
 @app.get("/sessions")
@@ -960,7 +1000,10 @@ async def run_agent_execution_loop(
     thinking_summary: str,
     follow_up_suggestions: List[str],
     provider: str = "gemini",
-    model: Optional[str] = None
+    model: Optional[str] = None,
+    fallback_provider: Optional[str] = None,
+    api_keys: Optional[Dict[str, str]] = None,
+    base_url: Optional[str] = None
 ):
     now_str = lambda: datetime.datetime.now().strftime("%I:%M:%S %p")
     agent_results: Dict[str, str] = {}
@@ -1115,7 +1158,10 @@ async def run_agent_execution_loop(
                         system_prompt=agent_data["systemPrompt"],
                         temperature=0.2,
                         json_schema=agent_turn_schema,
-                        timeout=30.0
+                        timeout=30.0,
+                        fallback_provider=fallback_provider,
+                        api_keys=api_keys,
+                        base_url=base_url
                     )
                     
                     thought = turn_data.get("thought", "")
@@ -1263,7 +1309,10 @@ async def run_agent_execution_loop(
                         messages=convert_gemini_history_to_standard(agent_history),
                         system_prompt=agent_data["systemPrompt"],
                         temperature=0.3,
-                        timeout=15.0
+                        timeout=15.0,
+                        fallback_provider=fallback_provider,
+                        api_keys=api_keys,
+                        base_url=base_url
                     )
                     if synth_text:
                         agent_final_answer = synth_text
@@ -1355,7 +1404,10 @@ async def run_agent_execution_loop(
             messages=convert_gemini_history_to_standard(aggregator_contents),
             system_prompt=RESPONSE_SYSTEM_INSTRUCTION,
             temperature=0.7,
-            timeout=90.0
+            timeout=90.0,
+            fallback_provider=fallback_provider,
+            api_keys=api_keys,
+            base_url=base_url
         ):
             final_synthesis_text += token
             yield f"event: text\ndata: {json.dumps(token)}\n\n"
@@ -1406,7 +1458,7 @@ async def run_agent_execution_loop(
     
     # Compute embeddings inside
     try:
-        prompt_embedding = await get_embedding(provider, api_key, prompt)
+        prompt_embedding = await get_embedding(provider, api_key, prompt, api_keys=api_keys)
         if prompt_embedding:
             prompt_hash_overall = hashlib.sha256(prompt.encode('utf-8')).hexdigest()
             db.save_cached_response(prompt_hash_overall, prompt, prompt_embedding, cached_val)
@@ -1425,8 +1477,9 @@ async def run_agent_execution_loop(
 
 @app.post("/execute_custom")
 async def execute_custom(req: ExecuteCustomRequest):
-    api_key = resolve_api_key(req.provider, req.api_key)
-    if not api_key:
+    provider_config = get_provider_config(req.provider)
+    api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
+    if not api_key and not provider_config.get("is_local", False):
         raise HTTPException(
             status_code=400,
             detail=f"API Key for provider '{req.provider}' is missing. Please configure BYOK in Settings."
@@ -1448,7 +1501,10 @@ async def execute_custom(req: ExecuteCustomRequest):
             thinking_summary="Running customized agent workflow",
             follow_up_suggestions=["Can you explain the agent collaboration?"],
             provider=req.provider,
-            model=req.model
+            model=req.model,
+            fallback_provider=req.fallback_provider,
+            api_keys=req.api_keys,
+            base_url=req.base_url
         ),
         media_type="text/event-stream"
     )
