@@ -1,10 +1,10 @@
 # Full Project Context
 
-> Generated: 2026-05-26T13:28:46.118Z
+> Generated: 2026-05-26T13:49:43.392Z
 > Mode: Full Project
 > Files: 32
-> Total Lines: 7,082
-> Total Size: 273.5 KB
+> Total Lines: 7,103
+> Total Size: 274.1 KB
 > Directories: 15
 
 ---
@@ -3390,7 +3390,7 @@ SoloSpace/
 
 ### File: `Frontend/app/page.tsx`
 
-> 1575 lines | 81.6 KB
+> 1596 lines | 82.1 KB
 
 ```tsx
    1 | 'use client';
@@ -3584,1390 +3584,1411 @@ SoloSpace/
  189 |     }
  190 |   }, [selectedProvider, availableProviders]);
  191 | 
- 192 |   // Auto-scroll chat to bottom if enabled
- 193 |   useEffect(() => {
+ 192 |   // Scroll helper
+ 193 |   const scrollToBottom = () => {
  194 |     if (shouldAutoScroll) {
  195 |       chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
  196 |     }
- 197 |   }, [chatMessages, isThinking, shouldAutoScroll]);
+ 197 |   };
  198 | 
- 199 |   // Load sessions and available providers from DB on mount
+ 199 |   // Auto-scroll chat to bottom if enabled
  200 |   useEffect(() => {
- 201 |     fetchSessions().catch(e => console.error("Failed to load sessions:", e));
- 202 |     fetchAvailableProviders().catch(e => console.error("Failed to load providers:", e));
- 203 |   }, []);
- 204 | 
- 205 |   const handleCloseConfigPanel = () => {
- 206 |     setIsConfigPanelOpen(false);
- 207 |     setSelectedNodeId(null);
- 208 |   };
- 209 | 
- 210 |   // Orchestrator — always stays in chat first
- 211 |   const startOrchestration = (promptText: string) => {
- 212 |     if (!promptText.trim()) return;
- 213 |     setWorkspaceState("active");
- 214 |     setCurrentTab("chat"); // ALWAYS stay in chat
- 215 | 
- 216 |     let sessionId = activeSessionId;
- 217 |     if (!sessionId) {
- 218 |       sessionId = createSession(promptText, isAutoMode ? "auto" : "custom");
- 219 |     }
- 220 | 
- 221 |     setExecutionState("running");
- 222 |     triggerSteerOrchestration(promptText, isAutoMode);
- 223 |     setUserQuery("");
- 224 |   };
+ 201 |     scrollToBottom();
+ 202 |   }, [chatMessages, isThinking, shouldAutoScroll]);
+ 203 | 
+ 204 |   // Auto-scroll when chat tab becomes active
+ 205 |   useEffect(() => {
+ 206 |     if (workspaceState === "active" && currentTab === "chat") {
+ 207 |       scrollToBottom();
+ 208 |     }
+ 209 |   }, [currentTab, workspaceState]);
+ 210 | 
+ 211 |   // Reset to home when active session is deleted
+ 212 |   useEffect(() => {
+ 213 |     if (workspaceState === "active" && activeSessionId === null) {
+ 214 |       setWorkspaceState("home");
+ 215 |       setCurrentTab("chat");
+ 216 |       setUserQuery("");
+ 217 |     }
+ 218 |   }, [activeSessionId, workspaceState]);
+ 219 | 
+ 220 |   // Load sessions and available providers from DB on mount
+ 221 |   useEffect(() => {
+ 222 |     fetchSessions().catch(e => console.error("Failed to load sessions:", e));
+ 223 |     fetchAvailableProviders().catch(e => console.error("Failed to load providers:", e));
+ 224 |   }, []);
  225 | 
- 226 |   // Node editing actions
- 227 |   const handleAddRule = () => {
- 228 |     if (!newRuleText.trim() || !selectedNodeId) return;
- 229 |     addRule(selectedNodeId, newRuleText.trim());
- 230 |     setNewRuleText("");
- 231 |   };
- 232 | 
- 233 |   const handleDeleteRule = (ruleIndex: number) => {
- 234 |     if (!selectedNodeId) return;
- 235 |     deleteRule(selectedNodeId, ruleIndex);
- 236 |   };
- 237 | 
- 238 |   const activeNodeDetail = nodes.find(n => n.id === selectedNodeId) as any;
- 239 | 
- 240 |   // ── Thinking indicator bubble
- 241 |   const ThinkingBubble = () => (
- 242 |     <motion.div
- 243 |       initial={{ opacity: 0, y: 8 }}
- 244 |       animate={{ opacity: 1, y: 0 }}
- 245 |       exit={{ opacity: 0, y: -4 }}
- 246 |       className="flex flex-col gap-1.5 py-2 px-1"
- 247 |     >
- 248 |       <div className="flex items-center gap-2">
- 249 |         <span className="text-xs text-neutral-500 italic">Thinking</span>
- 250 |         <span className="flex gap-1">
- 251 |           {[0, 1, 2].map(i => (
- 252 |             <span
- 253 |               key={i}
- 254 |               className="w-1.5 h-1.5 rounded-full bg-neutral-500 animate-bounce"
- 255 |               style={{ animationDelay: `${i * 0.15}s`, animationDuration: "0.9s" }}
- 256 |             />
- 257 |           ))}
- 258 |         </span>
- 259 |       </div>
- 260 |       {statusMessage && (
- 261 |         <span className="text-[10px] font-mono text-neutral-600 pl-0.5 truncate max-w-sm">
- 262 |           {statusMessage}
- 263 |         </span>
- 264 |       )}
- 265 |       {liveThoughts && (
- 266 |         <div className="mt-1 text-[10px] text-neutral-500 font-sans leading-relaxed max-w-lg whitespace-pre-wrap border-l-2 border-neutral-800 pl-2">
- 267 |           {liveThoughts.slice(-400)}
- 268 |         </div>
- 269 |       )}
- 270 |     </motion.div>
- 271 |   );
- 272 | 
- 273 |   // ── Collapsible agent trace (real data from backend)
- 274 |   const AgentTraceBlock = ({ logs, thinkingSummary }: { logs: AgentTalkLog[], thinkingSummary?: string }) => {
- 275 |     if (logs.length === 0 && !thinkingSummary) return null;
- 276 |     return (
- 277 |       <div className="border border-[#1f1f1f] rounded-xl overflow-hidden bg-[#050505] mt-3 max-w-2xl w-full">
- 278 |         <details className="group" open>
- 279 |           <summary className="flex items-center justify-between p-3 cursor-pointer select-none text-[11px] font-semibold text-neutral-500 hover:text-white hover:bg-neutral-900/40 transition-colors">
- 280 |             <div className="flex items-center gap-2">
- 281 |               <Sparkles className="w-3 h-3 text-neutral-500 group-hover:text-cyan-400 transition-colors" />
- 282 |               <span className="font-mono text-[10px] tracking-wider uppercase">Agent Trace & Thinking</span>
- 283 |             </div>
- 284 |             <div className="flex items-center gap-2">
- 285 |               {logs.length > 0 && <span className="text-[9px] text-neutral-600 font-mono">{logs.length} specialist{logs.length !== 1 ? "s" : ""}</span>}
- 286 |               <ChevronRight className="w-3.5 h-3.5 text-neutral-600 group-open:rotate-90 transition-transform" />
- 287 |             </div>
- 288 |           </summary>
- 289 |           <div className="border-t border-[#1f1f1f] p-3 space-y-3 bg-[#030303]">
- 290 |             {thinkingSummary && (
- 291 |               <div className="space-y-1.5 pb-2 border-b border-[#0d0d0d] last:border-0 last:pb-0">
- 292 |                 <span className="text-[9px] font-mono text-neutral-500 font-bold uppercase tracking-wider">Reasoning Process</span>
- 293 |                 <p className="text-[11px] text-neutral-400 leading-relaxed font-sans whitespace-pre-wrap">
- 294 |                   {thinkingSummary}
- 295 |                 </p>
- 296 |               </div>
- 297 |             )}
- 298 |             {logs.map((log) => (
- 299 |               <div key={log.id} className="flex gap-2 items-start text-[10.5px] leading-relaxed border-b border-[#0d0d0d] pb-2 last:border-0 last:pb-0">
- 300 |                 <div className="w-5 h-5 rounded-md bg-neutral-900 flex items-center justify-center border border-white/5 shrink-0 select-none text-[10px] font-mono text-neutral-400">
- 301 |                   {log.senderIcon === "science" ? "[S]" : log.senderIcon === "code" ? "[C]" : log.senderIcon === "trending_up" ? "[T]" : log.senderIcon === "present_to_all" ? "[U]" : "[G]"}
- 302 |                 </div>
- 303 |                 <div className="flex-1 min-w-0">
- 304 |                   <div className="flex justify-between items-baseline select-none">
- 305 |                     <span className="font-bold text-white uppercase tracking-wider text-[8.5px] leading-none">{log.senderName}</span>
- 306 |                     <span className="text-[7.5px] text-neutral-600 font-mono leading-none">{log.timestamp}</span>
- 307 |                   </div>
- 308 |                   <p className="text-neutral-400 mt-0.5 font-sans leading-relaxed">{log.text}</p>
- 309 |                 </div>
- 310 |               </div>
- 311 |             ))}
- 312 |           </div>
- 313 |         </details>
- 314 |       </div>
- 315 |     );
- 316 |   };
- 317 | 
- 318 |   return (
- 319 |     <div className="flex h-screen w-full bg-black text-[#f5f5f5] overflow-hidden font-sans">
- 320 | 
- 321 |       <aside
- 322 |         className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-30 select-none ${
- 323 |           isSidebarExpanded ? "w-64" : "w-[60px]"
- 324 |         }`}
- 325 |         onClick={(e) => {
- 326 |           if (!isSidebarExpanded) {
- 327 |             const target = e.target as HTMLElement;
- 328 |             if (!target.closest('button, a, input')) {
- 329 |               setIsSidebarExpanded(true);
- 330 |             }
- 331 |           }
- 332 |         }}
- 333 |       >
- 334 |         {/* Top Header Area */}
- 335 |         <div className="flex items-center gap-3 h-16 border-b border-[#1f1f1f] px-4 justify-between">
- 336 |           {isSidebarExpanded ? (
- 337 |             <div className="flex items-center gap-2.5">
- 338 |               <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center">
- 339 |                 <Bot className="w-4 h-4 text-black stroke-[2.5]" />
- 340 |               </div>
- 341 |               <div>
- 342 |                 <h1 className="text-sm font-bold text-white tracking-tight leading-none">Solospace</h1>
- 343 |               </div>
- 344 |             </div>
- 345 |           ) : (
- 346 |             <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center mx-auto">
- 347 |               <Bot className="w-4 h-4 text-black stroke-[2.5]" />
- 348 |             </div>
- 349 |           )}
- 350 |           {isSidebarExpanded && (
- 351 |             <button
- 352 |               onClick={() => setIsSidebarExpanded(false)}
- 353 |               className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"
- 354 |               title="Collapse sidebar"
- 355 |             >
- 356 |               <ChevronLeft className="w-4 h-4" />
- 357 |             </button>
- 358 |           )}
- 359 |         </div>
- 360 | 
- 361 |         {/* Sidebar Nav Buttons */}
- 362 |         <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto custom-scrollbar">
- 363 | 
- 364 | 
- 365 | 
- 366 |           {/* New Chat Button */}
- 367 |           <button
- 368 |             id="new-chat-btn"
- 369 |             onClick={() => {
- 370 |               const ctrl = useWorkflowStore.getState().abortController;
- 371 |               if (ctrl) ctrl.abort();
- 372 | 
- 373 |               setWorkspaceState("home");
- 374 |               setUserQuery("");
- 375 |               useWorkflowStore.setState({
- 376 |                 activeSessionId: null,
- 377 |                 nodes: [],
- 378 |                 edges: [],
- 379 |                 chatMessages: [],
- 380 |                 agentTalkLogs: [],
- 381 |                 executionState: "setup",
- 382 |                 statusMessage: "",
- 383 |                 isThinking: false,
- 384 |                 isOrchestrating: false,
- 385 |                 liveThoughts: "",
- 386 |                 pendingApproval: null,
- 387 |                 followUpSuggestions: [],
- 388 |                 abortController: null
- 389 |               });
- 390 |             }}
- 391 |             onMouseEnter={() => setHoveredSidebarItem("New Chat")}
- 392 |             onMouseLeave={() => setHoveredSidebarItem(null)}
- 393 |             className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${
- 394 |               isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"
- 395 |             }`}
- 396 |           >
- 397 |             <SquarePlus className="w-5 h-5 stroke-[1.8]" />
- 398 |             {isSidebarExpanded && <span className="text-xs font-semibold">New Chat</span>}
- 399 |             {!isSidebarExpanded && hoveredSidebarItem === "New Chat" && (
- 400 |               <div className="absolute left-[64px] bg-[#1a1a1a] border border-[#2d2d2d] py-1 px-2.5 rounded text-[10px] text-white whitespace-nowrap z-50 pointer-events-none shadow-md">
- 401 |                 New Chat
- 402 |               </div>
- 403 |             )}
- 404 |           </button>
- 405 | 
- 406 |           {/* BYOK Button */}
- 407 |           <button
- 408 |             id="byok-sidebar-btn"
- 409 |             onClick={() => setIsSecretOpen(true)}
- 410 |             onMouseEnter={() => setHoveredSidebarItem("BYOK")}
- 411 |             onMouseLeave={() => setHoveredSidebarItem(null)}
- 412 |             className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${
- 413 |               isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"
- 414 |             }`}
- 415 |           >
- 416 |             <Key className="w-5 h-5 stroke-[1.8]" />
- 417 |             {isSidebarExpanded && <span className="text-xs font-semibold">API Keys</span>}
- 418 |             {!isSidebarExpanded && hoveredSidebarItem === "BYOK" && (
- 419 |               <div className="absolute left-[64px] bg-[#1a1a1a] border border-[#2d2d2d] py-1 px-2.5 rounded text-[10px] text-white whitespace-nowrap z-50 pointer-events-none shadow-md">
- 420 |                 Bring Your Own Key
- 421 |               </div>
- 422 |             )}
- 423 |           </button>
- 424 | 
- 425 |           {/* Recents Log */}
- 426 |           {isSidebarExpanded && (
- 427 |             <div className="pt-6 space-y-2 select-none">
- 428 |               <div className="flex items-center gap-1.5 px-3">
- 429 |                 <History className="w-3.5 h-3.5 text-neutral-600" />
- 430 |                 <span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest font-mono">Recents</span>
- 431 |               </div>
- 432 |               <div className="space-y-1 max-h-[220px] overflow-y-auto custom-scrollbar">
- 433 |                 {Object.values(sessions).length === 0 ? (
- 434 |                   <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span>
- 435 |                 ) : (
- 436 |                   Object.values(sessions).reverse().map((s) => (
- 437 |                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
- 438 |                       <button
- 439 |                         disabled={isLoadingSession}
- 440 |                         onClick={async () => {
- 441 |                           setIsLoadingSession(true);
- 442 |                           try {
- 443 |                             await loadSessionFromDb(s.id);
- 444 |                             setWorkspaceState("active");
- 445 |                             setCurrentTab("chat");
- 446 |                           } catch (err) {
- 447 |                             console.error(err);
- 448 |                           } finally {
- 449 |                             setIsLoadingSession(false);
- 450 |                           }
- 451 |                         }}
- 452 |                         className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${
- 453 |                           activeSessionId === s.id
- 454 |                             ? "text-white font-bold"
- 455 |                             : "text-neutral-500 hover:text-white"
- 456 |                         }`}
- 457 |                         title={s.prompt}
- 458 |                       >
- 459 |                         {s.title}
- 460 |                       </button>
- 461 |                       <button
- 462 |                         onClick={async (e) => {
- 463 |                           e.stopPropagation();
- 464 |                           if (confirm(`Are you sure you want to delete "${s.title}"?`)) {
- 465 |                             await deleteSessionFromDb(s.id);
- 466 |                           }
- 467 |                         }}
- 468 |                         className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"
- 469 |                         title="Delete Chat"
- 470 |                       >
- 471 |                         <Trash2 className="w-3.5 h-3.5" />
- 472 |                       </button>
- 473 |                     </div>
- 474 |                   ))
- 475 |                 )}
- 476 |               </div>
- 477 |             </div>
- 478 |           )}
- 479 |         </nav>
- 480 | 
- 481 |         {/* Sidebar Footer */}
- 482 |         <div className="p-2 border-t border-[#1f1f1f] space-y-1 select-none">
- 483 |           <button
- 484 |             onClick={() => alert("Settings panel coming soon.")}
- 485 |             className={`w-full flex items-center rounded-lg hover:bg-neutral-900 transition-colors py-2 cursor-pointer ${
- 486 |               isSidebarExpanded ? "px-3 gap-3 text-neutral-400 hover:text-white" : "justify-center text-neutral-400 hover:text-white"
- 487 |             }`}
- 488 |           >
- 489 |             <Settings className="w-4 h-4" />
- 490 |             {isSidebarExpanded && <span className="text-xs">Settings</span>}
- 491 |           </button>
- 492 |           <button
- 493 |             onClick={() => setIsProfileOpen(true)}
- 494 |             className={`w-full flex items-center rounded-lg hover:bg-neutral-900 transition-colors py-2 cursor-pointer ${
- 495 |               isSidebarExpanded ? "px-3 gap-3 text-neutral-400 hover:text-white" : "justify-center text-neutral-400 hover:text-white"
- 496 |             }`}
- 497 |           >
- 498 |             <div className="w-6 h-6 rounded-full bg-neutral-800 flex items-center justify-center shrink-0 border border-neutral-700">
- 499 |               <User className="w-3.5 h-3.5 text-neutral-300" />
- 500 |             </div>
- 501 |             {isSidebarExpanded && <span className="text-xs truncate font-medium">Profile</span>}
- 502 |           </button>
- 503 |         </div>
- 504 |       </aside>
- 505 | 
- 506 |       <main className="flex-1 flex flex-col min-w-0 bg-[#000000] relative transition-all duration-300">
- 507 | 
- 508 |         {/* Header */}
- 509 |         <header className="flex justify-between items-center w-full px-6 h-16 border-b border-[#141414] shrink-0 z-10 bg-black/85 backdrop-blur-md">
- 510 |           <div className="flex items-center gap-2">
- 511 |           </div>
- 512 | 
- 513 |           {/* Tab Switcher — Chat always left, Flow/Arena only visible when complex task ran */}
- 514 |           <div className="flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-[2px] rounded-full select-none">
- 515 |             <button
- 516 |               id="tab-chat"
- 517 |               onClick={() => {
- 518 |                 if (workspaceState === "home") return;
- 519 |                 setCurrentTab("chat");
- 520 |               }}
- 521 |               className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
- 522 |                 currentTab === "chat" || workspaceState === "home"
- 523 |                   ? "bg-neutral-800 text-white"
- 524 |                   : "text-neutral-400 hover:text-white"
- 525 |               }`}
- 526 |             >
- 527 |               Chat
- 528 |             </button>
- 529 |             {/* Flow tab only shown when complex task (nodes exist) */}
- 530 |             {workspaceState === "active" && (
- 531 |               <button
- 532 |                 id="tab-flow"
- 533 |                 onClick={() => setCurrentTab("arena")}
- 534 |                 className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
- 535 |                   currentTab === "arena"
- 536 |                     ? "bg-neutral-800 text-white"
- 537 |                     : "text-neutral-400 hover:text-white"
- 538 |                 }`}
- 539 |               >
- 540 |                 <GitFork className="w-3 h-3" />
- 541 |                 Flow
- 542 |                 {nodes.length > 0 && (
- 543 |                   <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse ml-0.5" />
- 544 |                 )}
- 545 |               </button>
- 546 |             )}
- 547 |           </div>
- 548 | 
- 549 |           {/* Right Header Controls */}
- 550 |           <div className="flex items-center gap-4 select-none">
- 551 |             <button
- 552 |               onClick={() => alert("Solospace — AI-powered assistant. Enter any prompt to get a complete, detailed response. For complex tasks, use the Flow tab to inspect the multi-agent pipeline.")}
- 553 |               className="text-neutral-400 hover:text-white p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer"
- 554 |             >
- 555 |               <HelpCircle className="w-4 h-4 stroke-[1.8]" />
- 556 |             </button>
- 557 |           </div>
- 558 |         </header>
- 559 | 
- 560 |         {/* View Layout */}
- 561 |         <div className="flex-1 relative overflow-hidden">
- 562 | 
- 563 |           {/* A. HOME SCREEN */}
- 564 |           {workspaceState === "home" && (
- 565 |             <div className="absolute inset-0 flex flex-col justify-between overflow-y-auto custom-scrollbar">
- 566 |               <div />
- 567 |               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
- 568 |                 <div className="text-center mb-10 space-y-2 select-none">
- 569 |                   <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">
- 570 |                     What&apos;s on your mind?
- 571 |                   </h1>
- 572 |                   <p className="text-sm text-neutral-400 font-sans">
- 573 |                     Ask anything. Get a real, complete answer instantly.
- 574 |                   </p>
- 575 |                 </div>
- 576 | 
- 577 |                 {/* Search Bar */}
- 578 |                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
- 579 |                   <div className="flex items-center gap-3">
- 580 |                     <button
- 581 |                       onClick={() => alert("File attachment coming soon.")}
- 582 |                       className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"
- 583 |                       title="Attach File"
- 584 |                     >
- 585 |                       <UploadCloud className="w-5 h-5 stroke-[1.8]" />
- 586 |                     </button>
- 587 |                     <textarea
- 588 |                       id="home-prompt-input"
- 589 |                       rows={1}
- 590 |                       value={userQuery}
- 591 |                       onChange={(e) => setUserQuery(e.target.value)}
- 592 |                       onKeyDown={(e) => {
- 593 |                         if (e.key === "Enter" && !e.shiftKey) {
- 594 |                           e.preventDefault();
- 595 |                           if (userQuery.trim()) startOrchestration(userQuery);
- 596 |                         }
- 597 |                       }}
- 598 |                       placeholder="Describe your idea, problem, or question..."
- 599 |                       className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar"
- 600 |                       style={{ maxHeight: "150px" }}
- 601 |                     />
- 602 |                     <div className="flex items-center gap-1.5 shrink-0">
- 603 |                       <button
- 604 |                         onClick={() => alert("Voice input coming soon.")}
- 605 |                         className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors cursor-pointer"
- 606 |                         title="Voice Input"
- 607 |                       >
- 608 |                         <Mic className="w-5 h-5 stroke-[1.8]" />
- 609 |                       </button>
- 610 |                       <button
- 611 |                         id="home-send-btn"
- 612 |                         onClick={() => startOrchestration(userQuery)}
- 613 |                         disabled={!userQuery.trim()}
- 614 |                         className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"
- 615 |                         title="Send prompt"
- 616 |                       >
- 617 |                         <ArrowRight className="w-4 h-4 text-black stroke-[3]" />
- 618 |                       </button>
- 619 |                     </div>
- 620 |                   </div>
- 621 |                 </div>
- 622 | 
- 623 |                 {/* Mode Selector */}
- 624 |                 <div className="flex items-center gap-3 mt-5 select-none">
- 625 |                   <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">Mode:</span>
- 626 |                   <button
- 627 |                     onClick={() => setIsAutoMode(true)}
- 628 |                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${
- 629 |                       isAutoMode
- 630 |                         ? "bg-white text-black border-white font-bold"
- 631 |                         : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"
- 632 |                     }`}
- 633 |                   >
- 634 |                     <Zap className="w-3 h-3 stroke-[2]" />
- 635 |                     <span>Auto Agent</span>
- 636 |                   </button>
- 637 |                   <button
- 638 |                     onClick={() => setIsAutoMode(false)}
- 639 |                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${
- 640 |                       !isAutoMode
- 641 |                         ? "bg-white text-black border-white font-bold"
- 642 |                         : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"
- 643 |                     }`}
- 644 |                   >
- 645 |                     <Sliders className="w-3 h-3" />
- 646 |                     <span>Custom Agent</span>
- 647 |                   </button>
- 648 |                 </div>
- 649 |               </div>
- 650 |               <div />
- 651 |             </div>
- 652 |           )}
- 653 | 
- 654 |           {/* B. ACTIVE WORKSPACE */}
- 655 |           {workspaceState === "active" && (
- 656 |             <div className="absolute inset-0 flex">
- 657 | 
- 658 |               {/* VIEW 1: CHAT (Primary — always shown first) */}
- 659 |               {currentTab === "chat" && (
- 660 |                 <div className="flex-1 flex flex-col justify-between overflow-hidden bg-black">
- 661 | 
- 662 |                   {/* Chat messages */}
- 663 |                   <div
- 664 |                     ref={chatContainerRef}
- 665 |                     onScroll={handleScroll}
- 666 |                     className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4"
- 667 |                   >
- 668 |                     {isLoadingSession ? (
- 669 |                       <div className="flex items-center justify-center h-full">
- 670 |                         <div className="flex flex-col items-center gap-3 text-neutral-500">
- 671 |                           <div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
- 672 |                           <span className="text-xs font-semibold">Loading Session...</span>
- 673 |                         </div>
- 674 |                       </div>
- 675 |                     ) : (
- 676 |                       <div className="max-w-5xl mx-auto space-y-4 select-text">
- 677 | 
- 678 |                       {chatMessages.map((msg, msgIdx) => (
- 679 |                         <motion.div
- 680 |                           key={msg.id}
- 681 |                           initial={{ opacity: 0, y: 12 }}
- 682 |                           animate={{ opacity: 1, y: 0 }}
- 683 |                           transition={{ duration: 0.3 }}
- 684 |                           className={`flex w-full ${msg.sender === "user" ? "justify-end" : "justify-start"}`}
- 685 |                         >
- 686 |                           {msg.sender === "user" ? (
- 687 |                             <div className="max-w-[72%] rounded-3xl px-5 py-3 bg-[#2f2f2f] text-neutral-100 text-sm leading-relaxed">
- 688 |                               <p className="whitespace-pre-wrap">{msg.text}</p>
- 689 |                             </div>
- 690 |                           ) : (
- 691 |                             <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
- 692 |                               <div className="w-full text-neutral-100 text-sm leading-relaxed px-1 py-2">
- 693 |                                 <MarkdownRenderer content={msg.text || "*Streaming response...*"} />
- 694 |                                 
- 695 |                                 {/* Action Buttons for AI Response */}
- 696 |                                 {msg.text && (
- 697 |                                   <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
- 698 |                                     <button
- 699 |                                       onClick={() => copyToClipboard(msg.text, msg.id)}
- 700 |                                       className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800"
- 701 |                                       title="Copy response"
- 702 |                                     >
- 703 |                                       {copiedMsgId === msg.id ? (
- 704 |                                         <>
- 705 |                                           <Check className="w-3.5 h-3.5 text-emerald-400" />
- 706 |                                           <span className="text-emerald-400 font-medium">Copied</span>
- 707 |                                         </>
- 708 |                                       ) : (
- 709 |                                         <>
- 710 |                                           <Copy className="w-3.5 h-3.5" />
- 711 |                                           <span>Copy</span>
- 712 |                                         </>
- 713 |                                       )}
- 714 |                                     </button>
- 715 |                                     {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && (
- 716 |                                       <button
- 717 |                                         onClick={() => {
- 718 |                                           const lastUser = chatMessages.slice().reverse().find(m => m.sender === "user");
- 719 |                                           if (lastUser) {
- 720 |                                             setChatMessages(prev => {
- 721 |                                               const lastAiIdx = prev.map((m, i) => m.sender === 'ai' ? i : -1).filter(i => i >= 0).pop();
- 722 |                                               if (lastAiIdx !== undefined) {
- 723 |                                                 return prev.filter((_, i) => i !== lastAiIdx);
- 724 |                                               }
- 725 |                                               return prev;
- 726 |                                             });
- 727 |                                             startOrchestration(lastUser.text);
- 728 |                                           }
- 729 |                                         }}
- 730 |                                         className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800"
- 731 |                                         title="Regenerate response"
- 732 |                                       >
- 733 |                                         <Zap className="w-3.5 h-3.5" />
- 734 |                                         <span>Regenerate</span>
- 735 |                                       </button>
- 736 |                                     )}
- 737 |                                   </div>
- 738 |                                 )}
- 739 |                               </div>
- 740 | 
- 741 |                               {/* Collapsible trace block and see flow buttons outside bubble */}
- 742 |                               {msgIdx === chatMessages.length - 1 && (
- 743 |                                 <div className="space-y-3 pt-1 w-full">
- 744 |                                   <AgentTraceBlock
- 745 |                                     logs={agentTalkLogs}
- 746 |                                     thinkingSummary={msg.thinkingSummary}
- 747 |                                   />
- 748 |                                   
- 749 |                                   {!isThinking && !isOrchestrating && nodes.length > 0 && (
- 750 |                                     <div className="flex flex-wrap gap-2 pt-1">
- 751 |                                       <button
- 752 |                                         id="see-flow-btn"
- 753 |                                         onClick={() => setCurrentTab("arena")}
- 754 |                                         className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max select-none"
- 755 |                                       >
- 756 |                                         <GitFork className="w-3.5 h-3.5 text-cyan-400" />
- 757 |                                         <span>See Agent Flow</span>
- 758 |                                         <span className="text-[9px] font-mono text-neutral-600">({nodes.length} agents)</span>
- 759 |                                       </button>
- 760 | 
- 761 |                                       {!isAutoMode && (
- 762 |                                         <button
- 763 |                                           onClick={() => setCurrentTab("arena")}
- 764 |                                           className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-neutral-500 rounded-xl text-xs font-semibold text-neutral-400 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max select-none"
- 765 |                                         >
- 766 |                                           <Sliders className="w-3.5 h-3.5" />
- 767 |                                           <span>Customize Agents</span>
- 768 |                                         </button>
- 769 |                                       )}
- 770 |                                     </div>
- 771 |                                   )}
- 772 | 
- 773 |                                   {!isThinking && !isOrchestrating && followUpSuggestions && followUpSuggestions.length > 0 && (
- 774 |                                     <div className="flex flex-wrap gap-2 pt-2 select-none">
- 775 |                                       <span className="text-[9px] font-mono text-neutral-500 uppercase tracking-wider self-center">Suggestions:</span>
- 776 |                                       {followUpSuggestions.map((suggestion, idx) => (
- 777 |                                         <button
- 778 |                                           key={idx}
- 779 |                                           onClick={() => {
- 780 |                                             setUserQuery(suggestion);
- 781 |                                             startOrchestration(suggestion);
- 782 |                                           }}
- 783 |                                           className="px-3 py-1.5 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/30 rounded-full text-[10px] text-neutral-400 hover:text-white transition-all cursor-pointer animate-fade-in"
- 784 |                                         >
- 785 |                                           {suggestion}
- 786 |                                         </button>
- 787 |                                       ))}
- 788 |                                     </div>
- 789 |                                   )}
- 790 |                                 </div>
- 791 |                               )}
- 792 |                             </div>
- 793 |                           )}
- 794 |                         </motion.div>
- 795 |                       ))}
- 796 | 
- 797 |                       {/* Thinking indicator */}
- 798 |                       <AnimatePresence>
- 799 |                         {isThinking && <ThinkingBubble />}
- 800 |                       </AnimatePresence>
- 801 | 
- 802 |                       {/* Auto-scroll anchor */}
- 803 |                       <div ref={chatEndRef} />
- 804 |                     </div>
- 805 |                     )}
- 806 |                   </div>
- 807 | 
- 808 |                   {/* Bottom input bar */}
- 809 |                   <div className="px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
- 810 |                     {!isAutoMode && workspaceState === "active" && (
- 811 |                       <div className="text-[10px] font-mono text-amber-400 bg-amber-950/30 px-3 py-1 rounded-full self-center border border-amber-500/20 max-w-max select-none">
- 812 |                         Planning Mode – Edit agents in Flow, then click Proceed
- 813 |                       </div>
- 814 |                     )}
- 815 |                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
- 816 |                       <textarea
- 817 |                         ref={textareaRef}
- 818 |                         id="chat-prompt-input"
- 819 |                         rows={1}
- 820 |                         value={userQuery}
- 821 |                         onChange={(e) => setUserQuery(e.target.value)}
- 822 |                         onKeyDown={(e) => {
- 823 |                           if (e.key === "Enter" && !e.shiftKey) {
- 824 |                             e.preventDefault();
- 825 |                             if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery);
- 826 |                           }
- 827 |                         }}
- 828 |                         placeholder={isOrchestrating ? "Streaming response..." : (isAutoMode ? "Ask a follow-up or new question..." : "Enter a new idea to generate agents (no auto-run)...")}
- 829 |                         disabled={isOrchestrating}
- 830 |                         className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar"
- 831 |                       />
- 832 |                       {isOrchestrating ? (
- 833 |                         <button
- 834 |                           onClick={cancelOrchestration}
- 835 |                           className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all font-semibold cursor-pointer shrink-0"
- 836 |                           title="Stop generating"
- 837 |                         >
- 838 |                           <Square className="w-3.5 h-3.5 text-white fill-white" />
- 839 |                         </button>
- 840 |                       ) : (
- 841 |                         <button
- 842 |                           id="chat-send-btn"
- 843 |                           onClick={() => startOrchestration(userQuery)}
- 844 |                           disabled={!userQuery.trim() || isThinking}
- 845 |                           className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer shrink-0"
- 846 |                           title="Send message"
- 847 |                         >
- 848 |                           <ArrowRight className="w-4 h-4 text-black stroke-[3]" />
- 849 |                         </button>
- 850 |                       )}
- 851 |                     </div>
- 852 |                   </div>
- 853 |                 </div>
- 854 |               )}
- 855 | 
- 856 |               {/* VIEW 2: ARENA CANVAS (Optional — Flow inspection/editing) */}
- 857 |               {currentTab === "arena" && (
- 858 |                 <div className="flex-1 relative overflow-hidden bg-[#000000] flex">
- 859 | 
- 860 |                   {/* Back to chat bar at top */}
- 861 |                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#0d0d0d]/90 border border-[#1f1f1f] rounded-full px-4 py-2 backdrop-blur-md shadow-xl pointer-events-auto">
- 862 |                     <button
- 863 |                       onClick={() => setCurrentTab("chat")}
- 864 |                       className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-mono"
- 865 |                     >
- 866 |                       <ChevronLeft className="w-3.5 h-3.5" />
- 867 |                       Back to Chat
- 868 |                     </button>
- 869 |                     <span className="text-neutral-700 text-xs">|</span>
- 870 |                     <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">
- 871 |                       Agent Flow — {nodes.length} active
- 872 |                     </span>
+ 226 |   const handleCloseConfigPanel = () => {
+ 227 |     setIsConfigPanelOpen(false);
+ 228 |     setSelectedNodeId(null);
+ 229 |   };
+ 230 | 
+ 231 |   // Orchestrator — always stays in chat first
+ 232 |   const startOrchestration = (promptText: string) => {
+ 233 |     if (!promptText.trim()) return;
+ 234 |     setWorkspaceState("active");
+ 235 |     setCurrentTab("chat"); // ALWAYS stay in chat
+ 236 | 
+ 237 |     let sessionId = activeSessionId;
+ 238 |     if (!sessionId) {
+ 239 |       sessionId = createSession(promptText, isAutoMode ? "auto" : "custom");
+ 240 |     }
+ 241 | 
+ 242 |     setExecutionState("running");
+ 243 |     triggerSteerOrchestration(promptText, isAutoMode);
+ 244 |     setUserQuery("");
+ 245 |   };
+ 246 | 
+ 247 |   // Node editing actions
+ 248 |   const handleAddRule = () => {
+ 249 |     if (!newRuleText.trim() || !selectedNodeId) return;
+ 250 |     addRule(selectedNodeId, newRuleText.trim());
+ 251 |     setNewRuleText("");
+ 252 |   };
+ 253 | 
+ 254 |   const handleDeleteRule = (ruleIndex: number) => {
+ 255 |     if (!selectedNodeId) return;
+ 256 |     deleteRule(selectedNodeId, ruleIndex);
+ 257 |   };
+ 258 | 
+ 259 |   const activeNodeDetail = nodes.find(n => n.id === selectedNodeId) as any;
+ 260 | 
+ 261 |   // ── Thinking indicator bubble
+ 262 |   const ThinkingBubble = () => (
+ 263 |     <motion.div
+ 264 |       initial={{ opacity: 0, y: 8 }}
+ 265 |       animate={{ opacity: 1, y: 0 }}
+ 266 |       exit={{ opacity: 0, y: -4 }}
+ 267 |       className="flex flex-col gap-1.5 py-2 px-1"
+ 268 |     >
+ 269 |       <div className="flex items-center gap-2">
+ 270 |         <span className="text-xs text-neutral-500 italic">Thinking</span>
+ 271 |         <span className="flex gap-1">
+ 272 |           {[0, 1, 2].map(i => (
+ 273 |             <span
+ 274 |               key={i}
+ 275 |               className="w-1.5 h-1.5 rounded-full bg-neutral-500 animate-bounce"
+ 276 |               style={{ animationDelay: `${i * 0.15}s`, animationDuration: "0.9s" }}
+ 277 |             />
+ 278 |           ))}
+ 279 |         </span>
+ 280 |       </div>
+ 281 |       {statusMessage && (
+ 282 |         <span className="text-[10px] font-mono text-neutral-600 pl-0.5 truncate max-w-sm">
+ 283 |           {statusMessage}
+ 284 |         </span>
+ 285 |       )}
+ 286 |       {liveThoughts && (
+ 287 |         <div className="mt-1 text-[10px] text-neutral-500 font-sans leading-relaxed max-w-lg whitespace-pre-wrap border-l-2 border-neutral-800 pl-2">
+ 288 |           {liveThoughts.slice(-400)}
+ 289 |         </div>
+ 290 |       )}
+ 291 |     </motion.div>
+ 292 |   );
+ 293 | 
+ 294 |   // ── Collapsible agent trace (real data from backend)
+ 295 |   const AgentTraceBlock = ({ logs, thinkingSummary }: { logs: AgentTalkLog[], thinkingSummary?: string }) => {
+ 296 |     if (logs.length === 0 && !thinkingSummary) return null;
+ 297 |     return (
+ 298 |       <div className="border border-[#1f1f1f] rounded-xl overflow-hidden bg-[#050505] mt-3 max-w-2xl w-full">
+ 299 |         <details className="group" open>
+ 300 |           <summary className="flex items-center justify-between p-3 cursor-pointer select-none text-[11px] font-semibold text-neutral-500 hover:text-white hover:bg-neutral-900/40 transition-colors">
+ 301 |             <div className="flex items-center gap-2">
+ 302 |               <Sparkles className="w-3 h-3 text-neutral-500 group-hover:text-cyan-400 transition-colors" />
+ 303 |               <span className="font-mono text-[10px] tracking-wider uppercase">Agent Trace & Thinking</span>
+ 304 |             </div>
+ 305 |             <div className="flex items-center gap-2">
+ 306 |               {logs.length > 0 && <span className="text-[9px] text-neutral-600 font-mono">{logs.length} specialist{logs.length !== 1 ? "s" : ""}</span>}
+ 307 |               <ChevronRight className="w-3.5 h-3.5 text-neutral-600 group-open:rotate-90 transition-transform" />
+ 308 |             </div>
+ 309 |           </summary>
+ 310 |           <div className="border-t border-[#1f1f1f] p-3 space-y-3 bg-[#030303]">
+ 311 |             {thinkingSummary && (
+ 312 |               <div className="space-y-1.5 pb-2 border-b border-[#0d0d0d] last:border-0 last:pb-0">
+ 313 |                 <span className="text-[9px] font-mono text-neutral-500 font-bold uppercase tracking-wider">Reasoning Process</span>
+ 314 |                 <p className="text-[11px] text-neutral-400 leading-relaxed font-sans whitespace-pre-wrap">
+ 315 |                   {thinkingSummary}
+ 316 |                 </p>
+ 317 |               </div>
+ 318 |             )}
+ 319 |             {logs.map((log) => (
+ 320 |               <div key={log.id} className="flex gap-2 items-start text-[10.5px] leading-relaxed border-b border-[#0d0d0d] pb-2 last:border-0 last:pb-0">
+ 321 |                 <div className="w-5 h-5 rounded-md bg-neutral-900 flex items-center justify-center border border-white/5 shrink-0 select-none text-[10px] font-mono text-neutral-400">
+ 322 |                   {log.senderIcon === "science" ? "[S]" : log.senderIcon === "code" ? "[C]" : log.senderIcon === "trending_up" ? "[T]" : log.senderIcon === "present_to_all" ? "[U]" : "[G]"}
+ 323 |                 </div>
+ 324 |                 <div className="flex-1 min-w-0">
+ 325 |                   <div className="flex justify-between items-baseline select-none">
+ 326 |                     <span className="font-bold text-white uppercase tracking-wider text-[8.5px] leading-none">{log.senderName}</span>
+ 327 |                     <span className="text-[7.5px] text-neutral-600 font-mono leading-none">{log.timestamp}</span>
+ 328 |                   </div>
+ 329 |                   <p className="text-neutral-400 mt-0.5 font-sans leading-relaxed">{log.text}</p>
+ 330 |                 </div>
+ 331 |               </div>
+ 332 |             ))}
+ 333 |           </div>
+ 334 |         </details>
+ 335 |       </div>
+ 336 |     );
+ 337 |   };
+ 338 | 
+ 339 |   return (
+ 340 |     <div className="flex h-screen w-full bg-black text-[#f5f5f5] overflow-hidden font-sans">
+ 341 | 
+ 342 |       <aside
+ 343 |         className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-30 select-none ${
+ 344 |           isSidebarExpanded ? "w-64" : "w-[60px]"
+ 345 |         }`}
+ 346 |         onClick={(e) => {
+ 347 |           if (!isSidebarExpanded) {
+ 348 |             const target = e.target as HTMLElement;
+ 349 |             if (!target.closest('button, a, input')) {
+ 350 |               setIsSidebarExpanded(true);
+ 351 |             }
+ 352 |           }
+ 353 |         }}
+ 354 |       >
+ 355 |         {/* Top Header Area */}
+ 356 |         <div className="flex items-center gap-3 h-16 border-b border-[#1f1f1f] px-4 justify-between">
+ 357 |           {isSidebarExpanded ? (
+ 358 |             <div className="flex items-center gap-2.5">
+ 359 |               <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center">
+ 360 |                 <Bot className="w-4 h-4 text-black stroke-[2.5]" />
+ 361 |               </div>
+ 362 |               <div>
+ 363 |                 <h1 className="text-sm font-bold text-white tracking-tight leading-none">Solospace</h1>
+ 364 |               </div>
+ 365 |             </div>
+ 366 |           ) : (
+ 367 |             <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center mx-auto">
+ 368 |               <Bot className="w-4 h-4 text-black stroke-[2.5]" />
+ 369 |             </div>
+ 370 |           )}
+ 371 |           {isSidebarExpanded && (
+ 372 |             <button
+ 373 |               onClick={() => setIsSidebarExpanded(false)}
+ 374 |               className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"
+ 375 |               title="Collapse sidebar"
+ 376 |             >
+ 377 |               <ChevronLeft className="w-4 h-4" />
+ 378 |             </button>
+ 379 |           )}
+ 380 |         </div>
+ 381 | 
+ 382 |         {/* Sidebar Nav Buttons */}
+ 383 |         <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto custom-scrollbar">
+ 384 | 
+ 385 | 
+ 386 | 
+ 387 |           {/* New Chat Button */}
+ 388 |           <button
+ 389 |             id="new-chat-btn"
+ 390 |             onClick={() => {
+ 391 |               const ctrl = useWorkflowStore.getState().abortController;
+ 392 |               if (ctrl) ctrl.abort();
+ 393 | 
+ 394 |               setWorkspaceState("home");
+ 395 |               setUserQuery("");
+ 396 |               useWorkflowStore.setState({
+ 397 |                 activeSessionId: null,
+ 398 |                 nodes: [],
+ 399 |                 edges: [],
+ 400 |                 chatMessages: [],
+ 401 |                 agentTalkLogs: [],
+ 402 |                 executionState: "setup",
+ 403 |                 statusMessage: "",
+ 404 |                 isThinking: false,
+ 405 |                 isOrchestrating: false,
+ 406 |                 liveThoughts: "",
+ 407 |                 pendingApproval: null,
+ 408 |                 followUpSuggestions: [],
+ 409 |                 abortController: null
+ 410 |               });
+ 411 |             }}
+ 412 |             onMouseEnter={() => setHoveredSidebarItem("New Chat")}
+ 413 |             onMouseLeave={() => setHoveredSidebarItem(null)}
+ 414 |             className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${
+ 415 |               isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"
+ 416 |             }`}
+ 417 |           >
+ 418 |             <SquarePlus className="w-5 h-5 stroke-[1.8]" />
+ 419 |             {isSidebarExpanded && <span className="text-xs font-semibold">New Chat</span>}
+ 420 |             {!isSidebarExpanded && hoveredSidebarItem === "New Chat" && (
+ 421 |               <div className="absolute left-[64px] bg-[#1a1a1a] border border-[#2d2d2d] py-1 px-2.5 rounded text-[10px] text-white whitespace-nowrap z-50 pointer-events-none shadow-md">
+ 422 |                 New Chat
+ 423 |               </div>
+ 424 |             )}
+ 425 |           </button>
+ 426 | 
+ 427 |           {/* BYOK Button */}
+ 428 |           <button
+ 429 |             id="byok-sidebar-btn"
+ 430 |             onClick={() => setIsSecretOpen(true)}
+ 431 |             onMouseEnter={() => setHoveredSidebarItem("BYOK")}
+ 432 |             onMouseLeave={() => setHoveredSidebarItem(null)}
+ 433 |             className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${
+ 434 |               isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"
+ 435 |             }`}
+ 436 |           >
+ 437 |             <Key className="w-5 h-5 stroke-[1.8]" />
+ 438 |             {isSidebarExpanded && <span className="text-xs font-semibold">API Keys</span>}
+ 439 |             {!isSidebarExpanded && hoveredSidebarItem === "BYOK" && (
+ 440 |               <div className="absolute left-[64px] bg-[#1a1a1a] border border-[#2d2d2d] py-1 px-2.5 rounded text-[10px] text-white whitespace-nowrap z-50 pointer-events-none shadow-md">
+ 441 |                 Bring Your Own Key
+ 442 |               </div>
+ 443 |             )}
+ 444 |           </button>
+ 445 | 
+ 446 |           {/* Recents Log */}
+ 447 |           {isSidebarExpanded && (
+ 448 |             <div className="pt-6 space-y-2 select-none">
+ 449 |               <div className="flex items-center gap-1.5 px-3">
+ 450 |                 <History className="w-3.5 h-3.5 text-neutral-600" />
+ 451 |                 <span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest font-mono">Recents</span>
+ 452 |               </div>
+ 453 |               <div className="space-y-1 max-h-[220px] overflow-y-auto custom-scrollbar">
+ 454 |                 {Object.values(sessions).length === 0 ? (
+ 455 |                   <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span>
+ 456 |                 ) : (
+ 457 |                   Object.values(sessions).reverse().map((s) => (
+ 458 |                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
+ 459 |                       <button
+ 460 |                         disabled={isLoadingSession}
+ 461 |                         onClick={async () => {
+ 462 |                           setIsLoadingSession(true);
+ 463 |                           try {
+ 464 |                             await loadSessionFromDb(s.id);
+ 465 |                             setWorkspaceState("active");
+ 466 |                             setCurrentTab("chat");
+ 467 |                           } catch (err) {
+ 468 |                             console.error(err);
+ 469 |                           } finally {
+ 470 |                             setIsLoadingSession(false);
+ 471 |                           }
+ 472 |                         }}
+ 473 |                         className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${
+ 474 |                           activeSessionId === s.id
+ 475 |                             ? "text-white font-bold"
+ 476 |                             : "text-neutral-500 hover:text-white"
+ 477 |                         }`}
+ 478 |                         title={s.prompt}
+ 479 |                       >
+ 480 |                         {s.title}
+ 481 |                       </button>
+ 482 |                       <button
+ 483 |                         onClick={async (e) => {
+ 484 |                           e.stopPropagation();
+ 485 |                           if (confirm(`Are you sure you want to delete "${s.title}"?`)) {
+ 486 |                             await deleteSessionFromDb(s.id);
+ 487 |                           }
+ 488 |                         }}
+ 489 |                         className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"
+ 490 |                         title="Delete Chat"
+ 491 |                       >
+ 492 |                         <Trash2 className="w-3.5 h-3.5" />
+ 493 |                       </button>
+ 494 |                     </div>
+ 495 |                   ))
+ 496 |                 )}
+ 497 |               </div>
+ 498 |             </div>
+ 499 |           )}
+ 500 |         </nav>
+ 501 | 
+ 502 |         {/* Sidebar Footer */}
+ 503 |         <div className="p-2 border-t border-[#1f1f1f] space-y-1 select-none">
+ 504 |           <button
+ 505 |             onClick={() => alert("Settings panel coming soon.")}
+ 506 |             className={`w-full flex items-center rounded-lg hover:bg-neutral-900 transition-colors py-2 cursor-pointer ${
+ 507 |               isSidebarExpanded ? "px-3 gap-3 text-neutral-400 hover:text-white" : "justify-center text-neutral-400 hover:text-white"
+ 508 |             }`}
+ 509 |           >
+ 510 |             <Settings className="w-4 h-4" />
+ 511 |             {isSidebarExpanded && <span className="text-xs">Settings</span>}
+ 512 |           </button>
+ 513 |           <button
+ 514 |             onClick={() => setIsProfileOpen(true)}
+ 515 |             className={`w-full flex items-center rounded-lg hover:bg-neutral-900 transition-colors py-2 cursor-pointer ${
+ 516 |               isSidebarExpanded ? "px-3 gap-3 text-neutral-400 hover:text-white" : "justify-center text-neutral-400 hover:text-white"
+ 517 |             }`}
+ 518 |           >
+ 519 |             <div className="w-6 h-6 rounded-full bg-neutral-800 flex items-center justify-center shrink-0 border border-neutral-700">
+ 520 |               <User className="w-3.5 h-3.5 text-neutral-300" />
+ 521 |             </div>
+ 522 |             {isSidebarExpanded && <span className="text-xs truncate font-medium">Profile</span>}
+ 523 |           </button>
+ 524 |         </div>
+ 525 |       </aside>
+ 526 | 
+ 527 |       <main className="flex-1 flex flex-col min-w-0 bg-[#000000] relative transition-all duration-300">
+ 528 | 
+ 529 |         {/* Header */}
+ 530 |         <header className="flex justify-between items-center w-full px-6 h-16 border-b border-[#141414] shrink-0 z-10 bg-black/85 backdrop-blur-md">
+ 531 |           <div className="flex items-center gap-2">
+ 532 |           </div>
+ 533 | 
+ 534 |           {/* Tab Switcher — Chat always left, Flow/Arena only visible when complex task ran */}
+ 535 |           <div className="flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-[2px] rounded-full select-none">
+ 536 |             <button
+ 537 |               id="tab-chat"
+ 538 |               onClick={() => {
+ 539 |                 if (workspaceState === "home") return;
+ 540 |                 setCurrentTab("chat");
+ 541 |               }}
+ 542 |               className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+ 543 |                 currentTab === "chat" || workspaceState === "home"
+ 544 |                   ? "bg-neutral-800 text-white"
+ 545 |                   : "text-neutral-400 hover:text-white"
+ 546 |               }`}
+ 547 |             >
+ 548 |               Chat
+ 549 |             </button>
+ 550 |             {/* Flow tab only shown when complex task (nodes exist) */}
+ 551 |             {workspaceState === "active" && (
+ 552 |               <button
+ 553 |                 id="tab-flow"
+ 554 |                 onClick={() => setCurrentTab("arena")}
+ 555 |                 className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+ 556 |                   currentTab === "arena"
+ 557 |                     ? "bg-neutral-800 text-white"
+ 558 |                     : "text-neutral-400 hover:text-white"
+ 559 |                 }`}
+ 560 |               >
+ 561 |                 <GitFork className="w-3 h-3" />
+ 562 |                 Flow
+ 563 |                 {nodes.length > 0 && (
+ 564 |                   <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse ml-0.5" />
+ 565 |                 )}
+ 566 |               </button>
+ 567 |             )}
+ 568 |           </div>
+ 569 | 
+ 570 |           {/* Right Header Controls */}
+ 571 |           <div className="flex items-center gap-4 select-none">
+ 572 |             <button
+ 573 |               onClick={() => alert("Solospace — AI-powered assistant. Enter any prompt to get a complete, detailed response. For complex tasks, use the Flow tab to inspect the multi-agent pipeline.")}
+ 574 |               className="text-neutral-400 hover:text-white p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer"
+ 575 |             >
+ 576 |               <HelpCircle className="w-4 h-4 stroke-[1.8]" />
+ 577 |             </button>
+ 578 |           </div>
+ 579 |         </header>
+ 580 | 
+ 581 |         {/* View Layout */}
+ 582 |         <div className="flex-1 relative overflow-hidden">
+ 583 | 
+ 584 |           {/* A. HOME SCREEN */}
+ 585 |           {workspaceState === "home" && (
+ 586 |             <div className="absolute inset-0 flex flex-col justify-between overflow-y-auto custom-scrollbar">
+ 587 |               <div />
+ 588 |               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
+ 589 |                 <div className="text-center mb-10 space-y-2 select-none">
+ 590 |                   <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">
+ 591 |                     What&apos;s on your mind?
+ 592 |                   </h1>
+ 593 |                   <p className="text-sm text-neutral-400 font-sans">
+ 594 |                     Ask anything. Get a real, complete answer instantly.
+ 595 |                   </p>
+ 596 |                 </div>
+ 597 | 
+ 598 |                 {/* Search Bar */}
+ 599 |                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
+ 600 |                   <div className="flex items-center gap-3">
+ 601 |                     <button
+ 602 |                       onClick={() => alert("File attachment coming soon.")}
+ 603 |                       className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"
+ 604 |                       title="Attach File"
+ 605 |                     >
+ 606 |                       <UploadCloud className="w-5 h-5 stroke-[1.8]" />
+ 607 |                     </button>
+ 608 |                     <textarea
+ 609 |                       id="home-prompt-input"
+ 610 |                       rows={1}
+ 611 |                       value={userQuery}
+ 612 |                       onChange={(e) => setUserQuery(e.target.value)}
+ 613 |                       onKeyDown={(e) => {
+ 614 |                         if (e.key === "Enter" && !e.shiftKey) {
+ 615 |                           e.preventDefault();
+ 616 |                           if (userQuery.trim()) startOrchestration(userQuery);
+ 617 |                         }
+ 618 |                       }}
+ 619 |                       placeholder="Describe your idea, problem, or question..."
+ 620 |                       className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar"
+ 621 |                       style={{ maxHeight: "150px" }}
+ 622 |                     />
+ 623 |                     <div className="flex items-center gap-1.5 shrink-0">
+ 624 |                       <button
+ 625 |                         onClick={() => alert("Voice input coming soon.")}
+ 626 |                         className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors cursor-pointer"
+ 627 |                         title="Voice Input"
+ 628 |                       >
+ 629 |                         <Mic className="w-5 h-5 stroke-[1.8]" />
+ 630 |                       </button>
+ 631 |                       <button
+ 632 |                         id="home-send-btn"
+ 633 |                         onClick={() => startOrchestration(userQuery)}
+ 634 |                         disabled={!userQuery.trim()}
+ 635 |                         className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"
+ 636 |                         title="Send prompt"
+ 637 |                       >
+ 638 |                         <ArrowRight className="w-4 h-4 text-black stroke-[3]" />
+ 639 |                       </button>
+ 640 |                     </div>
+ 641 |                   </div>
+ 642 |                 </div>
+ 643 | 
+ 644 |                 {/* Mode Selector */}
+ 645 |                 <div className="flex items-center gap-3 mt-5 select-none">
+ 646 |                   <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">Mode:</span>
+ 647 |                   <button
+ 648 |                     onClick={() => setIsAutoMode(true)}
+ 649 |                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${
+ 650 |                       isAutoMode
+ 651 |                         ? "bg-white text-black border-white font-bold"
+ 652 |                         : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"
+ 653 |                     }`}
+ 654 |                   >
+ 655 |                     <Zap className="w-3 h-3 stroke-[2]" />
+ 656 |                     <span>Auto Agent</span>
+ 657 |                   </button>
+ 658 |                   <button
+ 659 |                     onClick={() => setIsAutoMode(false)}
+ 660 |                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${
+ 661 |                       !isAutoMode
+ 662 |                         ? "bg-white text-black border-white font-bold"
+ 663 |                         : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"
+ 664 |                     }`}
+ 665 |                   >
+ 666 |                     <Sliders className="w-3 h-3" />
+ 667 |                     <span>Custom Agent</span>
+ 668 |                   </button>
+ 669 |                 </div>
+ 670 |               </div>
+ 671 |               <div />
+ 672 |             </div>
+ 673 |           )}
+ 674 | 
+ 675 |           {/* B. ACTIVE WORKSPACE */}
+ 676 |           {workspaceState === "active" && (
+ 677 |             <div className="absolute inset-0 flex">
+ 678 | 
+ 679 |               {/* VIEW 1: CHAT (Primary — always shown first) */}
+ 680 |               {currentTab === "chat" && (
+ 681 |                 <div className="flex-1 flex flex-col justify-between overflow-hidden bg-black">
+ 682 | 
+ 683 |                   {/* Chat messages */}
+ 684 |                   <div
+ 685 |                     ref={chatContainerRef}
+ 686 |                     onScroll={handleScroll}
+ 687 |                     className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4"
+ 688 |                   >
+ 689 |                     {isLoadingSession ? (
+ 690 |                       <div className="flex items-center justify-center h-full">
+ 691 |                         <div className="flex flex-col items-center gap-3 text-neutral-500">
+ 692 |                           <div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
+ 693 |                           <span className="text-xs font-semibold">Loading Session...</span>
+ 694 |                         </div>
+ 695 |                       </div>
+ 696 |                     ) : (
+ 697 |                       <div className="max-w-5xl mx-auto space-y-4 select-text">
+ 698 | 
+ 699 |                       {chatMessages.map((msg, msgIdx) => (
+ 700 |                         <motion.div
+ 701 |                           key={msg.id}
+ 702 |                           initial={{ opacity: 0, y: 12 }}
+ 703 |                           animate={{ opacity: 1, y: 0 }}
+ 704 |                           transition={{ duration: 0.3 }}
+ 705 |                           className={`flex w-full ${msg.sender === "user" ? "justify-end" : "justify-start"}`}
+ 706 |                         >
+ 707 |                           {msg.sender === "user" ? (
+ 708 |                             <div className="max-w-[72%] rounded-3xl px-5 py-3 bg-[#2f2f2f] text-neutral-100 text-sm leading-relaxed">
+ 709 |                               <p className="whitespace-pre-wrap">{msg.text}</p>
+ 710 |                             </div>
+ 711 |                           ) : (
+ 712 |                             <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
+ 713 |                               <div className="w-full text-neutral-100 text-sm leading-relaxed px-1 py-2">
+ 714 |                                 <MarkdownRenderer content={msg.text || "*Streaming response...*"} />
+ 715 |                                 
+ 716 |                                 {/* Action Buttons for AI Response */}
+ 717 |                                 {msg.text && (
+ 718 |                                   <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
+ 719 |                                     <button
+ 720 |                                       onClick={() => copyToClipboard(msg.text, msg.id)}
+ 721 |                                       className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800"
+ 722 |                                       title="Copy response"
+ 723 |                                     >
+ 724 |                                       {copiedMsgId === msg.id ? (
+ 725 |                                         <>
+ 726 |                                           <Check className="w-3.5 h-3.5 text-emerald-400" />
+ 727 |                                           <span className="text-emerald-400 font-medium">Copied</span>
+ 728 |                                         </>
+ 729 |                                       ) : (
+ 730 |                                         <>
+ 731 |                                           <Copy className="w-3.5 h-3.5" />
+ 732 |                                           <span>Copy</span>
+ 733 |                                         </>
+ 734 |                                       )}
+ 735 |                                     </button>
+ 736 |                                     {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && (
+ 737 |                                       <button
+ 738 |                                         onClick={() => {
+ 739 |                                           const lastUser = chatMessages.slice().reverse().find(m => m.sender === "user");
+ 740 |                                           if (lastUser) {
+ 741 |                                             setChatMessages(prev => {
+ 742 |                                               const lastAiIdx = prev.map((m, i) => m.sender === 'ai' ? i : -1).filter(i => i >= 0).pop();
+ 743 |                                               if (lastAiIdx !== undefined) {
+ 744 |                                                 return prev.filter((_, i) => i !== lastAiIdx);
+ 745 |                                               }
+ 746 |                                               return prev;
+ 747 |                                             });
+ 748 |                                             startOrchestration(lastUser.text);
+ 749 |                                           }
+ 750 |                                         }}
+ 751 |                                         className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800"
+ 752 |                                         title="Regenerate response"
+ 753 |                                       >
+ 754 |                                         <Zap className="w-3.5 h-3.5" />
+ 755 |                                         <span>Regenerate</span>
+ 756 |                                       </button>
+ 757 |                                     )}
+ 758 |                                   </div>
+ 759 |                                 )}
+ 760 |                               </div>
+ 761 | 
+ 762 |                               {/* Collapsible trace block and see flow buttons outside bubble */}
+ 763 |                               {msgIdx === chatMessages.length - 1 && (
+ 764 |                                 <div className="space-y-3 pt-1 w-full">
+ 765 |                                   <AgentTraceBlock
+ 766 |                                     logs={agentTalkLogs}
+ 767 |                                     thinkingSummary={msg.thinkingSummary}
+ 768 |                                   />
+ 769 |                                   
+ 770 |                                   {!isThinking && !isOrchestrating && nodes.length > 0 && (
+ 771 |                                     <div className="flex flex-wrap gap-2 pt-1">
+ 772 |                                       <button
+ 773 |                                         id="see-flow-btn"
+ 774 |                                         onClick={() => setCurrentTab("arena")}
+ 775 |                                         className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max select-none"
+ 776 |                                       >
+ 777 |                                         <GitFork className="w-3.5 h-3.5 text-cyan-400" />
+ 778 |                                         <span>See Agent Flow</span>
+ 779 |                                         <span className="text-[9px] font-mono text-neutral-600">({nodes.length} agents)</span>
+ 780 |                                       </button>
+ 781 | 
+ 782 |                                       {!isAutoMode && (
+ 783 |                                         <button
+ 784 |                                           onClick={() => setCurrentTab("arena")}
+ 785 |                                           className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-neutral-500 rounded-xl text-xs font-semibold text-neutral-400 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max select-none"
+ 786 |                                         >
+ 787 |                                           <Sliders className="w-3.5 h-3.5" />
+ 788 |                                           <span>Customize Agents</span>
+ 789 |                                         </button>
+ 790 |                                       )}
+ 791 |                                     </div>
+ 792 |                                   )}
+ 793 | 
+ 794 |                                   {!isThinking && !isOrchestrating && followUpSuggestions && followUpSuggestions.length > 0 && (
+ 795 |                                     <div className="flex flex-wrap gap-2 pt-2 select-none">
+ 796 |                                       <span className="text-[9px] font-mono text-neutral-500 uppercase tracking-wider self-center">Suggestions:</span>
+ 797 |                                       {followUpSuggestions.map((suggestion, idx) => (
+ 798 |                                         <button
+ 799 |                                           key={idx}
+ 800 |                                           onClick={() => {
+ 801 |                                             setUserQuery(suggestion);
+ 802 |                                             startOrchestration(suggestion);
+ 803 |                                           }}
+ 804 |                                           className="px-3 py-1.5 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/30 rounded-full text-[10px] text-neutral-400 hover:text-white transition-all cursor-pointer animate-fade-in"
+ 805 |                                         >
+ 806 |                                           {suggestion}
+ 807 |                                         </button>
+ 808 |                                       ))}
+ 809 |                                     </div>
+ 810 |                                   )}
+ 811 |                                 </div>
+ 812 |                               )}
+ 813 |                             </div>
+ 814 |                           )}
+ 815 |                         </motion.div>
+ 816 |                       ))}
+ 817 | 
+ 818 |                       {/* Thinking indicator */}
+ 819 |                       <AnimatePresence>
+ 820 |                         {isThinking && <ThinkingBubble />}
+ 821 |                       </AnimatePresence>
+ 822 | 
+ 823 |                       {/* Auto-scroll anchor */}
+ 824 |                       <div ref={chatEndRef} />
+ 825 |                     </div>
+ 826 |                     )}
+ 827 |                   </div>
+ 828 | 
+ 829 |                   {/* Bottom input bar */}
+ 830 |                   <div className="px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
+ 831 |                     {!isAutoMode && workspaceState === "active" && (
+ 832 |                       <div className="text-[10px] font-mono text-amber-400 bg-amber-950/30 px-3 py-1 rounded-full self-center border border-amber-500/20 max-w-max select-none">
+ 833 |                         Planning Mode – Edit agents in Flow, then click Proceed
+ 834 |                       </div>
+ 835 |                     )}
+ 836 |                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
+ 837 |                       <textarea
+ 838 |                         ref={textareaRef}
+ 839 |                         id="chat-prompt-input"
+ 840 |                         rows={1}
+ 841 |                         value={userQuery}
+ 842 |                         onChange={(e) => setUserQuery(e.target.value)}
+ 843 |                         onKeyDown={(e) => {
+ 844 |                           if (e.key === "Enter" && !e.shiftKey) {
+ 845 |                             e.preventDefault();
+ 846 |                             if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery);
+ 847 |                           }
+ 848 |                         }}
+ 849 |                         placeholder={isOrchestrating ? "Streaming response..." : (isAutoMode ? "Ask a follow-up or new question..." : "Enter a new idea to generate agents (no auto-run)...")}
+ 850 |                         disabled={isOrchestrating}
+ 851 |                         className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar"
+ 852 |                       />
+ 853 |                       {isOrchestrating ? (
+ 854 |                         <button
+ 855 |                           onClick={cancelOrchestration}
+ 856 |                           className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all font-semibold cursor-pointer shrink-0"
+ 857 |                           title="Stop generating"
+ 858 |                         >
+ 859 |                           <Square className="w-3.5 h-3.5 text-white fill-white" />
+ 860 |                         </button>
+ 861 |                       ) : (
+ 862 |                         <button
+ 863 |                           id="chat-send-btn"
+ 864 |                           onClick={() => startOrchestration(userQuery)}
+ 865 |                           disabled={!userQuery.trim() || isThinking}
+ 866 |                           className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer shrink-0"
+ 867 |                           title="Send message"
+ 868 |                         >
+ 869 |                           <ArrowRight className="w-4 h-4 text-black stroke-[3]" />
+ 870 |                         </button>
+ 871 |                       )}
+ 872 |                     </div>
  873 |                   </div>
- 874 | 
- 875 |                   {/* FLOATING LEFT SIDE Arena Tools Panel */}
- 876 |                   <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col bg-[#0d0d0d]/80 border border-[#1f1f1f] p-1.5 rounded-xl z-20 backdrop-blur-md shadow-2xl">
- 877 |                     <div className="text-[8px] font-mono text-neutral-600 uppercase tracking-widest px-2 pb-2 text-center select-none border-b border-[#141414] mb-2 font-bold">
- 878 |                       Tools
- 879 |                     </div>
- 880 |                     {toolsList.map((tool) => (
- 881 |                       <div
- 882 |                         key={tool.name}
- 883 |                         draggable
- 884 |                         onDragStart={(e) => e.dataTransfer.setData("toolName", tool.name)}
- 885 |                         className="p-2.5 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-900 transition-all cursor-grab active:cursor-grabbing flex items-center justify-center relative group"
- 886 |                       >
- 887 |                         {tool.icon}
- 888 |                         <div className="absolute left-12 bg-[#0c0c0c] border border-[#1f1f1f] p-2.5 rounded-lg text-left hidden group-hover:block w-40 z-30 shadow-2xl pointer-events-none">
- 889 |                           <h4 className="text-[10px] font-bold text-white">{tool.name}</h4>
- 890 |                           <p className="text-[9px] text-neutral-400 mt-0.5 leading-relaxed">{tool.desc}</p>
- 891 |                           <span className="text-[8px] font-mono text-neutral-600 block mt-1.5 italic">Drag onto agent node</span>
- 892 |                         </div>
- 893 |                       </div>
- 894 |                     ))}
- 895 |                   </div>
- 896 | 
- 897 |                   {/* Flow Arena */}
- 898 |                   <FlowArena />
- 899 | 
- 900 |                   {/* Bottom controls — Proceed & Return to Chat */}
- 901 |                   <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 pointer-events-auto flex items-center gap-3 font-semibold select-none">
- 902 |                     <button
- 903 |                       disabled={isOrchestrating}
- 904 |                       onClick={async () => {
- 905 |                         if (isOrchestrating) return;
- 906 |                         // Bug 11: Immediately set orchestrating to prevent double-fire before async fn sets it
- 907 |                         useWorkflowStore.setState({ isOrchestrating: true });
- 908 |                         setCurrentTab("chat"); // Switch back to chat to see the output stream
- 909 |                         const triggerCustomExecution = useWorkflowStore.getState().triggerCustomExecution;
- 910 |                         await triggerCustomExecution();
- 911 |                       }}
- 912 |                       className="bg-white hover:bg-neutral-200 disabled:bg-neutral-800 disabled:text-neutral-500 text-black font-bold text-xs h-10 px-6 rounded-[24px] shadow-2xl flex items-center gap-1.5 cursor-pointer shrink-0 transition-all active:scale-95 disabled:scale-100 disabled:cursor-not-allowed"
- 913 |                     >
- 914 |                       {isOrchestrating ? (
- 915 |                         <>
- 916 |                           <div className="w-3.5 h-3.5 border-2 border-neutral-500 border-t-neutral-200 rounded-full animate-spin" />
- 917 |                           <span>Running Flow...</span>
- 918 |                         </>
- 919 |                       ) : (
- 920 |                         <>
- 921 |                           <Zap className="w-3.5 h-3.5 text-black fill-black" />
- 922 |                           <span>Proceed with Agents</span>
- 923 |                         </>
- 924 |                       )}
- 925 |                     </button>
- 926 |                     <button
- 927 |                       onClick={() => setCurrentTab("chat")}
- 928 |                       className="h-10 px-4 rounded-[24px] border border-[#1f1f1f] hover:border-neutral-600 bg-black/80 backdrop-blur-md text-neutral-400 hover:text-white text-xs font-semibold transition-all cursor-pointer shadow-2xl"
- 929 |                     >
- 930 |                       Return to Chat
- 931 |                     </button>
- 932 |                   </div>
- 933 |                 </div>
- 934 |               )}
- 935 |             </div>
- 936 |           )}
- 937 |         </div>
- 938 |       </main>
- 939 | 
- 940 |       {/* 3. RIGHT Sliding Configuration Edit Panel */}
- 941 |       {currentTab === "arena" && (
- 942 |         <div
- 943 |           className={`fixed top-0 right-0 h-full w-80 bg-[#0c0c0c]/95 border-l border-[#1f1f1f] z-40 flex flex-col justify-between shadow-2xl transition-transform duration-300 right-panel select-none ${
- 944 |             isConfigPanelOpen ? "translate-x-0" : "translate-x-full"
- 945 |           }`}
- 946 |         >
- 947 |         <button
- 948 |           onClick={handleCloseConfigPanel}
- 949 |           className="absolute -left-8 top-1/2 -translate-y-1/2 w-8 h-16 bg-[#0c0c0c]/95 border border-[#1f1f1f] border-r-0 rounded-l-xl flex items-center justify-center text-neutral-400 hover:text-white transition-colors cursor-pointer"
- 950 |         >
- 951 |           {isConfigPanelOpen ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
- 952 |         </button>
- 953 | 
- 954 |         {activeNodeDetail ? (
- 955 |           <div className="flex-1 flex flex-col h-full overflow-hidden">
- 956 |             <div className="p-5 border-b border-[#1f1f1f] flex justify-between items-center bg-[#0d0d0d]">
- 957 |               <div>
- 958 |                 <h3 className="text-sm font-bold text-white uppercase tracking-wider">{activeNodeDetail.data.name}</h3>
- 959 |                 <span className="text-[8px] font-mono text-neutral-500 uppercase tracking-widest block mt-0.5">{activeNodeDetail.data.tag}</span>
- 960 |               </div>
- 961 |               <button onClick={handleCloseConfigPanel} className="text-neutral-500 hover:text-white cursor-pointer">
- 962 |                 <X className="w-4 h-4" />
- 963 |               </button>
- 964 |             </div>
- 965 | 
- 966 |             <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
- 967 |               {/* Enable/Disable toggle */}
- 968 |               <div className="flex items-center justify-between bg-[#070707] border border-[#1f1f1f] p-3 rounded-xl">
- 969 |                 <div className="flex flex-col">
- 970 |                   <span className="text-[10px] font-bold text-white uppercase tracking-wider">Active</span>
- 971 |                   <span className="text-[9px] text-neutral-500 mt-0.5">Disable to exclude from pipeline</span>
- 972 |                 </div>
- 973 |                 <button
- 974 |                   onClick={() => updateNodeField(activeNodeDetail.id, { enabled: !activeNodeDetail.data.enabled })}
- 975 |                   className={`w-10 h-5 rounded-full p-0.5 transition-all duration-200 cursor-pointer ${activeNodeDetail.data.enabled ? "bg-white" : "bg-neutral-800"}`}
- 976 |                 >
- 977 |                   <div className={`w-4 h-4 rounded-full transition-transform ${activeNodeDetail.data.enabled ? "bg-black translate-x-5" : "bg-neutral-600 translate-x-0"}`} />
- 978 |                 </button>
- 979 |               </div>
- 980 | 
- 981 |               {/* Priority Slider */}
- 982 |               <div className="space-y-1 bg-[#070707] border border-[#1f1f1f] p-3 rounded-xl">
- 983 |                 <div className="flex justify-between items-center text-[9px] font-mono uppercase text-neutral-400 font-bold">
- 984 |                   <span>Priority</span>
- 985 |                   <span className="text-white">Level {activeNodeDetail.data.priority}</span>
- 986 |                 </div>
- 987 |                 <input
- 988 |                   type="range" min="1" max="10" step="1"
- 989 |                   value={activeNodeDetail.data.priority}
- 990 |                   onChange={(e) => updateNodeField(activeNodeDetail.id, { priority: parseInt(e.target.value) })}
- 991 |                   className="w-full accent-white h-1 bg-[#1f1f1f] rounded-lg appearance-none cursor-pointer mt-2"
- 992 |                 />
- 993 |               </div>
- 994 | 
- 995 |               {/* Name */}
- 996 |               <div className="space-y-1.5">
- 997 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Agent Name</label>
- 998 |                 <input
- 999 |                   type="text" value={activeNodeDetail.data.name}
-1000 |                   onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })}
-1001 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
-1002 |                 />
-1003 |               </div>
-1004 | 
-1005 |               {/* Personality */}
-1006 |               <div className="space-y-1.5">
-1007 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Personality</label>
+ 874 |                 </div>
+ 875 |               )}
+ 876 | 
+ 877 |               {/* VIEW 2: ARENA CANVAS (Optional — Flow inspection/editing) */}
+ 878 |               {currentTab === "arena" && (
+ 879 |                 <div className="flex-1 relative overflow-hidden bg-[#000000] flex">
+ 880 | 
+ 881 |                   {/* Back to chat bar at top */}
+ 882 |                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#0d0d0d]/90 border border-[#1f1f1f] rounded-full px-4 py-2 backdrop-blur-md shadow-xl pointer-events-auto">
+ 883 |                     <button
+ 884 |                       onClick={() => setCurrentTab("chat")}
+ 885 |                       className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-mono"
+ 886 |                     >
+ 887 |                       <ChevronLeft className="w-3.5 h-3.5" />
+ 888 |                       Back to Chat
+ 889 |                     </button>
+ 890 |                     <span className="text-neutral-700 text-xs">|</span>
+ 891 |                     <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">
+ 892 |                       Agent Flow — {nodes.length} active
+ 893 |                     </span>
+ 894 |                   </div>
+ 895 | 
+ 896 |                   {/* FLOATING LEFT SIDE Arena Tools Panel */}
+ 897 |                   <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col bg-[#0d0d0d]/80 border border-[#1f1f1f] p-1.5 rounded-xl z-20 backdrop-blur-md shadow-2xl">
+ 898 |                     <div className="text-[8px] font-mono text-neutral-600 uppercase tracking-widest px-2 pb-2 text-center select-none border-b border-[#141414] mb-2 font-bold">
+ 899 |                       Tools
+ 900 |                     </div>
+ 901 |                     {toolsList.map((tool) => (
+ 902 |                       <div
+ 903 |                         key={tool.name}
+ 904 |                         draggable
+ 905 |                         onDragStart={(e) => e.dataTransfer.setData("toolName", tool.name)}
+ 906 |                         className="p-2.5 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-900 transition-all cursor-grab active:cursor-grabbing flex items-center justify-center relative group"
+ 907 |                       >
+ 908 |                         {tool.icon}
+ 909 |                         <div className="absolute left-12 bg-[#0c0c0c] border border-[#1f1f1f] p-2.5 rounded-lg text-left hidden group-hover:block w-40 z-30 shadow-2xl pointer-events-none">
+ 910 |                           <h4 className="text-[10px] font-bold text-white">{tool.name}</h4>
+ 911 |                           <p className="text-[9px] text-neutral-400 mt-0.5 leading-relaxed">{tool.desc}</p>
+ 912 |                           <span className="text-[8px] font-mono text-neutral-600 block mt-1.5 italic">Drag onto agent node</span>
+ 913 |                         </div>
+ 914 |                       </div>
+ 915 |                     ))}
+ 916 |                   </div>
+ 917 | 
+ 918 |                   {/* Flow Arena */}
+ 919 |                   <FlowArena />
+ 920 | 
+ 921 |                   {/* Bottom controls — Proceed & Return to Chat */}
+ 922 |                   <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 pointer-events-auto flex items-center gap-3 font-semibold select-none">
+ 923 |                     <button
+ 924 |                       disabled={isOrchestrating}
+ 925 |                       onClick={async () => {
+ 926 |                         if (isOrchestrating) return;
+ 927 |                         // Bug 11: Immediately set orchestrating to prevent double-fire before async fn sets it
+ 928 |                         useWorkflowStore.setState({ isOrchestrating: true });
+ 929 |                         setCurrentTab("chat"); // Switch back to chat to see the output stream
+ 930 |                         const triggerCustomExecution = useWorkflowStore.getState().triggerCustomExecution;
+ 931 |                         await triggerCustomExecution();
+ 932 |                       }}
+ 933 |                       className="bg-white hover:bg-neutral-200 disabled:bg-neutral-800 disabled:text-neutral-500 text-black font-bold text-xs h-10 px-6 rounded-[24px] shadow-2xl flex items-center gap-1.5 cursor-pointer shrink-0 transition-all active:scale-95 disabled:scale-100 disabled:cursor-not-allowed"
+ 934 |                     >
+ 935 |                       {isOrchestrating ? (
+ 936 |                         <>
+ 937 |                           <div className="w-3.5 h-3.5 border-2 border-neutral-500 border-t-neutral-200 rounded-full animate-spin" />
+ 938 |                           <span>Running Flow...</span>
+ 939 |                         </>
+ 940 |                       ) : (
+ 941 |                         <>
+ 942 |                           <Zap className="w-3.5 h-3.5 text-black fill-black" />
+ 943 |                           <span>Proceed with Agents</span>
+ 944 |                         </>
+ 945 |                       )}
+ 946 |                     </button>
+ 947 |                     <button
+ 948 |                       onClick={() => setCurrentTab("chat")}
+ 949 |                       className="h-10 px-4 rounded-[24px] border border-[#1f1f1f] hover:border-neutral-600 bg-black/80 backdrop-blur-md text-neutral-400 hover:text-white text-xs font-semibold transition-all cursor-pointer shadow-2xl"
+ 950 |                     >
+ 951 |                       Return to Chat
+ 952 |                     </button>
+ 953 |                   </div>
+ 954 |                 </div>
+ 955 |               )}
+ 956 |             </div>
+ 957 |           )}
+ 958 |         </div>
+ 959 |       </main>
+ 960 | 
+ 961 |       {/* 3. RIGHT Sliding Configuration Edit Panel */}
+ 962 |       {currentTab === "arena" && (
+ 963 |         <div
+ 964 |           className={`fixed top-0 right-0 h-full w-80 bg-[#0c0c0c]/95 border-l border-[#1f1f1f] z-40 flex flex-col justify-between shadow-2xl transition-transform duration-300 right-panel select-none ${
+ 965 |             isConfigPanelOpen ? "translate-x-0" : "translate-x-full"
+ 966 |           }`}
+ 967 |         >
+ 968 |         <button
+ 969 |           onClick={handleCloseConfigPanel}
+ 970 |           className="absolute -left-8 top-1/2 -translate-y-1/2 w-8 h-16 bg-[#0c0c0c]/95 border border-[#1f1f1f] border-r-0 rounded-l-xl flex items-center justify-center text-neutral-400 hover:text-white transition-colors cursor-pointer"
+ 971 |         >
+ 972 |           {isConfigPanelOpen ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+ 973 |         </button>
+ 974 | 
+ 975 |         {activeNodeDetail ? (
+ 976 |           <div className="flex-1 flex flex-col h-full overflow-hidden">
+ 977 |             <div className="p-5 border-b border-[#1f1f1f] flex justify-between items-center bg-[#0d0d0d]">
+ 978 |               <div>
+ 979 |                 <h3 className="text-sm font-bold text-white uppercase tracking-wider">{activeNodeDetail.data.name}</h3>
+ 980 |                 <span className="text-[8px] font-mono text-neutral-500 uppercase tracking-widest block mt-0.5">{activeNodeDetail.data.tag}</span>
+ 981 |               </div>
+ 982 |               <button onClick={handleCloseConfigPanel} className="text-neutral-500 hover:text-white cursor-pointer">
+ 983 |                 <X className="w-4 h-4" />
+ 984 |               </button>
+ 985 |             </div>
+ 986 | 
+ 987 |             <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
+ 988 |               {/* Enable/Disable toggle */}
+ 989 |               <div className="flex items-center justify-between bg-[#070707] border border-[#1f1f1f] p-3 rounded-xl">
+ 990 |                 <div className="flex flex-col">
+ 991 |                   <span className="text-[10px] font-bold text-white uppercase tracking-wider">Active</span>
+ 992 |                   <span className="text-[9px] text-neutral-500 mt-0.5">Disable to exclude from pipeline</span>
+ 993 |                 </div>
+ 994 |                 <button
+ 995 |                   onClick={() => updateNodeField(activeNodeDetail.id, { enabled: !activeNodeDetail.data.enabled })}
+ 996 |                   className={`w-10 h-5 rounded-full p-0.5 transition-all duration-200 cursor-pointer ${activeNodeDetail.data.enabled ? "bg-white" : "bg-neutral-800"}`}
+ 997 |                 >
+ 998 |                   <div className={`w-4 h-4 rounded-full transition-transform ${activeNodeDetail.data.enabled ? "bg-black translate-x-5" : "bg-neutral-600 translate-x-0"}`} />
+ 999 |                 </button>
+1000 |               </div>
+1001 | 
+1002 |               {/* Priority Slider */}
+1003 |               <div className="space-y-1 bg-[#070707] border border-[#1f1f1f] p-3 rounded-xl">
+1004 |                 <div className="flex justify-between items-center text-[9px] font-mono uppercase text-neutral-400 font-bold">
+1005 |                   <span>Priority</span>
+1006 |                   <span className="text-white">Level {activeNodeDetail.data.priority}</span>
+1007 |                 </div>
 1008 |                 <input
-1009 |                   type="text" value={activeNodeDetail.data.personality}
-1010 |                   onChange={(e) => updateNodeField(activeNodeDetail.id, { personality: e.target.value })}
-1011 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
-1012 |                 />
-1013 |               </div>
-1014 | 
-1015 |               {/* System Prompt */}
-1016 |               <div className="space-y-1.5">
-1017 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label>
-1018 |                 <textarea
-1019 |                   value={activeNodeDetail.data.systemPrompt}
-1020 |                   onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })}
-1021 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed"
-1022 |                 />
-1023 |               </div>
-1024 | 
-1025 |               {/* Goal Objective */}
-1026 |               <div className="space-y-1.5">
-1027 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Objective</label>
-1028 |                 <textarea
-1029 |                   value={activeNodeDetail.data.objective}
-1030 |                   onChange={(e) => updateNodeField(activeNodeDetail.id, { objective: e.target.value })}
-1031 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[60px] resize-none leading-relaxed"
-1032 |                 />
-1033 |               </div>
-1034 | 
-1035 |               {/* Rules */}
-1036 |               <div className="space-y-2">
-1037 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold block">Rules</label>
-1038 |                 <div className="space-y-1.5">
-1039 |                   {activeNodeDetail.data.rules && activeNodeDetail.data.rules.map((rule: any, idx: number) => (
-1040 |                     <div key={idx} className="flex gap-2 items-center bg-[#050505] border border-[#1f1f1f] p-2 rounded-lg justify-between">
-1041 |                       <span className="text-[10px] text-neutral-300 leading-normal flex-1 pr-2">{rule}</span>
-1042 |                       <button onClick={() => handleDeleteRule(idx)} className="text-neutral-500 hover:text-red-400 transition-colors shrink-0 cursor-pointer">
-1043 |                         <Trash2 className="w-3.5 h-3.5" />
-1044 |                       </button>
-1045 |                     </div>
-1046 |                   ))}
-1047 |                 </div>
-1048 |                 <div className="flex gap-2">
-1049 |                   <input
-1050 |                     type="text" value={newRuleText}
-1051 |                     onChange={(e) => setNewRuleText(e.target.value)}
-1052 |                     placeholder="Add constraint..."
-1053 |                     className="flex-1 bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
-1054 |                   />
-1055 |                   <button onClick={handleAddRule} className="bg-white text-black font-bold text-xs px-3 rounded-lg hover:bg-neutral-200 cursor-pointer">Add</button>
-1056 |                 </div>
-1057 |               </div>
-1058 | 
-1059 |               {/* Sliders */}
-1060 |               <div className="space-y-4 pt-3 border-t border-[#141414]">
-1061 |                 {[
-1062 |                   { label: "Creativity", key: "temp", min: 0, max: 1, step: 0.05, display: (v: number) => v.toString() },
-1063 |                   { label: "Logic / Depth", key: "logic", min: 10, max: 100, step: 5, display: (v: number) => `${v}%` },
-1064 |                   { label: "Empathy", key: "empathy", min: 0, max: 100, step: 5, display: (v: number) => `${v}%` }
-1065 |                 ].map(({ label, key, min, max, step, display }) => (
-1066 |                   <div key={key} className="space-y-1">
-1067 |                     <div className="flex justify-between items-center text-[9px] font-mono uppercase text-neutral-400 font-bold">
-1068 |                       <span>{label}</span>
-1069 |                       <span className="text-white">{display(activeNodeDetail.data[key])}</span>
-1070 |                     </div>
-1071 |                     <input
-1072 |                       type="range" min={min} max={max} step={step}
-1073 |                       value={activeNodeDetail.data[key]}
-1074 |                       onChange={(e) => updateNodeField(activeNodeDetail.id, { [key]: key === "temp" ? parseFloat(e.target.value) : parseInt(e.target.value) })}
-1075 |                       className="w-full accent-white h-1 bg-[#1f1f1f] rounded-lg appearance-none cursor-pointer"
-1076 |                     />
-1077 |                   </div>
-1078 |                 ))}
-1079 |               </div>
-1080 | 
-1081 |               {/* Tool Integrations */}
-1082 |               <div className="pt-5 border-t border-[#141414] space-y-4">
-1083 |                 <div className="flex justify-between items-center">
-1084 |                   <label className="text-[10px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Tools</label>
-1085 |                   <span className="text-[8px] font-mono text-neutral-500 uppercase">Attached: {activeNodeDetail.data.tools?.length || 0}</span>
-1086 |                 </div>
-1087 |                 <select
-1088 |                   id="tool-selector-dropdown"
-1089 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-neutral-300 outline-none focus:border-neutral-500"
-1090 |                   defaultValue=""
-1091 |                   onChange={(e) => {
-1092 |                     const toolName = e.target.value;
-1093 |                     if (!toolName) return;
-1094 |                     const currentTools = activeNodeDetail.data.tools || [];
-1095 |                     if (!currentTools.includes(toolName)) {
-1096 |                       const updatedTools = [...currentTools, toolName];
-1097 |                       const permissions = activeNodeDetail.data.toolPermissions || {};
-1098 |                       const updatedPerms = { ...permissions, [toolName]: permissions[toolName] || "ALLOWED" };
-1099 |                       updateNodeField(activeNodeDetail.id, { tools: updatedTools, toolPermissions: updatedPerms });
-1100 |                     }
-1101 |                     e.target.value = "";
-1102 |                   }}
-1103 |                 >
-1104 |                   <option value="" disabled>+ Attach tool...</option>
-1105 |                   {["Web Search", "Browser", "Memory", "File Upload", "Code Executor", "Vision", "Voice", "API Connector"]
-1106 |                     .filter(tool => !(activeNodeDetail.data.tools || []).includes(tool))
-1107 |                     .map((tool: string) => (
-1108 |                       <option key={tool} value={tool}>{tool}</option>
-1109 |                     ))}
-1110 |                 </select>
-1111 | 
-1112 |                 <div className="space-y-3">
-1113 |                   {(!activeNodeDetail.data.tools || activeNodeDetail.data.tools.length === 0) ? (
-1114 |                     <div className="bg-[#050505] border border-dashed border-[#1f1f1f] p-4 text-center rounded-xl">
-1115 |                       <p className="text-[10px] text-neutral-500">No tools attached.</p>
-1116 |                     </div>
-1117 |                   ) : (
-1118 |                     activeNodeDetail.data.tools.map((tool: any) => {
-1119 |                       const currentPermissions = activeNodeDetail.data.toolPermissions || {};
-1120 |                       const permission = currentPermissions[tool] || "ALLOWED";
-1121 |                       return (
-1122 |                         <div key={tool} className="bg-[#050505] border border-[#1f1f1f] p-3 rounded-xl space-y-2">
-1123 |                           <div className="flex justify-between items-center">
-1124 |                             <span className="text-xs font-bold text-white flex items-center gap-1.5">
-1125 |                               <span className={`w-1.5 h-1.5 rounded-full ${permission === "ALLOWED" ? "bg-emerald-500 animate-pulse" : permission === "ASK" ? "bg-amber-500" : "bg-rose-500"}`} />
-1126 |                               {tool}
-1127 |                             </span>
-1128 |                             <button
-1129 |                               onClick={() => {
-1130 |                                 const updatedTools = (activeNodeDetail.data.tools || []).filter((t: string) => t !== tool);
-1131 |                                 const updatedPerms = { ...(activeNodeDetail.data.toolPermissions || {}) };
-1132 |                                 delete updatedPerms[tool];
-1133 |                                 updateNodeField(activeNodeDetail.id, { tools: updatedTools, toolPermissions: updatedPerms });
-1134 |                               }}
-1135 |                               className="text-neutral-500 hover:text-red-400 p-1 transition-colors cursor-pointer"
-1136 |                             >
-1137 |                               <Trash2 className="w-3.5 h-3.5" />
-1138 |                             </button>
-1139 |                           </div>
-1140 |                           <div className="grid grid-cols-3 gap-1 pt-1">
-1141 |                             {(["ALLOWED", "ASK", "DENIED"] as const).map((level) => (
-1142 |                               <button
-1143 |                                 key={level}
-1144 |                                 onClick={() => {
-1145 |                                   const updatedPerms = { ...(activeNodeDetail.data.toolPermissions || {}), [tool]: level };
-1146 |                                   updateNodeField(activeNodeDetail.id, { toolPermissions: updatedPerms });
-1147 |                                 }}
-1148 |                                 className={`py-1 text-[9px] font-mono font-bold rounded-md border transition-all cursor-pointer ${
-1149 |                                   permission === level
-1150 |                                     ? level === "ALLOWED" ? "bg-emerald-950/40 text-emerald-400 border-emerald-500/50"
-1151 |                                     : level === "ASK" ? "bg-amber-950/40 text-amber-400 border-amber-500/50"
-1152 |                                     : "bg-rose-950/40 text-rose-400 border-rose-500/50"
-1153 |                                     : "bg-transparent text-neutral-500 border-[#1f1f1f] hover:text-neutral-300"
-1154 |                                 }`}
-1155 |                               >
-1156 |                                 {level === "ALLOWED" ? "ALLOW" : level === "ASK" ? "ASK" : "DENY"}
-1157 |                               </button>
-1158 |                             ))}
-1159 |                           </div>
-1160 |                         </div>
-1161 |                       );
-1162 |                     })
-1163 |                   )}
-1164 |                 </div>
-1165 |               </div>
-1166 | 
-1167 |               {/* Connections */}
-1168 |               <div className="pt-5 border-t border-[#141414] space-y-4">
-1169 |                 <div className="flex justify-between items-center">
-1170 |                   <label className="text-[10px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Connections</label>
-1171 |                   <span className="text-[8px] font-mono text-neutral-500 uppercase">
-1172 |                     Links: {edges.filter(c => c.source === activeNodeDetail.id || c.target === activeNodeDetail.id).length}
-1173 |                   </span>
-1174 |                 </div>
-1175 |                 <select
-1176 |                   id="connection-selector-dropdown"
-1177 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-neutral-300 outline-none focus:border-neutral-500"
-1178 |                   defaultValue=""
-1179 |                   onChange={(e) => {
-1180 |                     const targetId = e.target.value;
-1181 |                     if (!targetId) return;
-1182 |                     const exists = edges.some(c =>
-1183 |                       (c.source === activeNodeDetail.id && c.target === targetId) ||
-1184 |                       (c.source === targetId && c.target === activeNodeDetail.id)
-1185 |                     );
-1186 |                     if (!exists) {
-1187 |                       setEdges(prev => [...prev, {
-1188 |                         id: `e-${activeNodeDetail.id}-${targetId}`,
-1189 |                         source: activeNodeDetail.id,
-1190 |                         target: targetId,
-1191 |                         animated: true,
-1192 |                         type: 'custom'
-1193 |                       }]);
-1194 |                       // Bug 1: Sync dependency — the target node now depends on this (source) node
-1195 |                       const targetNode = nodes.find(n => n.id === targetId);
-1196 |                       if (targetNode) {
-1197 |                         const currentDeps = (targetNode.data as any).dependencies || [];
-1198 |                         if (!currentDeps.includes(activeNodeDetail.id)) {
-1199 |                           updateNodeField(targetId, {
-1200 |                             dependencies: [...currentDeps, activeNodeDetail.id]
-1201 |                           });
-1202 |                         }
-1203 |                       }
-1204 |                     }
-1205 |                     e.target.value = "";
-1206 |                   }}
-1207 |                 >
-1208 |                   <option value="" disabled>+ Connect to agent...</option>
-1209 |                   {nodes.filter(n => n.id !== activeNodeDetail.id && n.type === 'custom').map(node => (
-1210 |                     <option key={node.id} value={node.id}>{(node.data as any).name}</option>
-1211 |                   ))}
-1212 |                 </select>
-1213 |                 <div className="space-y-1.5">
-1214 |                   {(() => {
-1215 |                     const linkedConns = edges.filter(c => c.source === activeNodeDetail.id || c.target === activeNodeDetail.id);
-1216 |                     if (linkedConns.length === 0) {
-1217 |                       return (
-1218 |                         <div className="bg-[#050505] border border-dashed border-[#1f1f1f] p-3 text-center rounded-xl">
-1219 |                           <p className="text-[10px] text-neutral-500">No connections.</p>
-1220 |                         </div>
-1221 |                       );
-1222 |                     }
-1223 |                     return linkedConns.map((conn, index) => {
-1224 |                       const otherNodeId = conn.source === activeNodeDetail.id ? conn.target : conn.source;
-1225 |                       const otherNode = nodes.find(n => n.id === otherNodeId);
-1226 |                       return (
-1227 |                         <div key={index} className="flex gap-2 items-center bg-[#050505] border border-[#1f1f1f] p-2 rounded-lg justify-between">
-1228 |                           <span className="text-[10px] text-neutral-300 leading-normal flex-1 pr-2">
-1229 |                             {otherNode ? (otherNode.data as any).name : otherNodeId}
-1230 |                           </span>
-1231 |                           <button onClick={() => deleteEdge(conn.id)} className="text-neutral-500 hover:text-red-400 transition-colors shrink-0 cursor-pointer">
-1232 |                             <Trash2 className="w-3.5 h-3.5" />
-1233 |                           </button>
-1234 |                         </div>
-1235 |                       );
-1236 |                     });
-1237 |                   })()}
-1238 |                 </div>
-1239 |               </div>
-1240 | 
-1241 |               {/* Execution Logs */}
-1242 |               <div className="pt-5 border-t border-[#141414] space-y-3">
-1243 |                 <div className="flex justify-between items-center">
-1244 |                   <label className="text-[10px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Execution Log</label>
-1245 |                   <button
-1246 |                     onClick={() => updateNodeField(activeNodeDetail.id, { toolLogs: [] })}
-1247 |                     className="text-[8px] font-mono text-neutral-500 hover:text-white uppercase transition-colors cursor-pointer"
-1248 |                   >
-1249 |                     Clear
-1250 |                   </button>
-1251 |                 </div>
-1252 |                 <div className="bg-black border border-[#1f1f1f] rounded-xl p-3 h-44 overflow-y-auto font-mono text-[9px] space-y-1.5 custom-scrollbar">
-1253 |                   {(!activeNodeDetail.data.toolLogs || activeNodeDetail.data.toolLogs.length === 0) ? (
-1254 |                     <div className="h-full flex items-center justify-center text-neutral-600 text-center">
-1255 |                       <span>No logs recorded.</span>
-1256 |                     </div>
-1257 |                   ) : (
-1258 |                     activeNodeDetail.data.toolLogs.map((log: any) => (
-1259 |                       <div key={log.id} className="flex gap-1.5 items-start leading-normal text-neutral-300">
-1260 |                         <span className="text-neutral-500 shrink-0 select-none">[{log.timestamp}]</span>
-1261 |                         <div className="flex-1">
-1262 |                           <span className="font-bold text-white uppercase mr-1">[{log.tool}]</span>
-1263 |                           <span>{log.detail}</span>
-1264 |                         </div>
-1265 |                         <span className={`shrink-0 font-bold px-1 rounded-sm text-[8px] ${
-1266 |                           log.status === "SUCCESS" ? "bg-emerald-950 text-emerald-400" :
-1267 |                           log.status === "PENDING" ? "bg-amber-950 text-amber-400 animate-pulse" :
-1268 |                           log.status === "BLOCKED" ? "bg-rose-950 text-rose-400" : "bg-neutral-800 text-neutral-400"
-1269 |                         }`}>
-1270 |                           {log.status}
-1271 |                         </span>
-1272 |                       </div>
-1273 |                     ))
-1274 |                   )}
-1275 |                 </div>
-1276 | 
-1277 |               </div>
-1278 |             </div>
-1279 | 
-1280 |             {/* Footer */}
-1281 |             <div className="p-4 border-t border-[#1f1f1f] bg-[#0d0d0d] grid grid-cols-2 gap-3">
-1282 |               <button
-1283 |                 onClick={() => { handleCloseConfigPanel(); }}
-1284 |                 className="py-2.5 border border-[#1f1f1f] text-xs font-semibold text-neutral-400 hover:text-white rounded-lg transition-colors font-mono cursor-pointer"
-1285 |               >
-1286 |                 Close
-1287 |               </button>
-1288 |               <button
-1289 |                 onClick={() => {
-1290 |                   alert("Agent configuration saved.");
-1291 |                   handleCloseConfigPanel();
-1292 |                 }}
-1293 |                 className="py-2.5 bg-white hover:bg-neutral-100 text-black text-xs font-bold rounded-lg transition-all font-mono cursor-pointer"
-1294 |               >
-1295 |                 Save Config
-1296 |               </button>
-1297 |             </div>
-1298 |           </div>
-1299 |         ) : (
-1300 |           <div className="flex-1 flex flex-col items-center justify-center p-6 text-center select-none">
-1301 |             <Bot className="w-12 h-12 text-neutral-700 mb-3 animate-pulse" />
-1302 |             <p className="text-xs text-neutral-500">Click any agent node in the Flow to edit its configuration.</p>
-1303 |           </div>
-1304 |         )}
-1305 |         </div>
-1306 |       )}
-1307 | 
-1308 |       {/* 4. Modals & Overlays */}
-1309 |       <AnimatePresence>
-1310 | 
-1311 |         {/* BYOK MODAL */}
-1312 |         {isSecretOpen && (
-1313 |           <motion.div
-1314 |             initial={{ opacity: 0 }}
-1315 |             animate={{ opacity: 1 }}
-1316 |             exit={{ opacity: 0 }}
-1317 |             className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
-1318 |           >
-1319 |             <motion.div
-1320 |               initial={{ scale: 0.95 }}
-1321 |               animate={{ scale: 1 }}
-1322 |               exit={{ scale: 0.95 }}
-1323 |               className="w-full max-w-md bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl"
-1324 |             >
-1325 |               <button onClick={() => setIsSecretOpen(false)} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer">
-1326 |                 <X className="w-5 h-5" />
-1327 |               </button>
-1328 |               <div className="flex gap-4 items-center mb-6">
-1329 |                 <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
-1330 |                   <Key className="w-6 h-6 text-white" />
-1331 |                 </div>
-1332 |                 <div>
-1333 |                   <h3 className="text-sm font-bold text-white">AI Engine Settings</h3>
-1334 |                   <p className="text-xs text-neutral-400 font-sans mt-0.5">Select your AI provider and configure keys.</p>
-1335 |                 </div>
-1336 |               </div>
-1337 |               <div className="space-y-4">
-1338 |                 {/* 1. Provider Selector */}
-1339 |                 <div className="space-y-1.5">
-1340 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Provider</label>
-1341 |                   <select
-1342 |                     value={selectedProvider}
-1343 |                     onChange={(e) => setSelectedProvider(e.target.value)}
-1344 |                     className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
-1345 |                   >
-1346 |                     {Object.keys(availableProviders).length > 0 ? (
-1347 |                       Object.entries(availableProviders).map(([pid, cfg]: [string, any]) => (
-1348 |                         <option key={pid} value={pid}>{cfg.name}</option>
-1349 |                       ))
-1350 |                     ) : (
-1351 |                       <option value="gemini">Google Gemini</option>
-1352 |                     )}
-1353 |                   </select>
-1354 |                 </div>
-1355 | 
-1356 |                 {/* 2. Model Selector */}
-1357 |                 <div className="space-y-1.5">
-1358 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Model</label>
-1359 |                   {availableProviders[selectedProvider]?.models?.length > 0 ? (
-1360 |                     <select
-1361 |                       value={selectedModel}
-1362 |                       onChange={(e) => setSelectedModel(e.target.value)}
-1363 |                       className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
-1364 |                     >
-1365 |                       {availableProviders[selectedProvider].models.map((m: any) => (
-1366 |                         <option key={m.id} value={m.id}>{m.name} ({m.tier})</option>
-1367 |                       ))}
-1368 |                     </select>
-1369 |                   ) : (
-1370 |                     <input
-1371 |                       type="text"
-1372 |                       placeholder="e.g. llama3, qwen2.5, my-fine-tune"
-1373 |                       value={selectedModel}
-1374 |                       onChange={(e) => setSelectedModel(e.target.value)}
-1375 |                       className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
-1376 |                     />
-1377 |                   )}
-1378 |                 </div>
-1379 | 
-1380 |                 {/* 3. API Key Input */}
-1381 |                 <div className="space-y-1.5">
-1382 |                   <div className="flex justify-between items-center">
-1383 |                     <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
-1384 |                       {selectedProvider.toUpperCase()}_API_KEY
-1385 |                     </label>
-1386 |                     {availableProviders[selectedProvider]?.key_url && (
-1387 |                       <a
-1388 |                         href={availableProviders[selectedProvider].key_url}
-1389 |                         target="_blank"
-1390 |                         rel="noreferrer"
-1391 |                         className="text-[9px] text-cyan-400 hover:underline"
-1392 |                       >
-1393 |                         Get key ↗
-1394 |                       </a>
-1395 |                     )}
-1396 |                   </div>
-1397 |                   <input
-1398 |                     id="api-key-input"
-1399 |                     type="password"
-1400 |                     placeholder={
-1401 |                       availableProviders[selectedProvider]
-1402 |                         ? `Enter key (starts with ${availableProviders[selectedProvider].key_hint || "sk-..."})`
-1403 |                         : "Enter API key"
-1404 |                     }
-1405 |                     value={apiKeyInput}
-1406 |                     onChange={(e) => setApiKeyInput(e.target.value)}
-1407 |                     className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
-1408 |                   />
-1409 |                   <p className="text-[9px] text-neutral-500 font-mono leading-normal">
-1410 |                     {availableProviders[selectedProvider]?.description || "Configure key for custom models. Key is stored locally in-memory."}
-1411 |                   </p>
-1412 |                 </div>
-1413 | 
-1414 |                 {/* 4. Save and Cancel Buttons */}
-1415 |                 <div className="pt-4 flex gap-3">
-1416 |                   <button
-1417 |                     id="save-api-key-btn"
-1418 |                     onClick={() => {
-1419 |                       setProvider(selectedProvider);
-1420 |                       setModel(selectedModel);
-1421 |                       setProviderApiKey(selectedProvider, apiKeyInput.trim());
-1422 |                       setIsSecretOpen(false);
-1423 |                     }}
-1424 |                     className="flex-1 py-2.5 bg-white hover:bg-neutral-100 text-black font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
-1425 |                   >
-1426 |                     Save Settings
-1427 |                   </button>
-1428 |                   <button
-1429 |                     onClick={() => setIsSecretOpen(false)}
-1430 |                     className="px-5 py-2.5 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-xl text-xs font-mono transition-colors cursor-pointer"
-1431 |                   >
-1432 |                     Cancel
-1433 |                   </button>
-1434 |                 </div>
-1435 |               </div>
-1436 |             </motion.div>
-1437 |           </motion.div>
-1438 |         )}
-1439 | 
-1440 |         {/* USER PROFILE MODAL */}
-1441 |         {isProfileOpen && (
-1442 |           <motion.div
-1443 |             initial={{ opacity: 0 }}
-1444 |             animate={{ opacity: 1 }}
-1445 |             exit={{ opacity: 0 }}
-1446 |             className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
-1447 |           >
-1448 |             <motion.div
-1449 |               initial={{ scale: 0.95 }}
-1450 |               animate={{ scale: 1 }}
-1451 |               exit={{ scale: 0.95 }}
-1452 |               className="w-full max-w-sm bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl"
-1453 |             >
-1454 |               <button onClick={() => setIsProfileOpen(false)} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer">
-1455 |                 <X className="w-5 h-5" />
-1456 |               </button>
-1457 |               <div className="flex flex-col items-center text-center space-y-4 py-4">
-1458 |                 <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-[#1f1f1f] flex items-center justify-center bg-neutral-900">
-1459 |                   <User className="w-8 h-8 text-neutral-500" />
-1460 |                 </div>
-1461 |                 <div>
-1462 |                   <h3 className="text-sm font-bold text-white uppercase tracking-wider">User Profile</h3>
-1463 |                   <span className="text-xs text-neutral-400 font-mono">solospace_user@gmail.com</span>
-1464 |                 </div>
-1465 |                 <div className="w-full pt-4 space-y-2 border-t border-[#141414]">
-1466 |                   <div className="flex justify-between items-center bg-black py-2 px-3 rounded text-[10px] border border-[#141414] font-mono">
-1467 |                     <span className="text-neutral-500">Plan:</span>
-1468 |                     <span className="text-white font-bold">Pro</span>
-1469 |                   </div>
-1470 |                   <div className="flex justify-between items-center bg-black py-2 px-3 rounded text-[10px] border border-[#141414] font-mono">
-1471 |                     <span className="text-neutral-500">Sessions:</span>
-1472 |                     <span className="text-white font-bold">{Object.values(sessions).length}</span>
-1473 |                   </div>
-1474 |                 </div>
-1475 |                 <button
-1476 |                   onClick={() => setIsProfileOpen(false)}
-1477 |                   className="w-full py-2.5 bg-neutral-900 hover:bg-neutral-800 border border-[#1f1f1f] text-neutral-300 hover:text-white font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
-1478 |                 >
-1479 |                   Close
-1480 |                 </button>
-1481 |               </div>
-1482 |             </motion.div>
-1483 |           </motion.div>
-1484 |         )}
-1485 | 
-1486 |         {/* TOOL APPROVAL TOAST */}
-1487 |         {pendingApproval && (
-1488 |           <div className="fixed bottom-6 right-6 w-96 bg-[#0d0d0d] border border-amber-500/50 shadow-[0_0_50px_rgba(245,158,11,0.15)] rounded-2xl p-5 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300 select-none">
-1489 |             <div className="flex gap-4 items-start">
-1490 |               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 shrink-0">
-1491 |                 <Sliders className="w-5 h-5 animate-pulse" />
-1492 |               </div>
-1493 |               <div className="flex-1 space-y-2">
-1494 |                 <div className="flex justify-between items-center">
-1495 |                   <span className="text-[10px] font-bold text-amber-500 font-mono tracking-widest uppercase">Permission Required</span>
-1496 |                   <span className="text-[9px] text-neutral-500 font-mono">Agent Tool</span>
-1497 |                 </div>
-1498 |                 <h4 className="text-xs font-bold text-white">
-1499 |                   &apos;{(nodes.find(n => n.id === pendingApproval.nodeId)?.data as any)?.name}&apos; wants to use <span className="text-amber-400 font-mono">[{pendingApproval.toolName}]</span>
-1500 |                 </h4>
-1501 |                 <p className="text-[10px] text-neutral-400 leading-normal">
-1502 |                   Action: <span className="text-white font-semibold">{pendingApproval.action}</span> — {pendingApproval.detail}
-1503 |                 </p>
-1504 |                 <div className="pt-3 flex gap-2">
-1505 |                   <button
-1506 |                     onClick={() => {
-1507 |                       const sessId = pendingApproval.sessionId || activeSessionId || "";
-1508 |                       fetch("/api/gemini/approve", {
-1509 |                         method: "POST",
-1510 |                         headers: { "Content-Type": "application/json" },
-1511 |                         body: JSON.stringify({
-1512 |                           sessionId: sessId,
-1513 |                           nodeId: pendingApproval.nodeId,
-1514 |                           toolName: pendingApproval.toolName,
-1515 |                           action: "approve"
-1516 |                         })
-1517 |                       }).catch(e => console.error("Failed to approve tool:", e));
-1518 | 
-1519 |                       const node = nodes.find(n => n.id === pendingApproval.nodeId);
-1520 |                       if (node) {
-1521 |                         const updatedLogs = ((node.data as any).toolLogs || []).map((log: any) => {
-1522 |                           if (log.id === pendingApproval.logId) {
-1523 |                             return { ...log, status: "SUCCESS" as const, detail: `Approved: ${pendingApproval.detail}` };
-1524 |                           }
-1525 |                           return log;
-1526 |                         });
-1527 |                         updateNodeField(pendingApproval.nodeId, { toolLogs: updatedLogs });
-1528 |                       }
-1529 |                       useWorkflowStore.setState({ pendingApproval: null });
-1530 |                     }}
-1531 |                     className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg text-[10px] font-mono transition-colors cursor-pointer"
-1532 |                   >
-1533 |                     Approve
-1534 |                   </button>
-1535 |                   <button
-1536 |                     onClick={() => {
-1537 |                       const sessId = pendingApproval.sessionId || activeSessionId || "";
-1538 |                       fetch("/api/gemini/approve", {
-1539 |                         method: "POST",
-1540 |                         headers: { "Content-Type": "application/json" },
-1541 |                         body: JSON.stringify({
-1542 |                           sessionId: sessId,
-1543 |                           nodeId: pendingApproval.nodeId,
-1544 |                           toolName: pendingApproval.toolName,
-1545 |                           action: "deny"
-1546 |                         })
-1547 |                       }).catch(e => console.error("Failed to deny tool:", e));
-1548 | 
-1549 |                       const node = nodes.find(n => n.id === pendingApproval.nodeId);
-1550 |                       if (node) {
-1551 |                         const updatedLogs = ((node.data as any).toolLogs || []).map((log: any) => {
-1552 |                           if (log.id === pendingApproval.logId) {
-1553 |                             return { ...log, status: "BLOCKED" as const, detail: `Denied: ${pendingApproval.detail}` };
-1554 |                           }
-1555 |                           return log;
-1556 |                         });
-1557 |                         updateNodeField(pendingApproval.nodeId, { toolLogs: updatedLogs });
-1558 |                       }
-1559 |                       useWorkflowStore.setState({ pendingApproval: null });
-1560 |                     }}
-1561 |                     className="px-4 py-2 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-lg text-[10px] font-mono transition-colors cursor-pointer"
-1562 |                   >
-1563 |                     Deny
-1564 |                   </button>
-1565 |                 </div>
-1566 |               </div>
-1567 |             </div>
-1568 |           </div>
-1569 |         )}
-1570 | 
-1571 |       </AnimatePresence>
-1572 |     </div>
-1573 |   );
-1574 | }
-1575 |
+1009 |                   type="range" min="1" max="10" step="1"
+1010 |                   value={activeNodeDetail.data.priority}
+1011 |                   onChange={(e) => updateNodeField(activeNodeDetail.id, { priority: parseInt(e.target.value) })}
+1012 |                   className="w-full accent-white h-1 bg-[#1f1f1f] rounded-lg appearance-none cursor-pointer mt-2"
+1013 |                 />
+1014 |               </div>
+1015 | 
+1016 |               {/* Name */}
+1017 |               <div className="space-y-1.5">
+1018 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Agent Name</label>
+1019 |                 <input
+1020 |                   type="text" value={activeNodeDetail.data.name}
+1021 |                   onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })}
+1022 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
+1023 |                 />
+1024 |               </div>
+1025 | 
+1026 |               {/* Personality */}
+1027 |               <div className="space-y-1.5">
+1028 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Personality</label>
+1029 |                 <input
+1030 |                   type="text" value={activeNodeDetail.data.personality}
+1031 |                   onChange={(e) => updateNodeField(activeNodeDetail.id, { personality: e.target.value })}
+1032 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
+1033 |                 />
+1034 |               </div>
+1035 | 
+1036 |               {/* System Prompt */}
+1037 |               <div className="space-y-1.5">
+1038 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label>
+1039 |                 <textarea
+1040 |                   value={activeNodeDetail.data.systemPrompt}
+1041 |                   onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })}
+1042 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed"
+1043 |                 />
+1044 |               </div>
+1045 | 
+1046 |               {/* Goal Objective */}
+1047 |               <div className="space-y-1.5">
+1048 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Objective</label>
+1049 |                 <textarea
+1050 |                   value={activeNodeDetail.data.objective}
+1051 |                   onChange={(e) => updateNodeField(activeNodeDetail.id, { objective: e.target.value })}
+1052 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[60px] resize-none leading-relaxed"
+1053 |                 />
+1054 |               </div>
+1055 | 
+1056 |               {/* Rules */}
+1057 |               <div className="space-y-2">
+1058 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold block">Rules</label>
+1059 |                 <div className="space-y-1.5">
+1060 |                   {activeNodeDetail.data.rules && activeNodeDetail.data.rules.map((rule: any, idx: number) => (
+1061 |                     <div key={idx} className="flex gap-2 items-center bg-[#050505] border border-[#1f1f1f] p-2 rounded-lg justify-between">
+1062 |                       <span className="text-[10px] text-neutral-300 leading-normal flex-1 pr-2">{rule}</span>
+1063 |                       <button onClick={() => handleDeleteRule(idx)} className="text-neutral-500 hover:text-red-400 transition-colors shrink-0 cursor-pointer">
+1064 |                         <Trash2 className="w-3.5 h-3.5" />
+1065 |                       </button>
+1066 |                     </div>
+1067 |                   ))}
+1068 |                 </div>
+1069 |                 <div className="flex gap-2">
+1070 |                   <input
+1071 |                     type="text" value={newRuleText}
+1072 |                     onChange={(e) => setNewRuleText(e.target.value)}
+1073 |                     placeholder="Add constraint..."
+1074 |                     className="flex-1 bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
+1075 |                   />
+1076 |                   <button onClick={handleAddRule} className="bg-white text-black font-bold text-xs px-3 rounded-lg hover:bg-neutral-200 cursor-pointer">Add</button>
+1077 |                 </div>
+1078 |               </div>
+1079 | 
+1080 |               {/* Sliders */}
+1081 |               <div className="space-y-4 pt-3 border-t border-[#141414]">
+1082 |                 {[
+1083 |                   { label: "Creativity", key: "temp", min: 0, max: 1, step: 0.05, display: (v: number) => v.toString() },
+1084 |                   { label: "Logic / Depth", key: "logic", min: 10, max: 100, step: 5, display: (v: number) => `${v}%` },
+1085 |                   { label: "Empathy", key: "empathy", min: 0, max: 100, step: 5, display: (v: number) => `${v}%` }
+1086 |                 ].map(({ label, key, min, max, step, display }) => (
+1087 |                   <div key={key} className="space-y-1">
+1088 |                     <div className="flex justify-between items-center text-[9px] font-mono uppercase text-neutral-400 font-bold">
+1089 |                       <span>{label}</span>
+1090 |                       <span className="text-white">{display(activeNodeDetail.data[key])}</span>
+1091 |                     </div>
+1092 |                     <input
+1093 |                       type="range" min={min} max={max} step={step}
+1094 |                       value={activeNodeDetail.data[key]}
+1095 |                       onChange={(e) => updateNodeField(activeNodeDetail.id, { [key]: key === "temp" ? parseFloat(e.target.value) : parseInt(e.target.value) })}
+1096 |                       className="w-full accent-white h-1 bg-[#1f1f1f] rounded-lg appearance-none cursor-pointer"
+1097 |                     />
+1098 |                   </div>
+1099 |                 ))}
+1100 |               </div>
+1101 | 
+1102 |               {/* Tool Integrations */}
+1103 |               <div className="pt-5 border-t border-[#141414] space-y-4">
+1104 |                 <div className="flex justify-between items-center">
+1105 |                   <label className="text-[10px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Tools</label>
+1106 |                   <span className="text-[8px] font-mono text-neutral-500 uppercase">Attached: {activeNodeDetail.data.tools?.length || 0}</span>
+1107 |                 </div>
+1108 |                 <select
+1109 |                   id="tool-selector-dropdown"
+1110 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-neutral-300 outline-none focus:border-neutral-500"
+1111 |                   defaultValue=""
+1112 |                   onChange={(e) => {
+1113 |                     const toolName = e.target.value;
+1114 |                     if (!toolName) return;
+1115 |                     const currentTools = activeNodeDetail.data.tools || [];
+1116 |                     if (!currentTools.includes(toolName)) {
+1117 |                       const updatedTools = [...currentTools, toolName];
+1118 |                       const permissions = activeNodeDetail.data.toolPermissions || {};
+1119 |                       const updatedPerms = { ...permissions, [toolName]: permissions[toolName] || "ALLOWED" };
+1120 |                       updateNodeField(activeNodeDetail.id, { tools: updatedTools, toolPermissions: updatedPerms });
+1121 |                     }
+1122 |                     e.target.value = "";
+1123 |                   }}
+1124 |                 >
+1125 |                   <option value="" disabled>+ Attach tool...</option>
+1126 |                   {["Web Search", "Browser", "Memory", "File Upload", "Code Executor", "Vision", "Voice", "API Connector"]
+1127 |                     .filter(tool => !(activeNodeDetail.data.tools || []).includes(tool))
+1128 |                     .map((tool: string) => (
+1129 |                       <option key={tool} value={tool}>{tool}</option>
+1130 |                     ))}
+1131 |                 </select>
+1132 | 
+1133 |                 <div className="space-y-3">
+1134 |                   {(!activeNodeDetail.data.tools || activeNodeDetail.data.tools.length === 0) ? (
+1135 |                     <div className="bg-[#050505] border border-dashed border-[#1f1f1f] p-4 text-center rounded-xl">
+1136 |                       <p className="text-[10px] text-neutral-500">No tools attached.</p>
+1137 |                     </div>
+1138 |                   ) : (
+1139 |                     activeNodeDetail.data.tools.map((tool: any) => {
+1140 |                       const currentPermissions = activeNodeDetail.data.toolPermissions || {};
+1141 |                       const permission = currentPermissions[tool] || "ALLOWED";
+1142 |                       return (
+1143 |                         <div key={tool} className="bg-[#050505] border border-[#1f1f1f] p-3 rounded-xl space-y-2">
+1144 |                           <div className="flex justify-between items-center">
+1145 |                             <span className="text-xs font-bold text-white flex items-center gap-1.5">
+1146 |                               <span className={`w-1.5 h-1.5 rounded-full ${permission === "ALLOWED" ? "bg-emerald-500 animate-pulse" : permission === "ASK" ? "bg-amber-500" : "bg-rose-500"}`} />
+1147 |                               {tool}
+1148 |                             </span>
+1149 |                             <button
+1150 |                               onClick={() => {
+1151 |                                 const updatedTools = (activeNodeDetail.data.tools || []).filter((t: string) => t !== tool);
+1152 |                                 const updatedPerms = { ...(activeNodeDetail.data.toolPermissions || {}) };
+1153 |                                 delete updatedPerms[tool];
+1154 |                                 updateNodeField(activeNodeDetail.id, { tools: updatedTools, toolPermissions: updatedPerms });
+1155 |                               }}
+1156 |                               className="text-neutral-500 hover:text-red-400 p-1 transition-colors cursor-pointer"
+1157 |                             >
+1158 |                               <Trash2 className="w-3.5 h-3.5" />
+1159 |                             </button>
+1160 |                           </div>
+1161 |                           <div className="grid grid-cols-3 gap-1 pt-1">
+1162 |                             {(["ALLOWED", "ASK", "DENIED"] as const).map((level) => (
+1163 |                               <button
+1164 |                                 key={level}
+1165 |                                 onClick={() => {
+1166 |                                   const updatedPerms = { ...(activeNodeDetail.data.toolPermissions || {}), [tool]: level };
+1167 |                                   updateNodeField(activeNodeDetail.id, { toolPermissions: updatedPerms });
+1168 |                                 }}
+1169 |                                 className={`py-1 text-[9px] font-mono font-bold rounded-md border transition-all cursor-pointer ${
+1170 |                                   permission === level
+1171 |                                     ? level === "ALLOWED" ? "bg-emerald-950/40 text-emerald-400 border-emerald-500/50"
+1172 |                                     : level === "ASK" ? "bg-amber-950/40 text-amber-400 border-amber-500/50"
+1173 |                                     : "bg-rose-950/40 text-rose-400 border-rose-500/50"
+1174 |                                     : "bg-transparent text-neutral-500 border-[#1f1f1f] hover:text-neutral-300"
+1175 |                                 }`}
+1176 |                               >
+1177 |                                 {level === "ALLOWED" ? "ALLOW" : level === "ASK" ? "ASK" : "DENY"}
+1178 |                               </button>
+1179 |                             ))}
+1180 |                           </div>
+1181 |                         </div>
+1182 |                       );
+1183 |                     })
+1184 |                   )}
+1185 |                 </div>
+1186 |               </div>
+1187 | 
+1188 |               {/* Connections */}
+1189 |               <div className="pt-5 border-t border-[#141414] space-y-4">
+1190 |                 <div className="flex justify-between items-center">
+1191 |                   <label className="text-[10px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Connections</label>
+1192 |                   <span className="text-[8px] font-mono text-neutral-500 uppercase">
+1193 |                     Links: {edges.filter(c => c.source === activeNodeDetail.id || c.target === activeNodeDetail.id).length}
+1194 |                   </span>
+1195 |                 </div>
+1196 |                 <select
+1197 |                   id="connection-selector-dropdown"
+1198 |                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-neutral-300 outline-none focus:border-neutral-500"
+1199 |                   defaultValue=""
+1200 |                   onChange={(e) => {
+1201 |                     const targetId = e.target.value;
+1202 |                     if (!targetId) return;
+1203 |                     const exists = edges.some(c =>
+1204 |                       (c.source === activeNodeDetail.id && c.target === targetId) ||
+1205 |                       (c.source === targetId && c.target === activeNodeDetail.id)
+1206 |                     );
+1207 |                     if (!exists) {
+1208 |                       setEdges(prev => [...prev, {
+1209 |                         id: `e-${activeNodeDetail.id}-${targetId}`,
+1210 |                         source: activeNodeDetail.id,
+1211 |                         target: targetId,
+1212 |                         animated: true,
+1213 |                         type: 'custom'
+1214 |                       }]);
+1215 |                       // Bug 1: Sync dependency — the target node now depends on this (source) node
+1216 |                       const targetNode = nodes.find(n => n.id === targetId);
+1217 |                       if (targetNode) {
+1218 |                         const currentDeps = (targetNode.data as any).dependencies || [];
+1219 |                         if (!currentDeps.includes(activeNodeDetail.id)) {
+1220 |                           updateNodeField(targetId, {
+1221 |                             dependencies: [...currentDeps, activeNodeDetail.id]
+1222 |                           });
+1223 |                         }
+1224 |                       }
+1225 |                     }
+1226 |                     e.target.value = "";
+1227 |                   }}
+1228 |                 >
+1229 |                   <option value="" disabled>+ Connect to agent...</option>
+1230 |                   {nodes.filter(n => n.id !== activeNodeDetail.id && n.type === 'custom').map(node => (
+1231 |                     <option key={node.id} value={node.id}>{(node.data as any).name}</option>
+1232 |                   ))}
+1233 |                 </select>
+1234 |                 <div className="space-y-1.5">
+1235 |                   {(() => {
+1236 |                     const linkedConns = edges.filter(c => c.source === activeNodeDetail.id || c.target === activeNodeDetail.id);
+1237 |                     if (linkedConns.length === 0) {
+1238 |                       return (
+1239 |                         <div className="bg-[#050505] border border-dashed border-[#1f1f1f] p-3 text-center rounded-xl">
+1240 |                           <p className="text-[10px] text-neutral-500">No connections.</p>
+1241 |                         </div>
+1242 |                       );
+1243 |                     }
+1244 |                     return linkedConns.map((conn, index) => {
+1245 |                       const otherNodeId = conn.source === activeNodeDetail.id ? conn.target : conn.source;
+1246 |                       const otherNode = nodes.find(n => n.id === otherNodeId);
+1247 |                       return (
+1248 |                         <div key={index} className="flex gap-2 items-center bg-[#050505] border border-[#1f1f1f] p-2 rounded-lg justify-between">
+1249 |                           <span className="text-[10px] text-neutral-300 leading-normal flex-1 pr-2">
+1250 |                             {otherNode ? (otherNode.data as any).name : otherNodeId}
+1251 |                           </span>
+1252 |                           <button onClick={() => deleteEdge(conn.id)} className="text-neutral-500 hover:text-red-400 transition-colors shrink-0 cursor-pointer">
+1253 |                             <Trash2 className="w-3.5 h-3.5" />
+1254 |                           </button>
+1255 |                         </div>
+1256 |                       );
+1257 |                     });
+1258 |                   })()}
+1259 |                 </div>
+1260 |               </div>
+1261 | 
+1262 |               {/* Execution Logs */}
+1263 |               <div className="pt-5 border-t border-[#141414] space-y-3">
+1264 |                 <div className="flex justify-between items-center">
+1265 |                   <label className="text-[10px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Execution Log</label>
+1266 |                   <button
+1267 |                     onClick={() => updateNodeField(activeNodeDetail.id, { toolLogs: [] })}
+1268 |                     className="text-[8px] font-mono text-neutral-500 hover:text-white uppercase transition-colors cursor-pointer"
+1269 |                   >
+1270 |                     Clear
+1271 |                   </button>
+1272 |                 </div>
+1273 |                 <div className="bg-black border border-[#1f1f1f] rounded-xl p-3 h-44 overflow-y-auto font-mono text-[9px] space-y-1.5 custom-scrollbar">
+1274 |                   {(!activeNodeDetail.data.toolLogs || activeNodeDetail.data.toolLogs.length === 0) ? (
+1275 |                     <div className="h-full flex items-center justify-center text-neutral-600 text-center">
+1276 |                       <span>No logs recorded.</span>
+1277 |                     </div>
+1278 |                   ) : (
+1279 |                     activeNodeDetail.data.toolLogs.map((log: any) => (
+1280 |                       <div key={log.id} className="flex gap-1.5 items-start leading-normal text-neutral-300">
+1281 |                         <span className="text-neutral-500 shrink-0 select-none">[{log.timestamp}]</span>
+1282 |                         <div className="flex-1">
+1283 |                           <span className="font-bold text-white uppercase mr-1">[{log.tool}]</span>
+1284 |                           <span>{log.detail}</span>
+1285 |                         </div>
+1286 |                         <span className={`shrink-0 font-bold px-1 rounded-sm text-[8px] ${
+1287 |                           log.status === "SUCCESS" ? "bg-emerald-950 text-emerald-400" :
+1288 |                           log.status === "PENDING" ? "bg-amber-950 text-amber-400 animate-pulse" :
+1289 |                           log.status === "BLOCKED" ? "bg-rose-950 text-rose-400" : "bg-neutral-800 text-neutral-400"
+1290 |                         }`}>
+1291 |                           {log.status}
+1292 |                         </span>
+1293 |                       </div>
+1294 |                     ))
+1295 |                   )}
+1296 |                 </div>
+1297 | 
+1298 |               </div>
+1299 |             </div>
+1300 | 
+1301 |             {/* Footer */}
+1302 |             <div className="p-4 border-t border-[#1f1f1f] bg-[#0d0d0d] grid grid-cols-2 gap-3">
+1303 |               <button
+1304 |                 onClick={() => { handleCloseConfigPanel(); }}
+1305 |                 className="py-2.5 border border-[#1f1f1f] text-xs font-semibold text-neutral-400 hover:text-white rounded-lg transition-colors font-mono cursor-pointer"
+1306 |               >
+1307 |                 Close
+1308 |               </button>
+1309 |               <button
+1310 |                 onClick={() => {
+1311 |                   alert("Agent configuration saved.");
+1312 |                   handleCloseConfigPanel();
+1313 |                 }}
+1314 |                 className="py-2.5 bg-white hover:bg-neutral-100 text-black text-xs font-bold rounded-lg transition-all font-mono cursor-pointer"
+1315 |               >
+1316 |                 Save Config
+1317 |               </button>
+1318 |             </div>
+1319 |           </div>
+1320 |         ) : (
+1321 |           <div className="flex-1 flex flex-col items-center justify-center p-6 text-center select-none">
+1322 |             <Bot className="w-12 h-12 text-neutral-700 mb-3 animate-pulse" />
+1323 |             <p className="text-xs text-neutral-500">Click any agent node in the Flow to edit its configuration.</p>
+1324 |           </div>
+1325 |         )}
+1326 |         </div>
+1327 |       )}
+1328 | 
+1329 |       {/* 4. Modals & Overlays */}
+1330 |       <AnimatePresence>
+1331 | 
+1332 |         {/* BYOK MODAL */}
+1333 |         {isSecretOpen && (
+1334 |           <motion.div
+1335 |             initial={{ opacity: 0 }}
+1336 |             animate={{ opacity: 1 }}
+1337 |             exit={{ opacity: 0 }}
+1338 |             className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
+1339 |           >
+1340 |             <motion.div
+1341 |               initial={{ scale: 0.95 }}
+1342 |               animate={{ scale: 1 }}
+1343 |               exit={{ scale: 0.95 }}
+1344 |               className="w-full max-w-md bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl"
+1345 |             >
+1346 |               <button onClick={() => setIsSecretOpen(false)} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer">
+1347 |                 <X className="w-5 h-5" />
+1348 |               </button>
+1349 |               <div className="flex gap-4 items-center mb-6">
+1350 |                 <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
+1351 |                   <Key className="w-6 h-6 text-white" />
+1352 |                 </div>
+1353 |                 <div>
+1354 |                   <h3 className="text-sm font-bold text-white">AI Engine Settings</h3>
+1355 |                   <p className="text-xs text-neutral-400 font-sans mt-0.5">Select your AI provider and configure keys.</p>
+1356 |                 </div>
+1357 |               </div>
+1358 |               <div className="space-y-4">
+1359 |                 {/* 1. Provider Selector */}
+1360 |                 <div className="space-y-1.5">
+1361 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Provider</label>
+1362 |                   <select
+1363 |                     value={selectedProvider}
+1364 |                     onChange={(e) => setSelectedProvider(e.target.value)}
+1365 |                     className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
+1366 |                   >
+1367 |                     {Object.keys(availableProviders).length > 0 ? (
+1368 |                       Object.entries(availableProviders).map(([pid, cfg]: [string, any]) => (
+1369 |                         <option key={pid} value={pid}>{cfg.name}</option>
+1370 |                       ))
+1371 |                     ) : (
+1372 |                       <option value="gemini">Google Gemini</option>
+1373 |                     )}
+1374 |                   </select>
+1375 |                 </div>
+1376 | 
+1377 |                 {/* 2. Model Selector */}
+1378 |                 <div className="space-y-1.5">
+1379 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Model</label>
+1380 |                   {availableProviders[selectedProvider]?.models?.length > 0 ? (
+1381 |                     <select
+1382 |                       value={selectedModel}
+1383 |                       onChange={(e) => setSelectedModel(e.target.value)}
+1384 |                       className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
+1385 |                     >
+1386 |                       {availableProviders[selectedProvider].models.map((m: any) => (
+1387 |                         <option key={m.id} value={m.id}>{m.name} ({m.tier})</option>
+1388 |                       ))}
+1389 |                     </select>
+1390 |                   ) : (
+1391 |                     <input
+1392 |                       type="text"
+1393 |                       placeholder="e.g. llama3, qwen2.5, my-fine-tune"
+1394 |                       value={selectedModel}
+1395 |                       onChange={(e) => setSelectedModel(e.target.value)}
+1396 |                       className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
+1397 |                     />
+1398 |                   )}
+1399 |                 </div>
+1400 | 
+1401 |                 {/* 3. API Key Input */}
+1402 |                 <div className="space-y-1.5">
+1403 |                   <div className="flex justify-between items-center">
+1404 |                     <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
+1405 |                       {selectedProvider.toUpperCase()}_API_KEY
+1406 |                     </label>
+1407 |                     {availableProviders[selectedProvider]?.key_url && (
+1408 |                       <a
+1409 |                         href={availableProviders[selectedProvider].key_url}
+1410 |                         target="_blank"
+1411 |                         rel="noreferrer"
+1412 |                         className="text-[9px] text-cyan-400 hover:underline"
+1413 |                       >
+1414 |                         Get key ↗
+1415 |                       </a>
+1416 |                     )}
+1417 |                   </div>
+1418 |                   <input
+1419 |                     id="api-key-input"
+1420 |                     type="password"
+1421 |                     placeholder={
+1422 |                       availableProviders[selectedProvider]
+1423 |                         ? `Enter key (starts with ${availableProviders[selectedProvider].key_hint || "sk-..."})`
+1424 |                         : "Enter API key"
+1425 |                     }
+1426 |                     value={apiKeyInput}
+1427 |                     onChange={(e) => setApiKeyInput(e.target.value)}
+1428 |                     className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
+1429 |                   />
+1430 |                   <p className="text-[9px] text-neutral-500 font-mono leading-normal">
+1431 |                     {availableProviders[selectedProvider]?.description || "Configure key for custom models. Key is stored locally in-memory."}
+1432 |                   </p>
+1433 |                 </div>
+1434 | 
+1435 |                 {/* 4. Save and Cancel Buttons */}
+1436 |                 <div className="pt-4 flex gap-3">
+1437 |                   <button
+1438 |                     id="save-api-key-btn"
+1439 |                     onClick={() => {
+1440 |                       setProvider(selectedProvider);
+1441 |                       setModel(selectedModel);
+1442 |                       setProviderApiKey(selectedProvider, apiKeyInput.trim());
+1443 |                       setIsSecretOpen(false);
+1444 |                     }}
+1445 |                     className="flex-1 py-2.5 bg-white hover:bg-neutral-100 text-black font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
+1446 |                   >
+1447 |                     Save Settings
+1448 |                   </button>
+1449 |                   <button
+1450 |                     onClick={() => setIsSecretOpen(false)}
+1451 |                     className="px-5 py-2.5 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-xl text-xs font-mono transition-colors cursor-pointer"
+1452 |                   >
+1453 |                     Cancel
+1454 |                   </button>
+1455 |                 </div>
+1456 |               </div>
+1457 |             </motion.div>
+1458 |           </motion.div>
+1459 |         )}
+1460 | 
+1461 |         {/* USER PROFILE MODAL */}
+1462 |         {isProfileOpen && (
+1463 |           <motion.div
+1464 |             initial={{ opacity: 0 }}
+1465 |             animate={{ opacity: 1 }}
+1466 |             exit={{ opacity: 0 }}
+1467 |             className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
+1468 |           >
+1469 |             <motion.div
+1470 |               initial={{ scale: 0.95 }}
+1471 |               animate={{ scale: 1 }}
+1472 |               exit={{ scale: 0.95 }}
+1473 |               className="w-full max-w-sm bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl"
+1474 |             >
+1475 |               <button onClick={() => setIsProfileOpen(false)} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer">
+1476 |                 <X className="w-5 h-5" />
+1477 |               </button>
+1478 |               <div className="flex flex-col items-center text-center space-y-4 py-4">
+1479 |                 <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-[#1f1f1f] flex items-center justify-center bg-neutral-900">
+1480 |                   <User className="w-8 h-8 text-neutral-500" />
+1481 |                 </div>
+1482 |                 <div>
+1483 |                   <h3 className="text-sm font-bold text-white uppercase tracking-wider">User Profile</h3>
+1484 |                   <span className="text-xs text-neutral-400 font-mono">solospace_user@gmail.com</span>
+1485 |                 </div>
+1486 |                 <div className="w-full pt-4 space-y-2 border-t border-[#141414]">
+1487 |                   <div className="flex justify-between items-center bg-black py-2 px-3 rounded text-[10px] border border-[#141414] font-mono">
+1488 |                     <span className="text-neutral-500">Plan:</span>
+1489 |                     <span className="text-white font-bold">Pro</span>
+1490 |                   </div>
+1491 |                   <div className="flex justify-between items-center bg-black py-2 px-3 rounded text-[10px] border border-[#141414] font-mono">
+1492 |                     <span className="text-neutral-500">Sessions:</span>
+1493 |                     <span className="text-white font-bold">{Object.values(sessions).length}</span>
+1494 |                   </div>
+1495 |                 </div>
+1496 |                 <button
+1497 |                   onClick={() => setIsProfileOpen(false)}
+1498 |                   className="w-full py-2.5 bg-neutral-900 hover:bg-neutral-800 border border-[#1f1f1f] text-neutral-300 hover:text-white font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
+1499 |                 >
+1500 |                   Close
+1501 |                 </button>
+1502 |               </div>
+1503 |             </motion.div>
+1504 |           </motion.div>
+1505 |         )}
+1506 | 
+1507 |         {/* TOOL APPROVAL TOAST */}
+1508 |         {pendingApproval && (
+1509 |           <div className="fixed bottom-6 right-6 w-96 bg-[#0d0d0d] border border-amber-500/50 shadow-[0_0_50px_rgba(245,158,11,0.15)] rounded-2xl p-5 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300 select-none">
+1510 |             <div className="flex gap-4 items-start">
+1511 |               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 shrink-0">
+1512 |                 <Sliders className="w-5 h-5 animate-pulse" />
+1513 |               </div>
+1514 |               <div className="flex-1 space-y-2">
+1515 |                 <div className="flex justify-between items-center">
+1516 |                   <span className="text-[10px] font-bold text-amber-500 font-mono tracking-widest uppercase">Permission Required</span>
+1517 |                   <span className="text-[9px] text-neutral-500 font-mono">Agent Tool</span>
+1518 |                 </div>
+1519 |                 <h4 className="text-xs font-bold text-white">
+1520 |                   &apos;{(nodes.find(n => n.id === pendingApproval.nodeId)?.data as any)?.name}&apos; wants to use <span className="text-amber-400 font-mono">[{pendingApproval.toolName}]</span>
+1521 |                 </h4>
+1522 |                 <p className="text-[10px] text-neutral-400 leading-normal">
+1523 |                   Action: <span className="text-white font-semibold">{pendingApproval.action}</span> — {pendingApproval.detail}
+1524 |                 </p>
+1525 |                 <div className="pt-3 flex gap-2">
+1526 |                   <button
+1527 |                     onClick={() => {
+1528 |                       const sessId = pendingApproval.sessionId || activeSessionId || "";
+1529 |                       fetch("/api/gemini/approve", {
+1530 |                         method: "POST",
+1531 |                         headers: { "Content-Type": "application/json" },
+1532 |                         body: JSON.stringify({
+1533 |                           sessionId: sessId,
+1534 |                           nodeId: pendingApproval.nodeId,
+1535 |                           toolName: pendingApproval.toolName,
+1536 |                           action: "approve"
+1537 |                         })
+1538 |                       }).catch(e => console.error("Failed to approve tool:", e));
+1539 | 
+1540 |                       const node = nodes.find(n => n.id === pendingApproval.nodeId);
+1541 |                       if (node) {
+1542 |                         const updatedLogs = ((node.data as any).toolLogs || []).map((log: any) => {
+1543 |                           if (log.id === pendingApproval.logId) {
+1544 |                             return { ...log, status: "SUCCESS" as const, detail: `Approved: ${pendingApproval.detail}` };
+1545 |                           }
+1546 |                           return log;
+1547 |                         });
+1548 |                         updateNodeField(pendingApproval.nodeId, { toolLogs: updatedLogs });
+1549 |                       }
+1550 |                       useWorkflowStore.setState({ pendingApproval: null });
+1551 |                     }}
+1552 |                     className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg text-[10px] font-mono transition-colors cursor-pointer"
+1553 |                   >
+1554 |                     Approve
+1555 |                   </button>
+1556 |                   <button
+1557 |                     onClick={() => {
+1558 |                       const sessId = pendingApproval.sessionId || activeSessionId || "";
+1559 |                       fetch("/api/gemini/approve", {
+1560 |                         method: "POST",
+1561 |                         headers: { "Content-Type": "application/json" },
+1562 |                         body: JSON.stringify({
+1563 |                           sessionId: sessId,
+1564 |                           nodeId: pendingApproval.nodeId,
+1565 |                           toolName: pendingApproval.toolName,
+1566 |                           action: "deny"
+1567 |                         })
+1568 |                       }).catch(e => console.error("Failed to deny tool:", e));
+1569 | 
+1570 |                       const node = nodes.find(n => n.id === pendingApproval.nodeId);
+1571 |                       if (node) {
+1572 |                         const updatedLogs = ((node.data as any).toolLogs || []).map((log: any) => {
+1573 |                           if (log.id === pendingApproval.logId) {
+1574 |                             return { ...log, status: "BLOCKED" as const, detail: `Denied: ${pendingApproval.detail}` };
+1575 |                           }
+1576 |                           return log;
+1577 |                         });
+1578 |                         updateNodeField(pendingApproval.nodeId, { toolLogs: updatedLogs });
+1579 |                       }
+1580 |                       useWorkflowStore.setState({ pendingApproval: null });
+1581 |                     }}
+1582 |                     className="px-4 py-2 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-lg text-[10px] font-mono transition-colors cursor-pointer"
+1583 |                   >
+1584 |                     Deny
+1585 |                   </button>
+1586 |                 </div>
+1587 |               </div>
+1588 |             </div>
+1589 |           </div>
+1590 |         )}
+1591 | 
+1592 |       </AnimatePresence>
+1593 |     </div>
+1594 |   );
+1595 | }
+1596 |
 ```
 
 ### File: `Frontend/components/edges/CustomEdge.tsx`

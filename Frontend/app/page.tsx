@@ -189,12 +189,33 @@ function SolospaceContent() {
     }
   }, [selectedProvider, availableProviders]);
 
-  // Auto-scroll chat to bottom if enabled
-  useEffect(() => {
+  // Scroll helper
+  const scrollToBottom = () => {
     if (shouldAutoScroll) {
       chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
+  };
+
+  // Auto-scroll chat to bottom if enabled
+  useEffect(() => {
+    scrollToBottom();
   }, [chatMessages, isThinking, shouldAutoScroll]);
+
+  // Auto-scroll when chat tab becomes active
+  useEffect(() => {
+    if (workspaceState === "active" && currentTab === "chat") {
+      scrollToBottom();
+    }
+  }, [currentTab, workspaceState]);
+
+  // Reset to home when active session is deleted
+  useEffect(() => {
+    if (workspaceState === "active" && activeSessionId === null) {
+      setWorkspaceState("home");
+      setCurrentTab("chat");
+      setUserQuery("");
+    }
+  }, [activeSessionId, workspaceState]);
 
   // Load sessions and available providers from DB on mount
   useEffect(() => {
