@@ -13,20 +13,32 @@ export const CustomEdge = ({
   targetPosition,
   style = {},
   markerEnd,
+  source,
+  target,
 }: EdgeProps) => {
   const [isHovered, setIsHovered] = useState(false);
   const deleteEdge = useWorkflowStore((s) => s.deleteEdge);
+  const edges = useWorkflowStore((s) => s.edges);  // Bug 6: needed for parallel edge offset
+
+  // Bug 6: Calculate Y offset for parallel edges between the same pair of nodes
+  const parallelEdges = edges.filter(
+    e => (e.source === source && e.target === target) ||
+         (e.source === target && e.target === source)
+  );
+  const edgeIndex = parallelEdges.findIndex(e => e.id === id);
+  const totalParallel = parallelEdges.length;
+  const offset = totalParallel > 1 ? (edgeIndex - (totalParallel - 1) / 2) * 25 : 0;
 
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
-    sourceY,
-    sourcePosition,
+    sourceY: sourceY + offset,  // Bug 6: offset to separate parallel edges
     targetX,
-    targetY,
+    targetY: targetY + offset,  // Bug 6: offset to separate parallel edges
+    sourcePosition,
     targetPosition,
   });
 
-  const strokeColor = style.stroke || '#06b6d4'; // default cyan neon
+  const strokeColor = (style as any).stroke || '#06b6d4'; // default cyan neon
 
   return (
     <g 
@@ -34,6 +46,25 @@ export const CustomEdge = ({
       onMouseLeave={() => setIsHovered(false)}
       className="group"
     >
+      {/* Bug 5: Arrow marker definition — unique per edge id to avoid conflicts */}
+      <defs>
+        <marker
+          id={`arrowhead-${id}`}
+          viewBox="0 0 10 10"
+          refX="9"
+          refY="5"
+          markerWidth="7"
+          markerHeight="7"
+          orient="auto"
+        >
+          <path
+            d="M 0 0 L 10 5 L 0 10 z"
+            fill={strokeColor}
+            opacity={isHovered ? 1 : 0.75}
+          />
+        </marker>
+      </defs>
+
       {/* Background thicker glow path */}
       <path
         id={`${id}-glow`}
@@ -49,7 +80,7 @@ export const CustomEdge = ({
         }}
       />
 
-      {/* Main Core Path */}
+      {/* Main Core Path — Bug 5: markerEnd for directional arrow */}
       <path
         id={id}
         className="react-flow__edge-path connection-line"
@@ -57,7 +88,7 @@ export const CustomEdge = ({
         fill="none"
         stroke={strokeColor}
         strokeWidth={isHovered ? 2.5 : 1.5}
-        markerEnd={markerEnd}
+        markerEnd={`url(#arrowhead-${id})`}
         style={{
           transition: 'stroke-width 0.2s',
           ...style,

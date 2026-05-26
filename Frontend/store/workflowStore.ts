@@ -23,7 +23,7 @@ export interface ToolLog {
 export interface CanvasNodeData {
   name: string;
   tag: string;
-  status: 'IDLE' | 'ACTIVE' | 'SCANNING WEB' | 'AUDITING' | 'QUEUED' | 'WAITING' | 'PROCESSING' | 'STANDBY' | 'DISABLED';
+  status: 'IDLE' | 'ACTIVE' | 'SCANNING WEB' | 'AUDITING' | 'QUEUED' | 'WAITING' | 'PROCESSING' | 'STANDBY' | 'DISABLED' | 'ERROR';
   metricLabel: string;
   metricVal: string;
   icon: string;
@@ -137,6 +137,36 @@ export interface WorkflowState {
   triggerCustomExecution: () => Promise<void>;
 }
 
+let saveTimeout: any = null;
+const debounceSave = (currentSessionId: string, get: any, set: any) => {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    // Re-verify the session is still active before saving to prevent stale writes
+    const activeId = get().activeSessionId;
+    if (activeId !== currentSessionId) return;
+
+    set((state: any) => {
+      // Only save if the session still exists
+      if (!state.sessions[currentSessionId]) return state;
+
+      const currentSession = {
+        id: currentSessionId,
+        title: state.sessions[currentSessionId]?.title || "Chat",
+        prompt: state.sessions[currentSessionId]?.prompt || "",
+        mode: state.sessions[currentSessionId]?.mode || "auto",
+        nodes: state.nodes,
+        edges: state.edges,
+        chatMessages: state.chatMessages,
+        agentTalkLogs: state.agentTalkLogs,
+        executionState: state.executionState,
+        statusMessage: state.statusMessage,
+        followUpSuggestions: state.followUpSuggestions
+      };
+      return { sessions: { ...state.sessions, [currentSessionId]: currentSession } };
+    });
+  }, 500);
+};
+
 export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   sessions: {},
   activeSessionId: null,
@@ -200,7 +230,22 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
         type: 'custom',
         style: { stroke: '#06b6d4', strokeWidth: 2 }
       };
-      return { edges: addEdge(edge, state.edges) };
+
+      // Sync dependency: target node depends on source node
+      const updatedNodes = state.nodes.map(node => {
+        if (node.id === connection.target) {
+          const currentDeps = (node.data as any).dependencies || [];
+          if (!currentDeps.includes(connection.source)) {
+            return {
+              ...node,
+              data: { ...node.data, dependencies: [...currentDeps, connection.source] }
+            };
+          }
+        }
+        return node;
+      });
+
+      return { edges: addEdge(edge, state.edges), nodes: updatedNodes };
     });
     get().saveCurrentSession();
   },
@@ -234,9 +279,29 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   deleteEdge: (edgeId) => {
-    set((state) => ({
-      edges: state.edges.filter((edge) => edge.id !== edgeId)
-    }));
+    set((state) => {
+      const edge = state.edges.find(e => e.id === edgeId);
+      let updatedNodes = state.nodes;
+
+      // Sync dependency: remove source from target's dependencies when edge deleted
+      if (edge) {
+        updatedNodes = state.nodes.map(node => {
+          if (node.id === edge.target) {
+            const currentDeps = (node.data as any).dependencies || [];
+            return {
+              ...node,
+              data: { ...node.data, dependencies: currentDeps.filter((d: string) => d !== edge.source) }
+            };
+          }
+          return node;
+        });
+      }
+
+      return {
+        edges: state.edges.filter(e => e.id !== edgeId),
+        nodes: updatedNodes
+      };
+    });
     get().saveCurrentSession();
   },
 
@@ -372,23 +437,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   saveCurrentSession: () => {
     const currentSessionId = get().activeSessionId;
     if (!currentSessionId) return;
-
-    set((state) => {
-      const currentSession: ChatSession = {
-        id: currentSessionId,
-        title: state.sessions[currentSessionId]?.title || "Chat",
-        prompt: state.sessions[currentSessionId]?.prompt || "",
-        mode: state.sessions[currentSessionId]?.mode || "auto",
-        nodes: state.nodes,
-        edges: state.edges,
-        chatMessages: state.chatMessages,
-        agentTalkLogs: state.agentTalkLogs,
-        executionState: state.executionState,
-        statusMessage: state.statusMessage,
-        followUpSuggestions: state.followUpSuggestions
-      };
-      return { sessions: { ...state.sessions, [currentSessionId]: currentSession } };
-    });
+    debounceSave(currentSessionId, get, set);
   },
 
   fetchSessions: async () => {
@@ -459,6 +508,12 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   deleteSessionFromDb: async (sessionId: string) => {
+    // Abort orchestration if deleting the currently active session
+    if (get().activeSessionId === sessionId) {
+      const ctrl = get().abortController;
+      if (ctrl) ctrl.abort();
+    }
+
     try {
       const response = await fetch(`/api/gemini/sessions?id=${sessionId}`, {
         method: "DELETE"
@@ -471,6 +526,9 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           return {
             sessions: updated,
             activeSessionId: newActiveId,
+            abortController: state.activeSessionId === sessionId ? null : state.abortController,
+            isOrchestrating: state.activeSessionId === sessionId ? false : state.isOrchestrating,
+            isThinking: state.activeSessionId === sessionId ? false : state.isThinking,
             ...(newActiveId ? {} : {
               nodes: [],
               edges: [],
@@ -577,15 +635,19 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
 
           const lines = part.split("\n");
           let eventType = "text";
-          let dataContent = "";
+          let dataLines: string[] = [];
 
           for (const line of lines) {
             if (line.startsWith("event: ")) {
               eventType = line.slice(7);
             } else if (line.startsWith("data: ")) {
-              dataContent = line.slice(6);
+              dataLines.push(line.slice(6));
+            } else if (line.startsWith("data:")) {
+              dataLines.push(line.slice(5));
             }
           }
+
+          const dataContent = dataLines.join("\n");
 
           if (eventType === "text") {
             try {
@@ -626,7 +688,8 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
               set({
                 nodes: meta.nodes || [],
                 edges: meta.edges || [],
-                agentTalkLogs: meta.agent_talk || []
+                agentTalkLogs: meta.agent_talk || [],
+                followUpSuggestions: meta.follow_up_suggestions || []  // Bug 2: populate suggestions
               });
             } catch (e) {
               console.error("Metadata SSE parse error", e);
@@ -764,15 +827,19 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
 
           const lines = part.split("\n");
           let eventType = "text";
-          let dataContent = "";
+          let dataLines: string[] = [];
 
           for (const line of lines) {
             if (line.startsWith("event: ")) {
               eventType = line.slice(7);
             } else if (line.startsWith("data: ")) {
-              dataContent = line.slice(6);
+              dataLines.push(line.slice(6));
+            } else if (line.startsWith("data:")) {
+              dataLines.push(line.slice(5));
             }
           }
+
+          const dataContent = dataLines.join("\n");
 
           if (eventType === "text") {
             try {
@@ -813,7 +880,8 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
               set({
                 nodes: meta.nodes || [],
                 edges: meta.edges || [],
-                agentTalkLogs: meta.agent_talk || []
+                agentTalkLogs: meta.agent_talk || [],
+                followUpSuggestions: meta.follow_up_suggestions || []  // Bug 2: populate suggestions
               });
             } catch (e) {
               console.error("Metadata SSE parse error", e);

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { 
   ReactFlow, 
   Background, 
@@ -12,12 +12,13 @@ import {
   Node,
   Viewport
 } from '@xyflow/react';
-import { Plus, Minus, Maximize, PlusCircle } from 'lucide-react';
+import { Plus, Minus, Maximize, PlusCircle, LayoutGrid } from 'lucide-react';
 import { useWorkflowStore, CanvasNodeData } from '@/store/workflowStore';
 import { CustomNode } from './nodes/CustomNode';
 import { GroupNode } from './nodes/GroupNode';
 import { CustomEdge } from './edges/CustomEdge';
 import { ContextMenu } from './ContextMenu';
+import dagre from 'dagre';
 
 const nodeTypes = {
   custom: CustomNode,
@@ -28,8 +29,36 @@ const edgeTypes = {
   custom: CustomEdge,
 };
 
+const getLayoutedElements = (nodes: Node[], edges: Edge[]) => {
+  const dagreGraph = new dagre.graphlib.Graph();
+  dagreGraph.setDefaultEdgeLabel(() => ({}));
+  dagreGraph.setGraph({ rankdir: 'LR', nodesep: 150, ranksep: 200 });
+
+  nodes.forEach((node) => {
+    dagreGraph.setNode(node.id, { width: 240, height: 220 });
+  });
+
+  edges.forEach((edge) => {
+    dagreGraph.setEdge(edge.source, edge.target);
+  });
+
+  dagre.layout(dagreGraph);
+
+  const layoutedNodes = nodes.map((node) => {
+    const nodeWithPosition = dagreGraph.node(node.id);
+    return {
+      ...node,
+      position: {
+        x: nodeWithPosition.x - 120,
+        y: nodeWithPosition.y - 110,
+      },
+    };
+  });
+  return { nodes: layoutedNodes, edges };
+};
+
 export default function FlowArena() {
-  const { zoomIn, zoomOut, setViewport, getViewport } = useReactFlow();
+  const { zoomIn, zoomOut, setViewport, getViewport, fitView } = useReactFlow();
   
   const nodes = useWorkflowStore((s) => s.nodes);
   const edges = useWorkflowStore((s) => s.edges);
@@ -37,8 +66,12 @@ export default function FlowArena() {
   const onEdgesChange = useWorkflowStore((s) => s.onEdgesChange);
   const onConnect = useWorkflowStore((s) => s.onConnect);
   const setEdges = useWorkflowStore((s) => s.setEdges);
+  const setNodes = useWorkflowStore((s) => s.setNodes);
   const addNode = useWorkflowStore((s) => s.addNode);
   const setSelectedNodeId = useWorkflowStore((s) => s.setSelectedNodeId);
+  const isOrchestrating = useWorkflowStore((s) => s.isOrchestrating);
+
+  const [initialLayoutDone, setInitialLayoutDone] = useState(false);
 
   // Context Menu State
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: Node | null } | null>(null);
@@ -84,12 +117,54 @@ export default function FlowArena() {
     setViewport({ x: 100, y: 50, zoom: 0.9 }, { duration: 400 });
   };
 
+  const applyLayout = useCallback(() => {
+    if (nodes.length === 0) return;
+    const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
+    setNodes(layoutedNodes);
+  }, [nodes, edges, setNodes]);
+
+  // Layout nodes once initially when loaded
+  useEffect(() => {
+    if (!initialLayoutDone && nodes.length > 0) {
+      const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
+      setNodes(layoutedNodes);
+      setInitialLayoutDone(true);
+    }
+  }, [nodes, edges, initialLayoutDone, setNodes]);
+
+  // Reset layout state if node length changes back to 0 (new chat)
+  useEffect(() => {
+    if (nodes.length === 0) {
+      setInitialLayoutDone(false);
+    }
+  }, [nodes.length]);
+
+  // Auto-fit viewport on node count changes
+  useEffect(() => {
+    if (nodes.length > 0) {
+      const timer = setTimeout(() => {
+        fitView({ padding: 0.2, duration: 400 });
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [nodes.length, fitView]);
+
   const handleAddAgentNode = () => {
     const randomId = `custom_agent_${Date.now().toString().slice(-4)}`;
     const view = getViewport();
     // Center new node inside view coordinates
-    const x = (-view.x + window.innerWidth / 2 - 120) / view.zoom;
-    const y = (-view.y + window.innerHeight / 2 - 100) / view.zoom;
+    let x = (-view.x + window.innerWidth / 2 - 120) / view.zoom;
+    let y = (-view.y + window.innerHeight / 2 - 100) / view.zoom;
+
+    // Avoid collision
+    const NODE_W = 240;
+    const NODE_H = 220;
+    const existingPositions = nodes.map(n => n.position);
+    for (const pos of existingPositions) {
+      if (Math.abs(x - pos.x) < NODE_W && Math.abs(y - pos.y) < NODE_H) {
+        y = pos.y + NODE_H + 40;
+      }
+    }
 
     const newNode = {
       id: randomId,
@@ -200,6 +275,14 @@ export default function FlowArena() {
           </button>
 
           <button 
+            onClick={applyLayout}
+            className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 cursor-pointer"
+            title="Auto Layout Graph"
+          >
+            <LayoutGrid className="w-3.5 h-3.5" />
+          </button>
+
+          <button 
             onClick={handleAddAgentNode}
             className="p-2 text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 flex items-center gap-1 text-[10px] cursor-pointer"
             title="Add Custom Agent Node"
@@ -218,6 +301,54 @@ export default function FlowArena() {
             onClose={() => setContextMenu(null)}
           />
         )}
+
+        {/* Connection hint — shown when nodes exist but no edges drawn yet */}
+        {nodes.length > 1 && edges.length === 0 && !isOrchestrating && (
+          <Panel position="top-right" className="!right-4 !top-16 select-none">
+            <div className="bg-[#0d0d0d]/92 border border-[#1f1f1f] rounded-xl p-3 backdrop-blur-md shadow-xl w-52">
+              <div className="flex items-center gap-2 mb-2.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                <span className="text-[9px] font-mono text-neutral-400 uppercase tracking-wider font-bold">How to Connect</span>
+              </div>
+              <div className="space-y-2 text-[10px] text-neutral-500 leading-relaxed">
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full bg-black border-2 border-emerald-500 shrink-0" />
+                  <span>Drag from <span className="text-emerald-400 font-semibold">green (OUT)</span></span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full bg-black border-2 border-rose-500 shrink-0" />
+                  <span>Drop on <span className="text-rose-400 font-semibold">red (IN)</span></span>
+                </div>
+                <div className="flex items-center gap-2 pt-0.5 border-t border-[#141414] mt-1">
+                  <span className="w-5 h-0.5 bg-cyan-500 rounded shrink-0" />
+                  <span>Wire = agent dependency</span>
+                </div>
+              </div>
+            </div>
+          </Panel>
+        )}
+
+        {/* Persistent legend — bottom right */}
+        <Panel position="bottom-right" className="!right-4 !bottom-14 select-none">
+          <div className="bg-[#0d0d0d]/80 border border-[#1f1f1f] rounded-lg p-2.5 backdrop-blur-md shadow-xl text-[9px] font-mono text-neutral-600 space-y-1.5">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-black border-2 border-rose-500 shrink-0" />
+              <span>Input (data in)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-black border-2 border-emerald-500 shrink-0" />
+              <span>Output (data out)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-3.5 h-0.5 bg-cyan-500 rounded shrink-0" />
+              <span>Dependency wire</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[8px] leading-none">✥</span>
+              <span>Drag card to reposition</span>
+            </div>
+          </div>
+        </Panel>
       </ReactFlow>
     </div>
   );

@@ -62,6 +62,7 @@ export const CustomNode = ({ id, data, selected }: NodeProps & { data: CanvasNod
 
   const isNodeEnabled = data.enabled !== false;
   const isActive = isNodeEnabled && (data.status === 'ACTIVE' || data.status === 'PROCESSING' || data.status === 'SCANNING WEB');
+  const isError = data.status === 'ERROR';
 
   return (
     <div
@@ -79,9 +80,21 @@ export const CustomNode = ({ id, data, selected }: NodeProps & { data: CanvasNod
       } ${
         isActive ? 'node-active-pulse' : ''
       } ${
-        !isNodeEnabled ? 'opacity-35 grayscale border-dashed border-neutral-800 bg-[#050505]' : ''
+        isError ? 'border-rose-500/60 ring-1 ring-rose-500/30' : ''
+      } ${
+        !isNodeEnabled ? 'opacity-40 grayscale border-dashed border-neutral-700 bg-[#050505] saturate-0' : ''
       }`}
     >
+      {!isNodeEnabled && (
+        <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-neutral-900 border border-neutral-700 rounded text-[7px] font-mono text-neutral-400 uppercase tracking-widest font-bold z-10 select-none">
+          Disabled
+        </div>
+      )}
+      {isError && !isActive && (
+        <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-rose-950 border border-rose-800 rounded text-[7px] font-mono text-rose-400 uppercase tracking-widest font-bold z-10 select-none">
+          Failed
+        </div>
+      )}
       {/* Floating Hover Controls Panel */}
       {isHovered && (
         <div className="absolute -top-10 left-1/2 -translate-x-1/2 flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-1 rounded-lg gap-1 shadow-lg pointer-events-auto z-30 animate-in fade-in zoom-in-95 duration-150">
@@ -115,23 +128,41 @@ export const CustomNode = ({ id, data, selected }: NodeProps & { data: CanvasNod
         </div>
       )}
 
-      {/* Target Handle (Left input port) */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="input"
-        className="!w-2.5 !h-2.5 !bg-black !border-2 !border-rose-500 !shadow-[0_0_8px_#f43f5e] !transition-all hover:!scale-125"
-        style={{ top: '24px', left: '-5px' }}
-      />
+      {/* ─── Target Handle (Left — Input Port) ─── */}
+      <div
+        className="absolute group/handle-in"
+        style={{ top: '14px', left: '-8px', zIndex: 10 }}
+      >
+        <Handle
+          type="target"
+          position={Position.Left}
+          id="input"
+          isConnectable={true}
+          className="!w-3 !h-3 !bg-black !border-2 !border-rose-500 !rounded-full !shadow-[0_0_10px_rgba(244,63,94,0.6)] !transition-all hover:!scale-150 hover:!bg-rose-500"
+        />
+        {/* IN label — appears on hover */}
+        <span className="pointer-events-none select-none absolute left-5 top-1/2 -translate-y-1/2 text-[8px] font-mono font-bold text-rose-400 bg-rose-950/90 border border-rose-500/30 px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover/handle-in:opacity-100 transition-opacity duration-150">
+          IN
+        </span>
+      </div>
 
-      {/* Source Handle (Right output port) */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="output"
-        className="!w-2.5 !h-2.5 !bg-black !border-2 !border-emerald-500 !shadow-[0_0_8px_#10b981] !transition-all hover:!scale-125"
-        style={{ top: '24px', right: '-5px' }}
-      />
+      {/* ─── Source Handle (Right — Output Port) ─── */}
+      <div
+        className="absolute group/handle-out flex items-center"
+        style={{ top: '14px', right: '-8px', zIndex: 10 }}
+      >
+        {/* OUT label — appears on hover */}
+        <span className="pointer-events-none select-none absolute right-5 top-1/2 -translate-y-1/2 text-[8px] font-mono font-bold text-emerald-400 bg-emerald-950/90 border border-emerald-500/30 px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover/handle-out:opacity-100 transition-opacity duration-150">
+          OUT
+        </span>
+        <Handle
+          type="source"
+          position={Position.Right}
+          id="output"
+          isConnectable={true}
+          className="!w-3 !h-3 !bg-black !border-2 !border-emerald-500 !rounded-full !shadow-[0_0_10px_rgba(16,185,129,0.6)] !transition-all hover:!scale-150 hover:!bg-emerald-500"
+        />
+      </div>
 
       {/* Node Header */}
       <div className="flex items-center gap-2.5 mb-2.5">
