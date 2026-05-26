@@ -98,6 +98,14 @@ export interface WorkflowState {
   pendingApproval: PendingApproval | null;
   apiKey: string | null;
   setApiKey: (key: string | null) => void;
+  provider: string;
+  model: string;
+  apiKeys: Record<string, string>;
+  availableProviders: Record<string, any>;
+  setProvider: (provider: string) => void;
+  setModel: (model: string) => void;
+  setProviderApiKey: (provider: string, key: string) => void;
+  fetchAvailableProviders: () => Promise<void>;
   followUpSuggestions: string[];
   liveThoughts: string;
   abortController: AbortController | null;
@@ -182,6 +190,24 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   pendingApproval: null,
   apiKey: null,
   setApiKey: (key) => set({ apiKey: key }),
+  provider: "gemini",
+  model: "gemini-2.5-flash",
+  apiKeys: {},
+  availableProviders: {},
+  setProvider: (provider) => set({ provider }),
+  setModel: (model) => set({ model }),
+  setProviderApiKey: (provider, key) => set((state) => ({ apiKeys: { ...state.apiKeys, [provider]: key } })),
+  fetchAvailableProviders: async () => {
+    try {
+      const resp = await fetch("/api/gemini/providers");
+      if (resp.ok) {
+        const data = await resp.json();
+        set({ availableProviders: data });
+      }
+    } catch (e) {
+      console.error("Failed to fetch available providers", e);
+    }
+  },
   followUpSuggestions: [],
   liveThoughts: '',
   abortController: null,
@@ -601,9 +627,11 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           history: get().chatMessages
             .filter(m => m.id !== aiMsgId) // Exclude current empty prompt placeholder
             .map(m => ({ sender: m.sender, text: m.text })),
-          api_key: get().apiKey || "",
+          api_key: get().apiKeys[get().provider] || get().apiKey || "",
           session_id: get().activeSessionId || "",
-          execute_agents: execute
+          execute_agents: execute,
+          provider: get().provider,
+          model: get().model
         }),
         signal: controller.signal
       });
@@ -793,9 +821,11 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           history: get().chatMessages
             .filter(m => m.id !== aiMsgId)
             .map(m => ({ sender: m.sender, text: m.text })),
-          api_key: get().apiKey || "",
+          api_key: get().apiKeys[get().provider] || get().apiKey || "",
           nodes: get().nodes,
-          edges: get().edges
+          edges: get().edges,
+          provider: get().provider,
+          model: get().model
         }),
         signal: controller.signal
       });

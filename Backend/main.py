@@ -18,6 +18,14 @@ from typing import Optional, List, Dict, Any
 from bs4 import BeautifulSoup
 import db
 from agent_messages import post_message, get_messages_for_agent, clear_messages
+from providers import (
+    call_provider,
+    stream_provider,
+    call_provider_json,
+    get_embedding,
+    get_available_providers,
+    resolve_api_key,
+)
 
 
 # Initialize database
@@ -79,6 +87,8 @@ class OrchestrateRequest(BaseModel):
     api_key: Optional[str] = None
     session_id: Optional[str] = None
     execute_agents: bool = True
+    provider: str = "gemini"
+    model: Optional[str] = None
 
 class ApprovalRequest(BaseModel):
     sessionId: str
@@ -93,25 +103,13 @@ class ExecuteCustomRequest(BaseModel):
     edges: List[Dict[str, Any]]
     prompt: str
     history: Optional[List[Message]] = []
+    provider: str = "gemini"
+    model: Optional[str] = None
 
-# ─── VECTOR DB MEMORY STORE (Gemini Embeddings + Local Cosine Similarity) ───
+# ─── VECTOR DB MEMORY STORE (Multi-Provider Embeddings + Local Cosine Similarity) ───
 
 async def get_gemini_embedding(text: str, api_key: str) -> List[float]:
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={api_key}"
-    payload = {
-        "model": "models/text-embedding-004",
-        "content": {
-            "parts": [{"text": text}]
-        }
-    }
-    async with httpx.AsyncClient() as client:
-        try:
-            r = await client.post(url, json=payload, timeout=15.0)
-            if r.status_code == 200:
-                return r.json().get("embedding", {}).get("values", [])
-        except Exception as e:
-            print(f"[MEMORY ERROR] Embedding API failed: {e}")
-    return []
+    return await get_embedding("gemini", api_key, text)
 
 def cosine_similarity(v1: List[float], v2: List[float]) -> float:
     if not v1 or not v2 or len(v1) != len(v2):
@@ -146,8 +144,8 @@ def save_memories(memories: List[Dict[str, Any]]):
 
 MAX_MEMORIES = 200  # Bug 8: Cap total entries to prevent unbounded growth
 
-async def store_memory(agent_id: str, text: str, api_key: str, session_id: str = None):
-    embedding = await get_gemini_embedding(text, api_key)
+async def store_memory(agent_id: str, text: str, api_key: str, session_id: str = None, provider: str = "gemini"):
+    embedding = await get_embedding(provider, api_key, text)
     if not embedding:
         return
     memories = load_memories()
@@ -167,8 +165,8 @@ async def store_memory(agent_id: str, text: str, api_key: str, session_id: str =
 
     save_memories(memories)
 
-async def query_memory(query: str, api_key: str, top_k=2, agent_id: Optional[str] = None, session_id: Optional[str] = None) -> List[str]:
-    embedding = await get_gemini_embedding(query, api_key)
+async def query_memory(query: str, api_key: str, top_k=2, agent_id: Optional[str] = None, session_id: Optional[str] = None, provider: str = "gemini") -> List[str]:
+    embedding = await get_embedding(provider, api_key, query)
     if not embedding:
         return []
     memories = load_memories()
@@ -629,11 +627,11 @@ def compute_agent_layout(active_agents):
 
 @app.post("/orchestrate")
 async def orchestrate(req: OrchestrateRequest):
-    api_key = req.api_key or os.environ.get("GEMINI_API_KEY")
-    if not api_key or api_key == "MY_GEMINI_API_KEY" or api_key == "":
+    api_key = resolve_api_key(req.provider, req.api_key)
+    if not api_key:
         raise HTTPException(
             status_code=400,
-            detail="Gemini API Key is missing. Please configure BYOK in Settings or set the GEMINI_API_KEY environment variable."
+            detail=f"API Key for provider '{req.provider}' is missing. Please configure BYOK in Settings or set the appropriate environment variable."
         )
 
     # 1. Guardrails check
@@ -656,7 +654,7 @@ async def orchestrate(req: OrchestrateRequest):
 
     # 3. Semantic caching
     prompt_hash_overall = hashlib.sha256(req.prompt.encode('utf-8')).hexdigest()
-    prompt_embedding = await get_gemini_embedding(req.prompt, api_key)
+    prompt_embedding = await get_embedding(req.provider, api_key, req.prompt)
     if prompt_embedding:
         all_caches = db.load_all_cached_embeddings()
         for cache in all_caches:
@@ -669,32 +667,16 @@ async def orchestrate(req: OrchestrateRequest):
     contents = []
     if req.history:
         for msg in req.history:
-            role = "user" if msg.sender == "user" else "model"
+            role = "user" if msg.sender == "user" else "assistant"
             contents.append({
                 "role": role,
-                "parts": [{"text": msg.text}]
+                "content": msg.text
             })
     
     contents.append({
         "role": "user",
-        "parts": [{"text": req.prompt}]
+        "content": req.prompt
     })
-
-    url_orchestrate = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-    
-    orchestrate_payload = {
-        "contents": contents,
-        "systemInstruction": {
-            "parts": [{"text": ORCHESTRATOR_SYSTEM_INSTRUCTION}]
-        },
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "responseSchema": orchestration_schema,
-            "temperature": 0.2,
-            "thinkingConfig": {"thinkingBudget": 2048}
-        },
-        "safetySettings": GEMINI_SAFETY_SETTINGS
-    }
 
     plan = {
         "complexity": "simple",
@@ -713,16 +695,19 @@ async def orchestrate(req: OrchestrateRequest):
         "follow_up_suggestions": ["Can you elaborate?", "Show me a detailed implementation example."]
     }
 
-    async with httpx.AsyncClient() as client:
-        try:
-            plan_response = await client.post(url_orchestrate, json=orchestrate_payload, timeout=30.0)
-            if plan_response.status_code == 200:
-                plan_data = plan_response.json()
-                if "candidates" in plan_data and len(plan_data["candidates"]) > 0:
-                    raw_text = plan_data["candidates"][0]["content"]["parts"][-1]["text"].strip()
-                    plan = json.loads(raw_text)
-        except Exception as e:
-            print(f"[ORCHESTRATION WARNING] Planning failed: {str(e)}")
+    try:
+        plan = await call_provider_json(
+            provider=req.provider,
+            model=req.model,
+            api_key=api_key,
+            messages=contents,
+            system_prompt=ORCHESTRATOR_SYSTEM_INSTRUCTION,
+            temperature=0.2,
+            json_schema=orchestration_schema,
+            timeout=30.0
+        )
+    except Exception as e:
+        print(f"[ORCHESTRATION WARNING] Planning failed: {str(e)}")
 
     nodes = []
     edges = []
@@ -931,6 +916,10 @@ async def orchestrate(req: OrchestrateRequest):
             media_type="text/event-stream"
         )
 
+@app.get("/providers")
+async def get_providers():
+    return get_available_providers()
+
 # Session persistence APIs
 @app.get("/sessions")
 async def get_sessions():
@@ -948,6 +937,17 @@ async def delete_session(session_id: str):
     db.delete_session(session_id)
     return {"status": "success"}
 
+def convert_gemini_history_to_standard(history: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    res = []
+    for msg in history:
+        parts = msg.get("parts", [])
+        text = ""
+        if parts:
+            text = parts[0].get("text", "")
+        role = "assistant" if msg.get("role") in ["model", "assistant"] else "user"
+        res.append({"role": role, "content": text})
+    return res
+
 async def run_agent_execution_loop(
     session_id: str,
     prompt: str,
@@ -958,7 +958,9 @@ async def run_agent_execution_loop(
     complexity: str,
     capabilities: List[str],
     thinking_summary: str,
-    follow_up_suggestions: List[str]
+    follow_up_suggestions: List[str],
+    provider: str = "gemini",
+    model: Optional[str] = None
 ):
     now_str = lambda: datetime.datetime.now().strftime("%I:%M:%S %p")
     agent_results: Dict[str, str] = {}
@@ -1071,7 +1073,7 @@ async def run_agent_execution_loop(
 
             memories_context = ""
             try:
-                matched_memories = await query_memory(agent_data["objective"], api_key, session_id=session_id)
+                matched_memories = await query_memory(agent_data["objective"], api_key, session_id=session_id, provider=provider)
                 if matched_memories:
                     memories_context = "### Relevant Historical Memories:\n" + "\n".join(f"- {m}" for m in matched_memories)
             except Exception:
@@ -1096,41 +1098,33 @@ async def run_agent_execution_loop(
             }]
 
             agent_final_answer = "Sub-task completed."
-            url_gemini = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-
             action_execution_history = []
             max_turns = 6 if complexity != "simple" else 3
 
             for turn in range(max_turns):
-                agent_payload = {
-                    "contents": agent_history,
-                    "systemInstruction": {"parts": [{"text": agent_data["systemPrompt"]}]},
-                    "generationConfig": {
-                        "responseMimeType": "application/json",
-                        "responseSchema": agent_turn_schema,
-                        "temperature": 0.2
-                    },
-                    "safetySettings": GEMINI_SAFETY_SETTINGS
-                }
-
+                turn_data = {}
                 action = "none"
                 observation = ""
                 try:
-                    async with httpx.AsyncClient() as client:
-                        resp = await client.post(url_gemini, json=agent_payload, timeout=30.0)
-                        if resp.status_code == 200:
-                            turn_text = resp.json()["candidates"][0]["content"]["parts"][-1]["text"].strip()
-                            turn_data = json.loads(turn_text)
-                            
-                            thought = turn_data.get("thought", "")
-                            action = turn_data.get("action", "none")
-                            action_input = turn_data.get("action_input", "")
-                            agent_final_answer = turn_data.get("final_answer", "")
-                            
-                            if thought:
-                                yield f"event: thinking\ndata: {json.dumps(f'[{agent_name}]: {thought}\\n')}\n\n"
-                        else:
-                            break
+                    standard_history = convert_gemini_history_to_standard(agent_history)
+                    turn_data = await call_provider_json(
+                        provider=provider,
+                        model=model,
+                        api_key=api_key,
+                        messages=standard_history,
+                        system_prompt=agent_data["systemPrompt"],
+                        temperature=0.2,
+                        json_schema=agent_turn_schema,
+                        timeout=30.0
+                    )
+                    
+                    thought = turn_data.get("thought", "")
+                    action = turn_data.get("action", "none")
+                    action_input = turn_data.get("action_input", "")
+                    agent_final_answer = turn_data.get("final_answer", "")
+                    
+                    if thought:
+                        yield f"event: thinking\ndata: {json.dumps(f'[{agent_name}]: {thought}\\n')}\n\n"
                 except Exception as e:
                     print(f"ReAct Turn fail: {e}")
                     break
@@ -1213,10 +1207,10 @@ async def run_agent_execution_loop(
                     elif action == "api_call":
                         observation = await execute_api_call(action_input)
                     elif action == "query_memory":
-                        mem_res = await query_memory(action_input, api_key, session_id=session_id)
+                        mem_res = await query_memory(action_input, api_key, session_id=session_id, provider=provider)
                         observation = "\n".join(mem_res) if mem_res else "No matches found."
                     elif action == "store_memory":
-                        await store_memory(node_id, action_input, api_key, session_id)
+                        await store_memory(node_id, action_input, api_key, session_id, provider=provider)
                         observation = "Saved successfully."
                     elif action == "send_message":
                         parts = action_input.split("|", 1)
@@ -1262,18 +1256,17 @@ async def run_agent_execution_loop(
                 synthesis_prompt = f"Based on your objective '{agent_data['objective']}' and the ReAct steps executed, write a concise summary/result of your sub-task."
                 agent_history.append({"role": "user", "parts": [{"text": synthesis_prompt}]})
                 try:
-                    async with httpx.AsyncClient() as client:
-                        synth_payload = {
-                            "contents": agent_history,
-                            "systemInstruction": {"parts": [{"text": agent_data["systemPrompt"]}]},
-                            "generationConfig": {"temperature": 0.3},
-                            "safetySettings": GEMINI_SAFETY_SETTINGS
-                        }
-                        synth_resp = await client.post(url_gemini, json=synth_payload, timeout=15.0)
-                        if synth_resp.status_code == 200:
-                            synth_text = synth_resp.json()["candidates"][0]["content"]["parts"][-1]["text"].strip()
-                            if synth_text:
-                                agent_final_answer = synth_text
+                    synth_text = await call_provider(
+                        provider=provider,
+                        model=model,
+                        api_key=api_key,
+                        messages=convert_gemini_history_to_standard(agent_history),
+                        system_prompt=agent_data["systemPrompt"],
+                        temperature=0.3,
+                        timeout=15.0
+                    )
+                    if synth_text:
+                        agent_final_answer = synth_text
                 except Exception:
                     pass
 
@@ -1300,7 +1293,7 @@ async def run_agent_execution_loop(
             if agent_final_answer and len(agent_final_answer) > 40 and agent_final_answer != "Sub-task completed.":
                 try:
                     memory_text = f"Objective: {agent_data['objective']}\nOutcome: {agent_final_answer[:500]}"
-                    await store_memory(node_id, memory_text, api_key, session_id)
+                    await store_memory(node_id, memory_text, api_key, session_id, provider=provider)
                 except Exception:
                     pass
         except Exception as e:
@@ -1328,7 +1321,7 @@ async def run_agent_execution_loop(
     # Build aggregator prompt — inject relevant memory + agent results
     aggregator_prompt = ""
     try:
-        memory_hits = await query_memory(prompt, api_key, top_k=3, agent_id=None, session_id=session_id)
+        memory_hits = await query_memory(prompt, api_key, top_k=3, agent_id=None, session_id=session_id, provider=provider)
         if memory_hits:
             aggregator_prompt += "### Relevant context from past conversation:\n" + "\n".join(f"- {m}" for m in memory_hits) + "\n\n"
     except Exception:
@@ -1353,70 +1346,23 @@ async def run_agent_execution_loop(
             aggregator_contents.append({"role": role, "parts": [{"text": msg.text}]})
     aggregator_contents.append({"role": "user", "parts": [{"text": aggregator_prompt}]})
 
-    url_stream = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key={api_key}"
-    stream_payload = {
-        "contents": aggregator_contents,
-        "systemInstruction": {
-            "parts": [{"text": RESPONSE_SYSTEM_INSTRUCTION}]
-        },
-        "generationConfig": {
-            "temperature": 0.7
-        },
-        "safetySettings": GEMINI_SAFETY_SETTINGS
-    }
-    
-    line_buf = ""
     final_synthesis_text = ""
-    async with httpx.AsyncClient() as client:
-        try:
-            async with client.stream("POST", url_stream, json=stream_payload, timeout=90.0) as r:
-                if r.status_code == 200:
-                    async for chunk in r.aiter_text():
-                        line_buf += chunk
-                        while "\n" in line_buf:
-                            line, line_buf = line_buf.split("\n", 1)
-                            line = line.strip()
-                            if not line:
-                                continue
-                            if line.startswith("data:"):
-                                json_str = line[5:].strip()
-                                if not json_str:
-                                    continue
-                                try:
-                                    obj = json.loads(json_str)
-                                    for cand in obj.get("candidates", []):
-                                        for part in cand.get("content", {}).get("parts", []):
-                                            if "text" in part:
-                                                token = part["text"]
-                                                final_synthesis_text += token
-                                                yield f"event: text\ndata: {json.dumps(token)}\n\n"
-                                except Exception:
-                                    pass
-                    # Process trailing buffer content
-                    if line_buf.strip():
-                        line = line_buf.strip()
-                        if line.startswith("data:"):
-                            json_str = line[5:].strip()
-                            if json_str:
-                                try:
-                                    obj = json.loads(json_str)
-                                    for cand in obj.get("candidates", []):
-                                        for part in cand.get("content", {}).get("parts", []):
-                                            if "text" in part:
-                                                token = part["text"]
-                                                final_synthesis_text += token
-                                                yield f"event: text\ndata: {json.dumps(token)}\n\n"
-                                except Exception:
-                                    pass
-                else:
-                    err_bytes = await r.aread()
-                    err_msg = f"**Synthesis error ({r.status_code})**: {err_bytes.decode()}"
-                    yield f"event: text\ndata: {json.dumps(err_msg)}\n\n"
-                    final_synthesis_text = err_msg
-        except Exception as exc:
-            err_msg = f"\n\n*Stream Synthesis Error: {str(exc)}*\n\n"
-            yield f"event: text\ndata: {json.dumps(err_msg)}\n\n"
-            final_synthesis_text = err_msg
+    try:
+        async for token in stream_provider(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            messages=convert_gemini_history_to_standard(aggregator_contents),
+            system_prompt=RESPONSE_SYSTEM_INSTRUCTION,
+            temperature=0.7,
+            timeout=90.0
+        ):
+            final_synthesis_text += token
+            yield f"event: text\ndata: {json.dumps(token)}\n\n"
+    except Exception as exc:
+        err_msg = f"\n\n*Stream Synthesis Error: {str(exc)}*\n\n"
+        yield f"event: text\ndata: {json.dumps(err_msg)}\n\n"
+        final_synthesis_text = err_msg
 
     print(f"[DEBUG] final_synthesis_text length: {len(final_synthesis_text)}")
     if not final_synthesis_text:
@@ -1460,7 +1406,7 @@ async def run_agent_execution_loop(
     
     # Compute embeddings inside
     try:
-        prompt_embedding = await get_gemini_embedding(prompt, api_key)
+        prompt_embedding = await get_embedding(provider, api_key, prompt)
         if prompt_embedding:
             prompt_hash_overall = hashlib.sha256(prompt.encode('utf-8')).hexdigest()
             db.save_cached_response(prompt_hash_overall, prompt, prompt_embedding, cached_val)
@@ -1471,7 +1417,7 @@ async def run_agent_execution_loop(
     if final_synthesis_text:
         try:
             convo_memory = f"User: {prompt}\nAssistant: {final_synthesis_text[:800]}"
-            await store_memory(f"session_{session_id}", convo_memory, api_key, session_id)
+            await store_memory(f"session_{session_id}", convo_memory, api_key, session_id, provider=provider)
         except Exception:
             pass
 
@@ -1479,11 +1425,11 @@ async def run_agent_execution_loop(
 
 @app.post("/execute_custom")
 async def execute_custom(req: ExecuteCustomRequest):
-    api_key = req.api_key or os.environ.get("GEMINI_API_KEY")
-    if not api_key or api_key == "MY_GEMINI_API_KEY" or api_key == "":
+    api_key = resolve_api_key(req.provider, req.api_key)
+    if not api_key:
         raise HTTPException(
             status_code=400,
-            detail="Gemini API Key is missing. Please configure BYOK in Settings."
+            detail=f"API Key for provider '{req.provider}' is missing. Please configure BYOK in Settings."
         )
 
     complexity = "simple" if len(req.nodes) == 1 and req.nodes[0]["id"] == "general" else "custom"
@@ -1500,7 +1446,9 @@ async def execute_custom(req: ExecuteCustomRequest):
             complexity=complexity,
             capabilities=capabilities,
             thinking_summary="Running customized agent workflow",
-            follow_up_suggestions=["Can you explain the agent collaboration?"]
+            follow_up_suggestions=["Can you explain the agent collaboration?"],
+            provider=req.provider,
+            model=req.model
         ),
         media_type="text/event-stream"
     )

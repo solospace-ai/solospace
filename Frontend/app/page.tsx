@@ -68,6 +68,14 @@ function SolospaceContent() {
   const liveThoughts = useWorkflowStore((s) => s.liveThoughts);
   const setApiKey = useWorkflowStore((s) => s.setApiKey);
   const apiKey = useWorkflowStore((s) => s.apiKey);
+  const provider = useWorkflowStore((s) => s.provider);
+  const model = useWorkflowStore((s) => s.model);
+  const apiKeys = useWorkflowStore((s) => s.apiKeys);
+  const availableProviders = useWorkflowStore((s) => s.availableProviders);
+  const setProvider = useWorkflowStore((s) => s.setProvider);
+  const setModel = useWorkflowStore((s) => s.setModel);
+  const setProviderApiKey = useWorkflowStore((s) => s.setProviderApiKey);
+  const fetchAvailableProviders = useWorkflowStore((s) => s.fetchAvailableProviders);
 
   const triggerSteerOrchestration = useWorkflowStore((s) => s.triggerSteerOrchestration);
   const setChatMessages = useWorkflowStore((s) => s.setChatMessages);
@@ -158,11 +166,28 @@ function SolospaceContent() {
 
   // Synchronize modal's local display state when it opens
   const [apiKeyInput, setApiKeyInput] = useState<string>("");
+  const [selectedProvider, setSelectedProvider] = useState<string>("gemini");
+  const [selectedModel, setSelectedModel] = useState<string>("");
+
   useEffect(() => {
     if (isSecretOpen) {
-      setApiKeyInput(apiKey || "");
+      setSelectedProvider(provider);
+      setSelectedModel(model);
+      setApiKeyInput(apiKeys[provider] || apiKey || "");
     }
-  }, [isSecretOpen, apiKey]);
+  }, [isSecretOpen, provider, model, apiKeys, apiKey]);
+
+  // When selectedProvider changes, set selectedModel to its default model, and load key
+  useEffect(() => {
+    if (isSecretOpen && availableProviders[selectedProvider]) {
+      const pConfig = availableProviders[selectedProvider];
+      const modelExists = pConfig.models?.some((m: any) => m.id === selectedModel);
+      if (!modelExists) {
+        setSelectedModel(pConfig.default_model);
+      }
+      setApiKeyInput(apiKeys[selectedProvider] || "");
+    }
+  }, [selectedProvider, availableProviders]);
 
   // Auto-scroll chat to bottom if enabled
   useEffect(() => {
@@ -171,9 +196,10 @@ function SolospaceContent() {
     }
   }, [chatMessages, isThinking, shouldAutoScroll]);
 
-  // Load sessions from DB on mount
+  // Load sessions and available providers from DB on mount
   useEffect(() => {
     fetchSessions().catch(e => console.error("Failed to load sessions:", e));
+    fetchAvailableProviders().catch(e => console.error("Failed to load providers:", e));
   }, []);
 
   const handleCloseConfigPanel = () => {
@@ -1304,35 +1330,100 @@ function SolospaceContent() {
                   <Key className="w-6 h-6 text-white" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white">API Key Settings</h3>
-                  <p className="text-xs text-neutral-400 font-sans mt-0.5">Connect your Gemini API key to power the AI.</p>
+                  <h3 className="text-sm font-bold text-white">AI Engine Settings</h3>
+                  <p className="text-xs text-neutral-400 font-sans mt-0.5">Select your AI provider and configure keys.</p>
                 </div>
               </div>
               <div className="space-y-4">
+                {/* 1. Provider Selector */}
                 <div className="space-y-1.5">
-                  <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">GEMINI_API_KEY</label>
+                  <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Provider</label>
+                  <select
+                    value={selectedProvider}
+                    onChange={(e) => setSelectedProvider(e.target.value)}
+                    className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
+                  >
+                    {Object.keys(availableProviders).length > 0 ? (
+                      Object.entries(availableProviders).map(([pid, cfg]: [string, any]) => (
+                        <option key={pid} value={pid}>{cfg.name}</option>
+                      ))
+                    ) : (
+                      <option value="gemini">Google Gemini</option>
+                    )}
+                  </select>
+                </div>
+
+                {/* 2. Model Selector */}
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Model</label>
+                  {availableProviders[selectedProvider]?.models?.length > 0 ? (
+                    <select
+                      value={selectedModel}
+                      onChange={(e) => setSelectedModel(e.target.value)}
+                      className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
+                    >
+                      {availableProviders[selectedProvider].models.map((m: any) => (
+                        <option key={m.id} value={m.id}>{m.name} ({m.tier})</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      placeholder="e.g. llama3, qwen2.5, my-fine-tune"
+                      value={selectedModel}
+                      onChange={(e) => setSelectedModel(e.target.value)}
+                      className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
+                    />
+                  )}
+                </div>
+
+                {/* 3. API Key Input */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center">
+                    <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
+                      {selectedProvider.toUpperCase()}_API_KEY
+                    </label>
+                    {availableProviders[selectedProvider]?.key_url && (
+                      <a
+                        href={availableProviders[selectedProvider].key_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[9px] text-cyan-400 hover:underline"
+                      >
+                        Get key ↗
+                      </a>
+                    )}
+                  </div>
                   <input
                     id="api-key-input"
                     type="password"
-                    placeholder="Enter AIzaSy... key from Google AI Studio"
+                    placeholder={
+                      availableProviders[selectedProvider]
+                        ? `Enter key (starts with ${availableProviders[selectedProvider].key_hint || "sk-..."})`
+                        : "Enter API key"
+                    }
                     value={apiKeyInput}
                     onChange={(e) => setApiKeyInput(e.target.value)}
                     className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
                   />
                   <p className="text-[9px] text-neutral-500 font-mono leading-normal">
-                    Get a free key at <span className="text-cyan-400">aistudio.google.com</span>. Your key is stored locally only.
+                    {availableProviders[selectedProvider]?.description || "Configure key for custom models. Key is stored locally in-memory."}
                   </p>
                 </div>
+
+                {/* 4. Save and Cancel Buttons */}
                 <div className="pt-4 flex gap-3">
                   <button
                     id="save-api-key-btn"
                     onClick={() => {
-                      setApiKey(apiKeyInput.trim());
+                      setProvider(selectedProvider);
+                      setModel(selectedModel);
+                      setProviderApiKey(selectedProvider, apiKeyInput.trim());
                       setIsSecretOpen(false);
                     }}
                     className="flex-1 py-2.5 bg-white hover:bg-neutral-100 text-black font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
                   >
-                    Save Key
+                    Save Settings
                   </button>
                   <button
                     onClick={() => setIsSecretOpen(false)}
