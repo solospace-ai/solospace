@@ -133,7 +133,8 @@ export interface WorkflowState {
   loadSessionFromDb: (sessionId: string) => Promise<void>;
   deleteSessionFromDb: (sessionId: string) => Promise<void>;
 
-  triggerSteerOrchestration: (promptText: string) => void;
+  triggerSteerOrchestration: (promptText: string, execute?: boolean) => void;
+  triggerCustomExecution: () => Promise<void>;
 }
 
 export const useWorkflowStore = create<WorkflowState>((set, get) => ({
@@ -487,7 +488,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     }
   },
 
-  triggerSteerOrchestration: async (promptText) => {
+  triggerSteerOrchestration: async (promptText, execute = true) => {
     if (!promptText.trim()) return;
 
     // Abort any active orchestration
@@ -543,7 +544,8 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
             .filter(m => m.id !== aiMsgId) // Exclude current empty prompt placeholder
             .map(m => ({ sender: m.sender, text: m.text })),
           api_key: get().apiKey || "",
-          session_id: get().activeSessionId || ""
+          session_id: get().activeSessionId || "",
+          execute_agents: execute
         }),
         signal: controller.signal
       });
@@ -591,6 +593,193 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
               assistantResponse += textVal;
               set((state) => ({
                 isThinking: false, // Turn off thinking dots on first text token
+                chatMessages: state.chatMessages.map(m =>
+                  m.id === aiMsgId ? { ...m, text: assistantResponse } : m
+                )
+              }));
+            } catch (e) {
+              console.error("Text SSE parse error", e);
+            }
+          } else if (eventType === "thinking") {
+            try {
+              const thoughtVal = JSON.parse(dataContent);
+              thinkingSummary += thoughtVal;
+              set((state) => ({
+                liveThoughts: thinkingSummary,
+                chatMessages: state.chatMessages.map(m =>
+                  m.id === aiMsgId ? { ...m, thinkingSummary: thinkingSummary } : m
+                )
+              }));
+            } catch (e) {
+              console.error("Thinking SSE parse error", e);
+            }
+          } else if (eventType === "status") {
+            try {
+              const statusVal = JSON.parse(dataContent);
+              set({ statusMessage: typeof statusVal === "string" ? statusVal : "" });
+            } catch (e) {
+              console.error("Status SSE parse error", e);
+            }
+          } else if (eventType === "metadata") {
+            try {
+              const meta = JSON.parse(dataContent);
+              set({
+                nodes: meta.nodes || [],
+                edges: meta.edges || [],
+                agentTalkLogs: meta.agent_talk || []
+              });
+            } catch (e) {
+              console.error("Metadata SSE parse error", e);
+            }
+          } else if (eventType === "tool_approval") {
+            try {
+              const approval = JSON.parse(dataContent);
+              set({ pendingApproval: approval });
+            } catch (e) {
+              console.error("Tool approval SSE parse error", e);
+            }
+          }
+        }
+      }
+
+      if (!assistantResponse) {
+        const fallbackMsg = "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again.";
+        set((state) => ({
+          chatMessages: state.chatMessages.map(m =>
+            m.id === aiMsgId ? { ...m, text: fallbackMsg } : m
+          )
+        }));
+      }
+
+      set({ abortController: null });
+      get().saveCurrentSession();
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        console.log("Steer Orchestration manually aborted.");
+        set((state) => ({
+          chatMessages: state.chatMessages.map(m =>
+            m.id === aiMsgId && !m.text ? { ...m, text: "*Generation stopped by user.*" } : m
+          )
+        }));
+      } else {
+        console.error("Steer Orchestration stream error:", err);
+        const errorMsg = `**Connection Error.**\n\n${err.message || "Failed to parse stream event source. Check backend logs."}`;
+        set((state) => ({
+          chatMessages: state.chatMessages.map(m =>
+            m.id === aiMsgId ? { ...m, text: errorMsg } : m
+          ),
+          nodes: [],
+          edges: [],
+          followUpSuggestions: []
+        }));
+      }
+      set({ abortController: null, isThinking: false, isOrchestrating: false });
+      get().saveCurrentSession();
+    } finally {
+      set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
+      get().saveCurrentSession();
+    }
+  },
+
+  triggerCustomExecution: async () => {
+    const currentController = get().abortController;
+    if (currentController) {
+      currentController.abort();
+    }
+
+    const controller = new AbortController();
+
+    const sessionId = get().activeSessionId;
+    if (!sessionId) return;
+
+    const prompt = get().chatMessages.findLast(m => m.sender === 'user')?.text || "";
+
+    set((state) => ({
+      isOrchestrating: true,
+      isThinking: true,
+      statusMessage: "Running custom orchestration loop...",
+      liveThoughts: "",
+      agentTalkLogs: [],
+      followUpSuggestions: [],
+      abortController: controller
+    }));
+    get().saveCurrentSession();
+
+    const aiMsgId = Date.now().toString();
+    set((state) => ({
+      chatMessages: [
+        ...state.chatMessages,
+        {
+          id: aiMsgId,
+          sender: "ai",
+          text: "",
+          thinkingSummary: "",
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }
+      ]
+    }));
+    get().saveCurrentSession();
+
+    try {
+      const response = await fetch("/api/gemini/execute_custom", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          prompt: prompt,
+          history: get().chatMessages
+            .filter(m => m.id !== aiMsgId)
+            .map(m => ({ sender: m.sender, text: m.text })),
+          api_key: get().apiKey || "",
+          nodes: get().nodes,
+          edges: get().edges
+        }),
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({ detail: "Execution failed." }));
+        throw new Error(errData.detail || `Server status error: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error("No response stream body reader.");
+
+      let assistantResponse = "";
+      let thinkingSummary = "";
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() || "";
+
+        for (const part of parts) {
+          if (!part.trim()) continue;
+
+          const lines = part.split("\n");
+          let eventType = "text";
+          let dataContent = "";
+
+          for (const line of lines) {
+            if (line.startsWith("event: ")) {
+              eventType = line.slice(7);
+            } else if (line.startsWith("data: ")) {
+              dataContent = line.slice(6);
+            }
+          }
+
+          if (eventType === "text") {
+            try {
+              const textVal = JSON.parse(dataContent);
+              assistantResponse += textVal;
+              set((state) => ({
+                isThinking: false,
                 chatMessages: state.chatMessages.map(m =>
                   m.id === aiMsgId ? { ...m, text: assistantResponse } : m
                 )

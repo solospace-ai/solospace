@@ -194,7 +194,7 @@ function SolospaceContent() {
     }
 
     setExecutionState("running");
-    triggerSteerOrchestration(promptText);
+    triggerSteerOrchestration(promptText, isAutoMode);
     setUserQuery("");
   };
 
@@ -765,7 +765,12 @@ function SolospaceContent() {
                   </div>
 
                   {/* Bottom input bar */}
-                  <div className="px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0">
+                  <div className="px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
+                    {!isAutoMode && workspaceState === "active" && (
+                      <div className="text-[10px] font-mono text-amber-400 bg-amber-950/30 px-3 py-1 rounded-full self-center border border-amber-500/20 max-w-max select-none">
+                        Planning Mode – Edit agents in Flow, then click Proceed
+                      </div>
+                    )}
                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
                       <textarea
                         ref={textareaRef}
@@ -779,7 +784,7 @@ function SolospaceContent() {
                             if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery);
                           }
                         }}
-                        placeholder={isOrchestrating ? "Streaming response..." : "Ask a follow-up or new question..."}
+                        placeholder={isOrchestrating ? "Streaming response..." : (isAutoMode ? "Ask a follow-up or new question..." : "Enter a new idea to generate agents (no auto-run)...")}
                         disabled={isOrchestrating}
                         className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar"
                       />
@@ -851,11 +856,22 @@ function SolospaceContent() {
                   {/* Flow Arena */}
                   <FlowArena />
 
-                  {/* Bottom controls — only Return to Chat */}
-                  <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 pointer-events-auto">
+                  {/* Bottom controls — Proceed & Return to Chat */}
+                  <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 pointer-events-auto flex items-center gap-3">
+                    <button
+                      onClick={() => {
+                        setCurrentTab("chat"); // Switch back to chat to see the output stream
+                        const triggerCustomExecution = useWorkflowStore.getState().triggerCustomExecution;
+                        triggerCustomExecution();
+                      }}
+                      className="bg-white hover:bg-neutral-200 text-black font-bold text-xs h-10 px-6 rounded-[24px] shadow-2xl flex items-center gap-1.5 cursor-pointer shrink-0 transition-all active:scale-95"
+                    >
+                      <Zap className="w-3.5 h-3.5 text-black fill-black" />
+                      <span>Proceed with Agents</span>
+                    </button>
                     <button
                       onClick={() => setCurrentTab("chat")}
-                      className="h-10 px-6 rounded-[24px] border border-[#1f1f1f] hover:border-neutral-600 bg-black/80 backdrop-blur-md text-neutral-400 hover:text-white text-xs font-semibold transition-all cursor-pointer shadow-2xl"
+                      className="h-10 px-4 rounded-[24px] border border-[#1f1f1f] hover:border-neutral-600 bg-black/80 backdrop-blur-md text-neutral-400 hover:text-white text-xs font-semibold transition-all cursor-pointer shadow-2xl"
                     >
                       Return to Chat
                     </button>
