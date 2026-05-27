@@ -132,10 +132,7 @@ function SolospaceContent() {
     setWorkspaceState("active");
     setCurrentTab("chat");
     let sessionId = activeSessionId;
-    if (!sessionId) {
-      // Smart routing: auto (Smart mode) or custom (Custom mode) - quick mode removed
-      sessionId = createSession(promptText, executionMode);
-    }
+    if (!sessionId) sessionId = createSession(promptText, executionMode);
     setExecutionState("running");
     triggerSteerOrchestration(promptText, executionMode !== "custom", executionMode);
     setUserQuery("");

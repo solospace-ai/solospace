@@ -1,10 +1,10 @@
 # Full Project Context
 
-> Generated: 2026-05-27T17:02:34.237Z
+> Generated: 2026-05-27T17:09:42.565Z
 > Mode: Full Project
 > Files: 64
-> Total Lines: 10,858
-> Total Size: 409.2 KB
+> Total Lines: 10,855
+> Total Size: 409.1 KB
 > Directories: 27
 
 ---
@@ -6949,7 +6949,7 @@ SoloSpace/
 
 ### File: `Frontend/app/page.tsx`
 
-> 372 lines | 28.0 KB
+> 369 lines | 27.9 KB
 
 ```tsx
   1 | 'use client';
@@ -7086,244 +7086,241 @@ SoloSpace/
 132 |     setWorkspaceState("active");
 133 |     setCurrentTab("chat");
 134 |     let sessionId = activeSessionId;
-135 |     if (!sessionId) {
-136 |       // Smart routing: auto (Smart mode) or custom (Custom mode) - quick mode removed
-137 |       sessionId = createSession(promptText, executionMode);
-138 |     }
-139 |     setExecutionState("running");
-140 |     triggerSteerOrchestration(promptText, executionMode !== "custom", executionMode);
-141 |     setUserQuery("");
-142 |   };
-143 | 
-144 |   const handleAddRule = () => {
-145 |     if (!newRuleText.trim() || !selectedNodeId) return;
-146 |     addRule(selectedNodeId, newRuleText.trim());
-147 |     setNewRuleText("");
-148 |   };
-149 | 
-150 |   const activeNodeDetail = nodes.find(n => n.id === selectedNodeId) as any;
-151 | 
-152 |   const ModeSelector = () => (
-153 |     <div className="flex items-center gap-1 bg-neutral-900/40 rounded-full p-0.5 border border-[#1f1f1f]">
-154 |       <button onClick={() => setExecutionMode("auto")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "auto" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Smart</button>
-155 |       <button onClick={() => setExecutionMode("custom")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "custom" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Custom</button>
-156 |     </div>
-157 |   );
-158 | 
-159 |   const handleFileAttach = () => {
-160 |     const input = document.createElement("input");
-161 |     input.type = "file";
-162 |     input.accept = ".txt,.md,.json,.csv,.py,.js,.ts,.tsx,.html,.css,.yaml,.yml,.xml,.ini,.cfg,.pdf,.jpg,.png";
-163 |     input.onchange = (e: any) => {
-164 |       const file = e.target.files?.[0];
-165 |       if (!file) return;
-166 |       const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-167 |       if (['.txt', '.md', '.json', '.csv', '.py', '.js', '.ts', '.tsx', '.html', '.css', '.yaml', '.yml', '.xml', '.ini', '.cfg'].includes(ext)) {
-168 |         const reader = new FileReader();
-169 |         reader.onload = (ev) => setUserQuery((prev) => prev + `\n[Attached: ${file.name}]\n${ev.target?.result as string}\n`);
-170 |         reader.readAsText(file);
-171 |       }
-172 |     };
-173 |     input.click();
-174 |   };
-175 | 
-176 |   return (
-177 |     <div className="flex h-screen w-full bg-black text-[#f5f5f5] overflow-hidden font-sans">
-178 |       <aside className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-30 select-none ${isSidebarExpanded ? "w-64" : "w-[60px]"}`}>
-179 |         <div className="flex items-center gap-3 h-16 border-b border-[#1f1f1f] px-4 justify-between">
-180 |           {isSidebarExpanded ? (
-181 |             <div className="flex items-center gap-2.5">
-182 |               <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
-183 |               <h1 className="text-sm font-bold text-white tracking-tight leading-none">Solospace</h1>
-184 |             </div>
-185 |           ) : (
-186 |             <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center mx-auto"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
-187 |           )}
-188 |           {isSidebarExpanded && <button onClick={() => setIsSidebarExpanded(false)} className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>}
-189 |         </div>
-190 | 
-191 |         <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto custom-scrollbar">
-192 |           <button onClick={() => { useWorkflowStore.getState().abortController?.abort(); setWorkspaceState("home"); setUserQuery(""); useWorkflowStore.setState({ activeSessionId: null, nodes: [], edges: [], chatMessages: [], agentTalkLogs: [], executionState: "setup", statusMessage: "", isThinking: false, isOrchestrating: false, liveThoughts: "", pendingApproval: null, followUpSuggestions: [], abortController: null }); }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
-193 |             <SquarePlus className="w-5 h-5 stroke-[1.8]" />
-194 |             {isSidebarExpanded && <span className="text-xs font-semibold">New Chat</span>}
-195 |           </button>
-196 | 
-197 |           <button onClick={() => setIsSecretOpen(true)} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
-198 |             <Key className="w-5 h-5 stroke-[1.8]" />
-199 |             {isSidebarExpanded && <span className="text-xs font-semibold">API Keys</span>}
-200 |           </button>
-201 | 
-202 |           {isSidebarExpanded && (
-203 |             <div className="pt-6 space-y-2 select-none">
-204 |               <div className="flex items-center gap-1.5 px-3"><History className="w-3.5 h-3.5 text-neutral-600" /><span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest font-mono">Recents</span></div>
-205 |               <div className="space-y-1 max-h-[220px] overflow-y-auto custom-scrollbar">
-206 |                 {Object.values(sessions).length === 0 ? <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span> : (
-207 |                   Object.values(sessions).reverse().map((s) => (
-208 |                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
-209 |                       <button disabled={isLoadingSession} onClick={async () => { setIsLoadingSession(true); try { await loadSessionFromDb(s.id); setWorkspaceState("active"); setCurrentTab("chat"); } catch (err) { console.error(err); } finally { setIsLoadingSession(false); } }} className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${activeSessionId === s.id ? "text-white font-bold" : "text-neutral-500 hover:text-white"}`} title={s.prompt}>{s.title}</button>
-210 |                       <button onClick={async (e) => { e.stopPropagation(); if (confirm(`Delete "${s.title}"?`)) await deleteSessionFromDb(s.id); }} className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
-211 |                     </div>
-212 |                   ))
-213 |                 )}
-214 |               </div>
-215 |             </div>
-216 |           )}
-217 |         </nav>
-218 |       </aside>
-219 | 
-220 |       <main className="flex-1 flex flex-col min-w-0 bg-[#000000] relative transition-all duration-300">
-221 |         <header className="flex justify-between items-center w-full px-6 h-16 border-b border-[#141414] shrink-0 z-10 bg-black/85 backdrop-blur-md">
-222 |           <div className="flex items-center gap-2">
-223 |             {isConnected && activeSessionId && (
-224 |               <span className="flex items-center gap-1.5 text-[9px] font-mono text-emerald-400 bg-emerald-950/30 border border-emerald-500/20 px-2 py-0.5 rounded-full">
-225 |                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> LIVE SYNC
-226 |               </span>
-227 |             )}
-228 |           </div>
-229 |           <div className="flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-[2px] rounded-full select-none">
-230 |             <button onClick={() => { if (workspaceState !== "home") setCurrentTab("chat"); }} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${currentTab === "chat" || workspaceState === "home" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>Chat</button>
-231 |             {workspaceState === "active" && (
-232 |               <button onClick={() => setCurrentTab("arena")} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${currentTab === "arena" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>
-233 |                 <GitFork className="w-3 h-3" /> Flow {nodes.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse ml-0.5" />}
-234 |               </button>
-235 |             )}
-236 |           </div>
-237 |           <div className="flex items-center gap-2 select-none">
-238 |             <button onClick={() => setIsCostDashboardOpen(true)} className="text-neutral-400 hover:text-emerald-400 p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer" title="Cost & Token Dashboard"><DollarSign className="w-4 h-4 stroke-[1.8]" /></button>
-239 |             <button onClick={() => alert("Solospace AI OS")} className="text-neutral-400 hover:text-white p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer"><HelpCircle className="w-4 h-4 stroke-[1.8]" /></button>
-240 |           </div>
-241 |         </header>
-242 | 
-243 |         <div className="flex-1 relative overflow-hidden">
-244 |           {workspaceState === "home" && (
-245 |             <div className="absolute inset-0 flex flex-col justify-between overflow-y-auto custom-scrollbar">
-246 |               <div />
-247 |               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
-248 |                 <div className="text-center mb-10 space-y-2 select-none">
-249 |                   <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">What&apos;s on your mind?</h1>
-250 |                   <p className="text-sm text-neutral-400 font-sans">Ask anything. Get a real, complete answer instantly.</p>
-251 |                 </div>
-252 |                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
-253 |                   <div className="flex items-center gap-3">
-254 |                     <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
-255 |                     <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder="Describe your idea, problem, or question..." className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
-256 |                     <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim()} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
-257 |                   </div>
-258 |                 </div>
-259 |                 <div className="flex items-center gap-3 mt-5 select-none">
-260 |                   <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">Mode:</span>
-261 |                   <button onClick={() => setExecutionMode("auto")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "auto" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sparkles className="w-3 h-3 stroke-[2]" /><span>Smart Auto</span></button>
-262 |                   <button onClick={() => setExecutionMode("custom")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "custom" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sliders className="w-3 h-3" /><span>Custom Agent</span></button>
-263 |                 </div>
-264 |               </div>
-265 |               <div />
-266 |             </div>
-267 |           )}
-268 | 
-269 |           {workspaceState === "active" && (
-270 |             <div className="absolute inset-0 flex">
-271 |               {currentTab === "chat" && (
-272 |                 <div className="flex-1 flex flex-col justify-between overflow-hidden bg-black">
-273 |                   <div ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
-274 |                     {isLoadingSession ? (
-275 |                       <div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" /></div>
-276 |                     ) : (
-277 |                       <div className="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto space-y-4 select-text">
-278 |                         {chatMessages.map((msg, msgIdx) => (
-279 |                           <motion.div key={msg.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={`flex w-full ${msg.sender === "user" ? "justify-end" : "justify-start"}`}>
-280 |                             {msg.sender === "user" ? (
-281 |                               <div className="max-w-[72%] rounded-3xl px-5 py-3 bg-[#2f2f2f] text-neutral-100 text-sm leading-relaxed"><p className="whitespace-pre-wrap">{msg.text}</p></div>
-282 |                             ) : (
-283 |                               <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
-284 |                                 <div className="w-full text-neutral-100 text-sm leading-relaxed px-1 py-2">
-285 |                                   {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
-286 |                                   {msg.text && (!isOrchestrating || msgIdx !== chatMessages.length - 1) && (
-287 |                                     <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
-288 |                                       <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
-289 |                                         {copiedMsgId === msg.id ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400 font-medium">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
-290 |                                       </button>
-291 |                                     </div>
-292 |                                   )}
-293 |                                 </div>
-294 |                                 {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && nodes.length > 0 && (
-295 |                                   <button onClick={() => setCurrentTab("arena")} className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max select-none">
-296 |                                     <GitFork className="w-3.5 h-3.5 text-cyan-400" /><span>See Agent Flow</span>
-297 |                                   </button>
-298 |                                 )}
-299 |                               </div>
-300 |                             )}
-301 |                           </motion.div>
-302 |                         ))}
-303 |                         <div ref={chatEndRef} />
-304 |                       </div>
-305 |                     )}
-306 |                   </div>
-307 |                   <div className="px-4 sm:px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
-308 |                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
-309 |                       <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
-310 |                       <textarea ref={textareaRef} rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery); } }} placeholder={isOrchestrating ? "Streaming..." : "Ask a follow-up..."} disabled={isOrchestrating} className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar" />
-311 |                       <div className="flex items-center gap-2 shrink-0">
-312 |                         <ModeSelector />
-313 |                         {isOrchestrating ? (
-314 |                           <button onClick={cancelOrchestration} className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all cursor-pointer"><Square className="w-3.5 h-3.5 text-white fill-white" /></button>
-315 |                         ) : (
-316 |                           <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim() || isThinking} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
-317 |                         )}
-318 |                       </div>
-319 |                     </div>
-320 |                   </div>
-321 |                 </div>
-322 |               )}
-323 |               {currentTab === "arena" && (
-324 |                 <div className="flex-1 relative overflow-hidden bg-[#000000] flex">
-325 |                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#0d0d0d]/90 border border-[#1f1f1f] rounded-full px-4 py-2 backdrop-blur-md shadow-xl pointer-events-auto">
-326 |                     <button onClick={() => setCurrentTab("chat")} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-mono"><ChevronLeft className="w-3.5 h-3.5" /> Back to Chat</button>
-327 |                   </div>
-328 |                   <FlowArena />
-329 |                 </div>
-330 |               )}
-331 |             </div>
-332 |           )}
-333 |         </div>
-334 |       </main>
-335 | 
-336 |       {currentTab === "arena" && isConfigPanelOpen && activeNodeDetail && (
-337 |         <div className="fixed top-0 right-0 h-full w-80 bg-[#0c0c0c]/95 border-l border-[#1f1f1f] z-40 flex flex-col justify-between shadow-2xl transition-transform duration-300 right-panel select-none">
-338 |           <div className="p-5 border-b border-[#1f1f1f] flex justify-between items-center bg-[#0d0d0d]">
-339 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider">{activeNodeDetail.data.name}</h3>
-340 |             <button onClick={() => { setIsConfigPanelOpen(false); setSelectedNodeId(null); }} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
-341 |           </div>
-342 |           <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
-343 |             <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label><input type="text" value={activeNodeDetail.data.name} onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none" /></div>
-344 |             <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label><textarea value={activeNodeDetail.data.systemPrompt} onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed" /></div>
-345 |           </div>
-346 |         </div>
-347 |       )}
-348 | 
-349 |       <AnimatePresence>
-350 |         {isCostDashboardOpen && <CostDashboard isOpen={isCostDashboardOpen} onClose={() => setIsCostDashboardOpen(false)} currentSessionId={activeSessionId} currentSessionCost={0.042} currentModel={model} currentProvider={provider} />}
-351 |         {isSecretOpen && <APIKeysModal isOpen={isSecretOpen} onClose={() => setIsSecretOpen(false)} />}
-352 |         
-353 |         {pendingApproval && (
-354 |           <div className="fixed bottom-6 right-6 w-96 bg-[#0d0d0d] border border-amber-500/50 shadow-[0_0_50px_rgba(245,158,11,0.15)] rounded-2xl p-5 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300 select-none">
-355 |             <div className="flex gap-4 items-start">
-356 |               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 shrink-0"><Sliders className="w-5 h-5 animate-pulse" /></div>
-357 |               <div className="flex-1 space-y-2">
-358 |                 <h4 className="text-xs font-bold text-white">&apos;{(nodes.find(n => n.id === pendingApproval.nodeId)?.data as any)?.name}&apos; wants to use <span className="text-amber-400 font-mono">[{pendingApproval.toolName}]</span></h4>
-359 |                 <p className="text-[10px] text-neutral-400 leading-normal">Action: <span className="text-white font-semibold">{pendingApproval.action}</span> — {pendingApproval.detail}</p>
-360 |                 <div className="pt-3 flex gap-2">
-361 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "approve", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Approve</button>
-362 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "deny", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="px-4 py-2 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Deny</button>
-363 |                 </div>
-364 |               </div>
-365 |             </div>
-366 |           </div>
-367 |         )}
-368 |       </AnimatePresence>
-369 |     </div>
-370 |   );
-371 | }
-372 |
+135 |     if (!sessionId) sessionId = createSession(promptText, executionMode);
+136 |     setExecutionState("running");
+137 |     triggerSteerOrchestration(promptText, executionMode !== "custom", executionMode);
+138 |     setUserQuery("");
+139 |   };
+140 | 
+141 |   const handleAddRule = () => {
+142 |     if (!newRuleText.trim() || !selectedNodeId) return;
+143 |     addRule(selectedNodeId, newRuleText.trim());
+144 |     setNewRuleText("");
+145 |   };
+146 | 
+147 |   const activeNodeDetail = nodes.find(n => n.id === selectedNodeId) as any;
+148 | 
+149 |   const ModeSelector = () => (
+150 |     <div className="flex items-center gap-1 bg-neutral-900/40 rounded-full p-0.5 border border-[#1f1f1f]">
+151 |       <button onClick={() => setExecutionMode("auto")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "auto" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Smart</button>
+152 |       <button onClick={() => setExecutionMode("custom")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "custom" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Custom</button>
+153 |     </div>
+154 |   );
+155 | 
+156 |   const handleFileAttach = () => {
+157 |     const input = document.createElement("input");
+158 |     input.type = "file";
+159 |     input.accept = ".txt,.md,.json,.csv,.py,.js,.ts,.tsx,.html,.css,.yaml,.yml,.xml,.ini,.cfg,.pdf,.jpg,.png";
+160 |     input.onchange = (e: any) => {
+161 |       const file = e.target.files?.[0];
+162 |       if (!file) return;
+163 |       const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+164 |       if (['.txt', '.md', '.json', '.csv', '.py', '.js', '.ts', '.tsx', '.html', '.css', '.yaml', '.yml', '.xml', '.ini', '.cfg'].includes(ext)) {
+165 |         const reader = new FileReader();
+166 |         reader.onload = (ev) => setUserQuery((prev) => prev + `\n[Attached: ${file.name}]\n${ev.target?.result as string}\n`);
+167 |         reader.readAsText(file);
+168 |       }
+169 |     };
+170 |     input.click();
+171 |   };
+172 | 
+173 |   return (
+174 |     <div className="flex h-screen w-full bg-black text-[#f5f5f5] overflow-hidden font-sans">
+175 |       <aside className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-30 select-none ${isSidebarExpanded ? "w-64" : "w-[60px]"}`}>
+176 |         <div className="flex items-center gap-3 h-16 border-b border-[#1f1f1f] px-4 justify-between">
+177 |           {isSidebarExpanded ? (
+178 |             <div className="flex items-center gap-2.5">
+179 |               <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
+180 |               <h1 className="text-sm font-bold text-white tracking-tight leading-none">Solospace</h1>
+181 |             </div>
+182 |           ) : (
+183 |             <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center mx-auto"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
+184 |           )}
+185 |           {isSidebarExpanded && <button onClick={() => setIsSidebarExpanded(false)} className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>}
+186 |         </div>
+187 | 
+188 |         <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto custom-scrollbar">
+189 |           <button onClick={() => { useWorkflowStore.getState().abortController?.abort(); setWorkspaceState("home"); setUserQuery(""); useWorkflowStore.setState({ activeSessionId: null, nodes: [], edges: [], chatMessages: [], agentTalkLogs: [], executionState: "setup", statusMessage: "", isThinking: false, isOrchestrating: false, liveThoughts: "", pendingApproval: null, followUpSuggestions: [], abortController: null }); }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
+190 |             <SquarePlus className="w-5 h-5 stroke-[1.8]" />
+191 |             {isSidebarExpanded && <span className="text-xs font-semibold">New Chat</span>}
+192 |           </button>
+193 | 
+194 |           <button onClick={() => setIsSecretOpen(true)} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
+195 |             <Key className="w-5 h-5 stroke-[1.8]" />
+196 |             {isSidebarExpanded && <span className="text-xs font-semibold">API Keys</span>}
+197 |           </button>
+198 | 
+199 |           {isSidebarExpanded && (
+200 |             <div className="pt-6 space-y-2 select-none">
+201 |               <div className="flex items-center gap-1.5 px-3"><History className="w-3.5 h-3.5 text-neutral-600" /><span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest font-mono">Recents</span></div>
+202 |               <div className="space-y-1 max-h-[220px] overflow-y-auto custom-scrollbar">
+203 |                 {Object.values(sessions).length === 0 ? <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span> : (
+204 |                   Object.values(sessions).reverse().map((s) => (
+205 |                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
+206 |                       <button disabled={isLoadingSession} onClick={async () => { setIsLoadingSession(true); try { await loadSessionFromDb(s.id); setWorkspaceState("active"); setCurrentTab("chat"); } catch (err) { console.error(err); } finally { setIsLoadingSession(false); } }} className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${activeSessionId === s.id ? "text-white font-bold" : "text-neutral-500 hover:text-white"}`} title={s.prompt}>{s.title}</button>
+207 |                       <button onClick={async (e) => { e.stopPropagation(); if (confirm(`Delete "${s.title}"?`)) await deleteSessionFromDb(s.id); }} className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+208 |                     </div>
+209 |                   ))
+210 |                 )}
+211 |               </div>
+212 |             </div>
+213 |           )}
+214 |         </nav>
+215 |       </aside>
+216 | 
+217 |       <main className="flex-1 flex flex-col min-w-0 bg-[#000000] relative transition-all duration-300">
+218 |         <header className="flex justify-between items-center w-full px-6 h-16 border-b border-[#141414] shrink-0 z-10 bg-black/85 backdrop-blur-md">
+219 |           <div className="flex items-center gap-2">
+220 |             {isConnected && activeSessionId && (
+221 |               <span className="flex items-center gap-1.5 text-[9px] font-mono text-emerald-400 bg-emerald-950/30 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+222 |                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> LIVE SYNC
+223 |               </span>
+224 |             )}
+225 |           </div>
+226 |           <div className="flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-[2px] rounded-full select-none">
+227 |             <button onClick={() => { if (workspaceState !== "home") setCurrentTab("chat"); }} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${currentTab === "chat" || workspaceState === "home" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>Chat</button>
+228 |             {workspaceState === "active" && (
+229 |               <button onClick={() => setCurrentTab("arena")} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${currentTab === "arena" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>
+230 |                 <GitFork className="w-3 h-3" /> Flow {nodes.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse ml-0.5" />}
+231 |               </button>
+232 |             )}
+233 |           </div>
+234 |           <div className="flex items-center gap-2 select-none">
+235 |             <button onClick={() => setIsCostDashboardOpen(true)} className="text-neutral-400 hover:text-emerald-400 p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer" title="Cost & Token Dashboard"><DollarSign className="w-4 h-4 stroke-[1.8]" /></button>
+236 |             <button onClick={() => alert("Solospace AI OS")} className="text-neutral-400 hover:text-white p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer"><HelpCircle className="w-4 h-4 stroke-[1.8]" /></button>
+237 |           </div>
+238 |         </header>
+239 | 
+240 |         <div className="flex-1 relative overflow-hidden">
+241 |           {workspaceState === "home" && (
+242 |             <div className="absolute inset-0 flex flex-col justify-between overflow-y-auto custom-scrollbar">
+243 |               <div />
+244 |               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
+245 |                 <div className="text-center mb-10 space-y-2 select-none">
+246 |                   <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">What&apos;s on your mind?</h1>
+247 |                   <p className="text-sm text-neutral-400 font-sans">Ask anything. Get a real, complete answer instantly.</p>
+248 |                 </div>
+249 |                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
+250 |                   <div className="flex items-center gap-3">
+251 |                     <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
+252 |                     <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder="Describe your idea, problem, or question..." className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
+253 |                     <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim()} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
+254 |                   </div>
+255 |                 </div>
+256 |                 <div className="flex items-center gap-3 mt-5 select-none">
+257 |                   <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">Mode:</span>
+258 |                   <button onClick={() => setExecutionMode("auto")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "auto" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sparkles className="w-3 h-3 stroke-[2]" /><span>Smart Auto</span></button>
+259 |                   <button onClick={() => setExecutionMode("custom")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "custom" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sliders className="w-3 h-3" /><span>Custom Agent</span></button>
+260 |                 </div>
+261 |               </div>
+262 |               <div />
+263 |             </div>
+264 |           )}
+265 | 
+266 |           {workspaceState === "active" && (
+267 |             <div className="absolute inset-0 flex">
+268 |               {currentTab === "chat" && (
+269 |                 <div className="flex-1 flex flex-col justify-between overflow-hidden bg-black">
+270 |                   <div ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
+271 |                     {isLoadingSession ? (
+272 |                       <div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" /></div>
+273 |                     ) : (
+274 |                       <div className="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto space-y-4 select-text">
+275 |                         {chatMessages.map((msg, msgIdx) => (
+276 |                           <motion.div key={msg.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={`flex w-full ${msg.sender === "user" ? "justify-end" : "justify-start"}`}>
+277 |                             {msg.sender === "user" ? (
+278 |                               <div className="max-w-[72%] rounded-3xl px-5 py-3 bg-[#2f2f2f] text-neutral-100 text-sm leading-relaxed"><p className="whitespace-pre-wrap">{msg.text}</p></div>
+279 |                             ) : (
+280 |                               <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
+281 |                                 <div className="w-full text-neutral-100 text-sm leading-relaxed px-1 py-2">
+282 |                                   {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
+283 |                                   {msg.text && (!isOrchestrating || msgIdx !== chatMessages.length - 1) && (
+284 |                                     <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
+285 |                                       <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
+286 |                                         {copiedMsgId === msg.id ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400 font-medium">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
+287 |                                       </button>
+288 |                                     </div>
+289 |                                   )}
+290 |                                 </div>
+291 |                                 {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && nodes.length > 0 && (
+292 |                                   <button onClick={() => setCurrentTab("arena")} className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max select-none">
+293 |                                     <GitFork className="w-3.5 h-3.5 text-cyan-400" /><span>See Agent Flow</span>
+294 |                                   </button>
+295 |                                 )}
+296 |                               </div>
+297 |                             )}
+298 |                           </motion.div>
+299 |                         ))}
+300 |                         <div ref={chatEndRef} />
+301 |                       </div>
+302 |                     )}
+303 |                   </div>
+304 |                   <div className="px-4 sm:px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
+305 |                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
+306 |                       <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
+307 |                       <textarea ref={textareaRef} rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery); } }} placeholder={isOrchestrating ? "Streaming..." : "Ask a follow-up..."} disabled={isOrchestrating} className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar" />
+308 |                       <div className="flex items-center gap-2 shrink-0">
+309 |                         <ModeSelector />
+310 |                         {isOrchestrating ? (
+311 |                           <button onClick={cancelOrchestration} className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all cursor-pointer"><Square className="w-3.5 h-3.5 text-white fill-white" /></button>
+312 |                         ) : (
+313 |                           <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim() || isThinking} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
+314 |                         )}
+315 |                       </div>
+316 |                     </div>
+317 |                   </div>
+318 |                 </div>
+319 |               )}
+320 |               {currentTab === "arena" && (
+321 |                 <div className="flex-1 relative overflow-hidden bg-[#000000] flex">
+322 |                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#0d0d0d]/90 border border-[#1f1f1f] rounded-full px-4 py-2 backdrop-blur-md shadow-xl pointer-events-auto">
+323 |                     <button onClick={() => setCurrentTab("chat")} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-mono"><ChevronLeft className="w-3.5 h-3.5" /> Back to Chat</button>
+324 |                   </div>
+325 |                   <FlowArena />
+326 |                 </div>
+327 |               )}
+328 |             </div>
+329 |           )}
+330 |         </div>
+331 |       </main>
+332 | 
+333 |       {currentTab === "arena" && isConfigPanelOpen && activeNodeDetail && (
+334 |         <div className="fixed top-0 right-0 h-full w-80 bg-[#0c0c0c]/95 border-l border-[#1f1f1f] z-40 flex flex-col justify-between shadow-2xl transition-transform duration-300 right-panel select-none">
+335 |           <div className="p-5 border-b border-[#1f1f1f] flex justify-between items-center bg-[#0d0d0d]">
+336 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider">{activeNodeDetail.data.name}</h3>
+337 |             <button onClick={() => { setIsConfigPanelOpen(false); setSelectedNodeId(null); }} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
+338 |           </div>
+339 |           <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
+340 |             <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label><input type="text" value={activeNodeDetail.data.name} onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none" /></div>
+341 |             <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label><textarea value={activeNodeDetail.data.systemPrompt} onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed" /></div>
+342 |           </div>
+343 |         </div>
+344 |       )}
+345 | 
+346 |       <AnimatePresence>
+347 |         {isCostDashboardOpen && <CostDashboard isOpen={isCostDashboardOpen} onClose={() => setIsCostDashboardOpen(false)} currentSessionId={activeSessionId} currentSessionCost={0.042} currentModel={model} currentProvider={provider} />}
+348 |         {isSecretOpen && <APIKeysModal isOpen={isSecretOpen} onClose={() => setIsSecretOpen(false)} />}
+349 |         
+350 |         {pendingApproval && (
+351 |           <div className="fixed bottom-6 right-6 w-96 bg-[#0d0d0d] border border-amber-500/50 shadow-[0_0_50px_rgba(245,158,11,0.15)] rounded-2xl p-5 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300 select-none">
+352 |             <div className="flex gap-4 items-start">
+353 |               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 shrink-0"><Sliders className="w-5 h-5 animate-pulse" /></div>
+354 |               <div className="flex-1 space-y-2">
+355 |                 <h4 className="text-xs font-bold text-white">&apos;{(nodes.find(n => n.id === pendingApproval.nodeId)?.data as any)?.name}&apos; wants to use <span className="text-amber-400 font-mono">[{pendingApproval.toolName}]</span></h4>
+356 |                 <p className="text-[10px] text-neutral-400 leading-normal">Action: <span className="text-white font-semibold">{pendingApproval.action}</span> — {pendingApproval.detail}</p>
+357 |                 <div className="pt-3 flex gap-2">
+358 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "approve", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Approve</button>
+359 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "deny", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="px-4 py-2 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Deny</button>
+360 |                 </div>
+361 |               </div>
+362 |             </div>
+363 |           </div>
+364 |         )}
+365 |       </AnimatePresence>
+366 |     </div>
+367 |   );
+368 | }
+369 |
 ```
 
 ### File: `Frontend/components/edges/CustomEdge.tsx`
