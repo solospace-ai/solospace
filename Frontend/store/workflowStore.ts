@@ -76,7 +76,7 @@ export interface ChatSession {
   id: string;
   title: string;
   prompt: string;
-  mode: 'auto' | 'custom' | 'quick';
+  mode: 'auto' | 'custom';  // Smart routing only - quick mode removed
   nodes: Node[];
   edges: Edge[];
   chatMessages: ChatMessage[];
@@ -145,7 +145,7 @@ export interface WorkflowState {
   setPendingApproval: (val: PendingApproval | null) => void;
 
   // Session Actions
-  createSession: (prompt: string, mode: 'auto' | 'custom' | 'quick') => string;
+  createSession: (prompt: string, mode: 'auto' | 'custom') => string;  // Smart routing only
   forkSession: (sessionId: string) => Promise<string | null>;
   switchSession: (sessionId: string) => void;
   saveCurrentSession: () => void;
