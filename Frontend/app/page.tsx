@@ -547,7 +547,8 @@ function SolospaceContent() {
 
     let sessionId = activeSessionId;
     if (!sessionId) {
-      sessionId = createSession(promptText, executionMode === "quick" ? "quick" : executionMode === "custom" ? "custom" : "auto");
+      // Smart routing: auto (Smart mode) or custom (Custom mode) - quick mode removed
+      sessionId = createSession(promptText, executionMode);
     }
 
     setExecutionState("running");
@@ -1314,7 +1315,7 @@ function SolospaceContent() {
                             if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery);
                           }
                         }}
-                        placeholder={isOrchestrating ? "Streaming response..." : (executionMode === "auto" ? "Ask a follow-up or new question..." : executionMode === "quick" ? "Ask a quick question directly..." : "Enter a new idea to generate agents (no auto-run)...")}
+                        placeholder={isOrchestrating ? "Streaming response..." : (executionMode === "auto" ? "Ask anything — AI routes smartly..." : "Enter a new idea to generate agents (no auto-run)...")}
                         disabled={isOrchestrating}
                         className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar"
                       />
