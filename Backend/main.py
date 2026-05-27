@@ -391,14 +391,16 @@ async def approve_tool(req: ApprovalRequest):
 @app.get("/sessions")
 async def get_sessions():
     sessions = await load_sessions()
-    result = {}
+    result = []
     for s in sessions:
-        result[s["session_id"]] = {
-            "id": s["session_id"],
+        result.append({
+            "session_id": s["session_id"],
             "title": s["title"],
             "prompt": s["prompt"],
             "mode": s.get("mode", "auto"),
-        }
+            "execution_state": s.get("execution_state", "setup"),
+            "status_message": s.get("status_message", ""),
+        })
     return result
 
 

@@ -1,11 +1,11 @@
 # Full Project Context
 
-> Generated: 2026-05-27T11:55:43.547Z
+> Generated: 2026-05-27T17:02:34.237Z
 > Mode: Full Project
-> Files: 56
-> Total Lines: 8,341
-> Total Size: 293.3 KB
-> Directories: 26
+> Files: 64
+> Total Lines: 10,858
+> Total Size: 409.2 KB
+> Directories: 27
 
 ---
 
@@ -20,6 +20,13 @@ SoloSpace/
 │   │   ├── orchestrator.py
 │   │   ├── planner.py
 │   │   └── synthesizer.py
+│   ├── providers/
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   ├── claude.py
+│   │   ├── gemini.py
+│   │   ├── openai_compat.py
+│   │   └── registry.py
 │   ├── security/
 │   │   ├── __init__.py
 │   │   └── guards.py
@@ -62,13 +69,15 @@ SoloSpace/
 │   │   │       └── test_agent/
 │   │   │           └── route.ts
 │   │   ├── globals.css
-│   │   └── layout.tsx
+│   │   ├── layout.tsx
+│   │   └── page.tsx
 │   ├── components/
 │   │   ├── edges/
 │   │   │   └── CustomEdge.tsx
 │   │   ├── nodes/
 │   │   │   ├── CustomNode.tsx
 │   │   │   └── GroupNode.tsx
+│   │   ├── APIKeysModal.tsx
 │   │   ├── ContextMenu.tsx
 │   │   ├── CostDashboard.tsx
 │   │   ├── ErrorBoundary.tsx
@@ -1174,6 +1183,1712 @@ SoloSpace/
 259 | 
 260 |     yield "event: done\ndata: {}\n\n"
 261 |
+```
+
+### File: `Backend/providers/__init__.py`
+
+> 59 lines | 1.3 KB
+
+```python
+ 1 | """
+ 2 | Solospace AI OS — Provider Registry
+ 3 | Re-exports all provider functions for backward compatibility.
+ 4 | """
+ 5 | 
+ 6 | from .base import (
+ 7 |     PROVIDERS,
+ 8 |     get_provider_config,
+ 9 |     get_available_providers,
+10 |     resolve_api_key,
+11 |     extract_json_from_text,
+12 |     call_with_retry,
+13 | )
+14 | from .openai_compat import (
+15 |     _build_openai_messages,
+16 |     _call_openai_compatible,
+17 |     _stream_openai_compatible,
+18 | )
+19 | from .gemini import (
+20 |     _build_gemini_contents,
+21 |     _call_gemini,
+22 |     _stream_gemini,
+23 | )
+24 | from .claude import (
+25 |     _build_claude_messages,
+26 |     _call_claude,
+27 |     _stream_claude,
+28 | )
+29 | from .registry import (
+30 |     call_provider,
+31 |     stream_provider,
+32 |     call_provider_json,
+33 |     get_embedding,
+34 |     fetch_models_from_provider,
+35 | )
+36 | 
+37 | __all__ = [
+38 |     "PROVIDERS",
+39 |     "get_provider_config",
+40 |     "get_available_providers",
+41 |     "resolve_api_key",
+42 |     "extract_json_from_text",
+43 |     "call_with_retry",
+44 |     "_build_openai_messages",
+45 |     "_call_openai_compatible",
+46 |     "_stream_openai_compatible",
+47 |     "_build_gemini_contents",
+48 |     "_call_gemini",
+49 |     "_stream_gemini",
+50 |     "_build_claude_messages",
+51 |     "_call_claude",
+52 |     "_stream_claude",
+53 |     "call_provider",
+54 |     "stream_provider",
+55 |     "call_provider_json",
+56 |     "get_embedding",
+57 |     "fetch_models_from_provider",
+58 | ]
+59 |
+```
+
+### File: `Backend/providers/base.py`
+
+> 435 lines | 18.8 KB
+
+```python
+  1 | """
+  2 | Unified multi-provider AI adapter.
+  3 | Supports: Gemini, OpenAI, Claude, OpenRouter, Groq, DeepSeek,
+  4 |           Together AI, Mistral, Fireworks, Perplexity, Cohere,
+  5 |           Azure OpenAI, AWS Bedrock, Ollama, xAI, Cerebras, LM Studio, Custom.
+  6 | """
+  7 | 
+  8 | import json
+  9 | import re
+ 10 | import os
+ 11 | import time
+ 12 | import random
+ 13 | import asyncio
+ 14 | from typing import List, Dict, Any, Optional, AsyncGenerator
+ 15 | import httpx
+ 16 | 
+ 17 | # ─── Retry / Backoff Configuration ──────────────────────────────────
+ 18 | 
+ 19 | MAX_RETRIES = 2          # ── PERF: Reduced from 3 → 2
+ 20 | BASE_DELAY = 0.5         # ── PERF: Reduced from 1.0 → 0.5
+ 21 | MAX_DELAY = 5.0          # ── PERF: Reduced from 10.0 → 5.0
+ 22 | JITTER_FACTOR = 0.3      # ── PERF: Reduced from 0.5 → 0.3
+ 23 | 
+ 24 | async def call_with_retry(func, *args, **kwargs):
+ 25 |     """Call a provider function with exponential backoff and jitter."""
+ 26 |     retries = 0
+ 27 |     while retries <= MAX_RETRIES:
+ 28 |         try:
+ 29 |             return await func(*args, **kwargs)
+ 30 |         except Exception as e:
+ 31 |             retries += 1
+ 32 |             if retries > MAX_RETRIES:
+ 33 |                 raise
+ 34 |             delay = min(MAX_DELAY, BASE_DELAY * (2 ** retries))
+ 35 |             delay += random.uniform(-JITTER_FACTOR * delay, JITTER_FACTOR * delay)
+ 36 |             await asyncio.sleep(delay)
+ 37 |     raise Exception("Retry loop exhausted")
+ 38 | 
+ 39 | # ─── Provider Registry ───────────────────────────────────────────────
+ 40 | 
+ 41 | PROVIDERS: Dict[str, Dict[str, Any]] = {
+ 42 |     "gemini": {
+ 43 |         "name": "Google Gemini",
+ 44 |         "description": "Multimodal AI with native JSON schema & embeddings",
+ 45 |         "base_url": "https://generativelanguage.googleapis.com/v1beta",
+ 46 |         "chat_path": None,
+ 47 |         "default_model": "gemini-2.5-flash",
+ 48 |         "models": [
+ 49 |             {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "tier": "fast"},
+ 50 |             {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "tier": "advanced"},
+ 51 |             {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "tier": "fast"},
+ 52 |             {"id": "gemini-2.5-flash-lite", "name": "Gemini 2.5 Flash Lite", "tier": "fast"},
+ 53 |             {"id": "gemini-2.0-flash-lite", "name": "Gemini 2.0 Flash Lite", "tier": "fast"},
+ 54 |             {"id": "gemma-3-27b-it", "name": "Gemma 3 27B IT", "tier": "open"},
+ 55 |             {"id": "gemma-3-12b-it", "name": "Gemma 3 12B IT", "tier": "open"},
+ 56 |             {"id": "gemma-3-4b-it", "name": "Gemma 3 4B IT", "tier": "open"},
+ 57 |         ],
+ 58 |         "capabilities": ["chat", "streaming", "json_schema", "embeddings"],
+ 59 |         "key_url": "https://aistudio.google.com/apikey",
+ 60 |         "key_hint": "AIzaSy...",
+ 61 |         "adapter": "gemini",
+ 62 |     },
+ 63 |     "openai": {
+ 64 |         "name": "OpenAI",
+ 65 |         "description": "GPT-4o, o3-mini, o1 reasoning models",
+ 66 |         "base_url": "https://api.openai.com/v1",
+ 67 |         "chat_path": "/chat/completions",
+ 68 |         "default_model": "gpt-4o",
+ 69 |         "models": [
+ 70 |             {"id": "gpt-4.1", "name": "GPT-4.1", "tier": "advanced"},
+ 71 |             {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini", "tier": "fast"},
+ 72 |             {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano", "tier": "fast"},
+ 73 |             {"id": "gpt-4o", "name": "GPT-4o", "tier": "advanced"},
+ 74 |             {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "tier": "fast"},
+ 75 |             {"id": "o4-mini", "name": "o4-mini", "tier": "reasoning"},
+ 76 |             {"id": "o3", "name": "o3", "tier": "reasoning"},
+ 77 |             {"id": "o3-mini", "name": "o3-mini", "tier": "reasoning"},
+ 78 |             {"id": "o1", "name": "o1", "tier": "reasoning"},
+ 79 |         ],
+ 80 |         "capabilities": ["chat", "streaming", "json_mode", "embeddings"],
+ 81 |         "key_url": "https://platform.openai.com/api-keys",
+ 82 |         "key_hint": "sk-...",
+ 83 |         "adapter": "openai",
+ 84 |     },
+ 85 |     "claude": {
+ 86 |         "name": "Anthropic Claude",
+ 87 |         "description": "Claude Sonnet 4, Opus, Haiku family",
+ 88 |         "base_url": "https://api.anthropic.com/v1",
+ 89 |         "chat_path": "/messages",
+ 90 |         "default_model": "claude-sonnet-4-20250514",
+ 91 |         "models": [
+ 92 |             {"id": "claude-sonnet-4-20250514", "name": "Claude Sonnet 4", "tier": "advanced"},
+ 93 |             {"id": "claude-opus-4-20250115", "name": "Claude Opus 4", "tier": "reasoning"},
+ 94 |             {"id": "claude-3-7-sonnet-20250219", "name": "Claude 3.7 Sonnet", "tier": "advanced"},
+ 95 |             {"id": "claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet", "tier": "advanced"},
+ 96 |             {"id": "claude-3-5-haiku-20241022", "name": "Claude 3.5 Haiku", "tier": "fast"},
+ 97 |         ],
+ 98 |         "capabilities": ["chat", "streaming"],
+ 99 |         "key_url": "https://console.anthropic.com/settings/keys",
+100 |         "key_hint": "sk-ant-...",
+101 |         "adapter": "claude",
+102 |     },
+103 |     "openrouter": {
+104 |         "name": "OpenRouter",
+105 |         "description": "One API for 200+ models including GPT, Claude, Llama",
+106 |         "base_url": "https://openrouter.ai/api/v1",
+107 |         "chat_path": "/chat/completions",
+108 |         "default_model": "openai/gpt-4o",
+109 |         "models": [
+110 |             {"id": "openai/gpt-4o", "name": "GPT-4o", "tier": "advanced"},
+111 |             {"id": "anthropic/claude-sonnet-4", "name": "Claude Sonnet 4", "tier": "advanced"},
+112 |             {"id": "anthropic/claude-3.7-sonnet", "name": "Claude 3.7 Sonnet", "tier": "advanced"},
+113 |             {"id": "google/gemini-2.5-flash-preview", "name": "Gemini 2.5 Flash", "tier": "fast"},
+114 |             {"id": "meta-llama/llama-3.1-405b-instruct", "name": "Llama 3.1 405B", "tier": "open"},
+115 |             {"id": "deepseek/deepseek-chat", "name": "DeepSeek V3", "tier": "open"},
+116 |             {"id": "qwen/qwen-2.5-72b-instruct", "name": "Qwen 2.5 72B", "tier": "open"},
+117 |         ],
+118 |         "capabilities": ["chat", "streaming", "json_mode"],
+119 |         "key_url": "https://openrouter.ai/keys",
+120 |         "key_hint": "sk-or-...",
+121 |         "adapter": "openai",
+122 |     },
+123 |     "groq": {
+124 |         "name": "Groq",
+125 |         "description": "Ultra-fast LPU inference on open models",
+126 |         "base_url": "https://api.groq.com/openai/v1",
+127 |         "chat_path": "/chat/completions",
+128 |         "default_model": "llama-3.3-70b-versatile",
+129 |         "models": [
+130 |             {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B", "tier": "fast"},
+131 |             {"id": "qwen3-32b", "name": "Qwen 3 32B", "tier": "fast"},
+132 |             {"id": "deepseek-r1-distill-llama-70b", "name": "DeepSeek R1 Distill Llama 70B", "tier": "reasoning"},
+133 |             {"id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B Instant", "tier": "fast"},
+134 |             {"id": "mixtral-8x7b-32768", "name": "Mixtral 8x7B", "tier": "fast"},
+135 |             {"id": "gemma2-9b-it", "name": "Gemma 2 9B", "tier": "fast"},
+136 |         ],
+137 |         "capabilities": ["chat", "streaming", "json_mode"],
+138 |         "key_url": "https://console.groq.com/keys",
+139 |         "key_hint": "gsk_...",
+140 |         "adapter": "openai",
+141 |     },
+142 |     "deepseek": {
+143 |         "name": "DeepSeek",
+144 |         "description": "DeepSeek V3 & R1 reasoning models",
+145 |         "base_url": "https://api.deepseek.com/v1",
+146 |         "chat_path": "/chat/completions",
+147 |         "default_model": "deepseek-chat",
+148 |         "models": [
+149 |             {"id": "deepseek-chat", "name": "DeepSeek V3", "tier": "advanced"},
+150 |             {"id": "deepseek-reasoner", "name": "DeepSeek R1", "tier": "reasoning"},
+151 |         ],
+152 |         "capabilities": ["chat", "streaming", "json_mode"],
+153 |         "key_url": "https://platform.deepseek.com/api_keys",
+154 |         "key_hint": "sk-...",
+155 |         "adapter": "openai",
+156 |     },
+157 |     "together": {
+158 |         "name": "Together AI",
+159 |         "description": "Open-source models with fast hosted inference",
+160 |         "base_url": "https://api.together.xyz/v1",
+161 |         "chat_path": "/chat/completions",
+162 |         "default_model": "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo",
+163 |         "models": [
+164 |             {"id": "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo", "name": "Llama 3.1 405B Turbo", "tier": "advanced"},
+165 |             {"id": "mistralai/Mixtral-8x7B-Instruct-v0.1", "name": "Mixtral 8x7B", "tier": "fast"},
+166 |             {"id": "Qwen/Qwen2.5-72B-Instruct-Turbo", "name": "Qwen 2.5 72B Turbo", "tier": "advanced"},
+167 |         ],
+168 |         "capabilities": ["chat", "streaming", "json_mode"],
+169 |         "key_url": "https://api.together.xyz/settings/api-keys",
+170 |         "key_hint": "",
+171 |         "adapter": "openai",
+172 |     },
+173 |     "mistral": {
+174 |         "name": "Mistral AI",
+175 |         "description": "Mistral Large, Codestral, and more",
+176 |         "base_url": "https://api.mistral.ai/v1",
+177 |         "chat_path": "/chat/completions",
+178 |         "default_model": "mistral-large-latest",
+179 |         "models": [
+180 |             {"id": "mistral-large-latest", "name": "Mistral Large", "tier": "advanced"},
+181 |             {"id": "mistral-medium-3", "name": "Mistral Medium 3", "tier": "fast"},
+182 |             {"id": "codestral-2501", "name": "Codestral 2501", "tier": "code"},
+183 |             {"id": "open-mistral-nemo", "name": "Mistral Nemo (Free)", "tier": "fast"},
+184 |         ],
+185 |         "capabilities": ["chat", "streaming", "json_mode"],
+186 |         "key_url": "https://console.mistral.ai/api-keys/",
+187 |         "key_hint": "",
+188 |         "adapter": "openai",
+189 |     },
+190 |     "fireworks": {
+191 |         "name": "Fireworks AI",
+192 |         "description": "Fast inference on popular open-source models",
+193 |         "base_url": "https://api.fireworks.ai/inference/v1",
+194 |         "chat_path": "/chat/completions",
+195 |         "default_model": "accounts/fireworks/models/llama-v3p1-405b-instruct",
+196 |         "models": [
+197 |             {"id": "accounts/fireworks/models/llama-v3p1-405b-instruct", "name": "Llama 3.1 405B", "tier": "advanced"},
+198 |             {"id": "accounts/fireworks/models/mixtral-8x7b-instruct", "name": "Mixtral 8x7B", "tier": "fast"},
+199 |             {"id": "accounts/fireworks/models/qwen2p5-72b-instruct", "name": "Qwen 2.5 72B", "tier": "advanced"},
+200 |         ],
+201 |         "capabilities": ["chat", "streaming", "json_mode"],
+202 |         "key_url": "https://fireworks.ai/api-keys",
+203 |         "key_hint": "fw_...",
+204 |         "adapter": "openai",
+205 |     },
+206 |     "perplexity": {
+207 |         "name": "Perplexity",
+208 |         "description": "Online search-augmented generation models",
+209 |         "base_url": "https://api.perplexity.ai",
+210 |         "chat_path": "/chat/completions",
+211 |         "default_model": "sonar-pro",
+212 |         "models": [
+213 |             {"id": "sonar-pro", "name": "Sonar Pro", "tier": "advanced"},
+214 |             {"id": "sonar-deep-research", "name": "Sonar Deep Research", "tier": "advanced"},
+215 |             {"id": "sonar-reasoning", "name": "Sonar Reasoning", "tier": "reasoning"},
+216 |             {"id": "sonar", "name": "Sonar", "tier": "fast"},
+217 |         ],
+218 |         "capabilities": ["chat", "streaming"],
+219 |         "key_url": "https://www.perplexity.ai/settings/api",
+220 |         "key_hint": "pplx-...",
+221 |         "adapter": "openai",
+222 |     },
+223 |     "cohere": {
+224 |         "name": "Cohere",
+225 |         "description": "Command R+ enterprise models with citations",
+226 |         "base_url": "https://api.cohere.ai/v2",
+227 |         "chat_path": "/chat",
+228 |         "default_model": "command-r-plus",
+229 |         "models": [
+230 |             {"id": "command-r-plus", "name": "Command R+", "tier": "advanced"},
+231 |             {"id": "command-r", "name": "Command R", "tier": "fast"},
+232 |         ],
+233 |         "capabilities": ["chat", "streaming"],
+234 |         "key_url": "https://dashboard.cohere.com/api-keys",
+235 |         "key_hint": "",
+236 |         "adapter": "cohere",
+237 |     },
+238 |     "azure_openai": {
+239 |         "name": "Azure OpenAI",
+240 |         "description": "Azure OpenAI service deployment",
+241 |         "base_url": "https://YOUR_RESOURCE.openai.azure.com/openai/deployments",
+242 |         "chat_path": "/chat/completions",
+243 |         "default_model": "gpt-4o",
+244 |         "models": [],
+245 |         "capabilities": ["chat", "streaming", "json_mode", "embeddings"],
+246 |         "key_url": "https://azure.microsoft.com/en-us/products/ai-services/openai",
+247 |         "key_hint": "Azure API key",
+248 |         "adapter": "openai",
+249 |         "requires_deployment": True,
+250 |         "requires_base_url": True,
+251 |     },
+252 |     "bedrock": {
+253 |         "name": "AWS Bedrock",
+254 |         "description": "AWS Bedrock models using boto3 runtime",
+255 |         "base_url": "",
+256 |         "default_model": "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+257 |         "models": [
+258 |             {"id": "us.anthropic.claude-3-7-sonnet-20250219-v1:0", "name": "Claude 3.7 Sonnet (US)", "tier": "advanced"},
+259 |             {"id": "anthropic.claude-3-7-sonnet-20250219-v1:0", "name": "Claude 3.7 Sonnet", "tier": "advanced"},
+260 |             {"id": "anthropic.claude-3-5-sonnet-20241022-v2:0", "name": "Claude 3.5 Sonnet v2", "tier": "advanced"},
+261 |             {"id": "anthropic.claude-3-5-haiku-20241022-v1:0", "name": "Claude 3.5 Haiku", "tier": "fast"},
+262 |             {"id": "meta.llama3-3-70b-instruct-v1:0", "name": "Llama 3.3 70B", "tier": "advanced"},
+263 |             {"id": "meta.llama3-1-8b-instruct-v1:0", "name": "Llama 3.1 8B", "tier": "fast"},
+264 |         ],
+265 |         "capabilities": ["chat", "streaming", "json_mode"],
+266 |         "key_url": "https://aws.amazon.com/bedrock/",
+267 |         "key_hint": "AWS Access Key ID",
+268 |         "adapter": "bedrock",
+269 |         "requires_aws": True,
+270 |     },
+271 |     "ollama": {
+272 |         "name": "Ollama (Local)",
+273 |         "description": "Run local models on http://localhost:11434",
+274 |         "base_url": "http://localhost:11434/v1",
+275 |         "chat_path": "/chat/completions",
+276 |         "default_model": "llama3",
+277 |         "models": [],
+278 |         "capabilities": ["chat", "streaming", "json_mode"],
+279 |         "key_url": "",
+280 |         "key_hint": "No API key required",
+281 |         "adapter": "openai",
+282 |         "is_local": True,
+283 |         "requires_base_url": True,
+284 |     },
+285 |     "xai": {
+286 |         "name": "xAI Grok",
+287 |         "description": "Grok-3 and Grok-2 reasoning models",
+288 |         "base_url": "https://api.x.ai/v1",
+289 |         "chat_path": "/chat/completions",
+290 |         "default_model": "grok-3",
+291 |         "models": [
+292 |             {"id": "grok-3", "name": "Grok 3", "tier": "advanced"},
+293 |             {"id": "grok-3-mini", "name": "Grok 3 Mini", "tier": "fast"},
+294 |             {"id": "grok-2", "name": "Grok 2", "tier": "advanced"},
+295 |             {"id": "grok-2-mini", "name": "Grok 2-mini", "tier": "fast"},
+296 |         ],
+297 |         "capabilities": ["chat", "streaming", "json_mode"],
+298 |         "key_url": "https://x.ai/api-keys",
+299 |         "key_hint": "xai-...",
+300 |         "adapter": "openai",
+301 |     },
+302 |     "cerebras": {
+303 |         "name": "Cerebras",
+304 |         "description": "Ultra-fast Cerebras CS-3 inference on Llama models",
+305 |         "base_url": "https://api.cerebras.ai/v1",
+306 |         "chat_path": "/chat/completions",
+307 |         "default_model": "llama3.1-70b",
+308 |         "models": [
+309 |             {"id": "llama3.1-70b", "name": "Llama 3.1 70B", "tier": "advanced"},
+310 |             {"id": "llama3.1-8b", "name": "Llama 3.1 8B", "tier": "fast"},
+311 |         ],
+312 |         "capabilities": ["chat", "streaming", "json_mode"],
+313 |         "key_url": "https://cerebras.ai/api-keys",
+314 |         "key_hint": "cerebras-...",
+315 |         "adapter": "openai",
+316 |     },
+317 |     "lmstudio": {
+318 |         "name": "LM Studio (Local)",
+319 |         "description": "Local models served on http://localhost:1234",
+320 |         "base_url": "http://localhost:1234/v1",
+321 |         "chat_path": "/chat/completions",
+322 |         "default_model": "local-model",
+323 |         "models": [],
+324 |         "capabilities": ["chat", "streaming", "json_mode"],
+325 |         "key_url": "",
+326 |         "key_hint": "No API key required",
+327 |         "adapter": "openai",
+328 |         "is_local": True,
+329 |         "requires_base_url": True,
+330 |     },
+331 |     "custom": {
+332 |         "name": "Custom / Open Code",
+333 |         "description": "vLLM, LM Studio, Ollama or any OpenAI-compatible API",
+334 |         "base_url": "",
+335 |         "chat_path": "/v1/chat/completions",
+336 |         "default_model": "",
+337 |         "models": [],
+338 |         "capabilities": ["chat", "streaming", "json_mode"],
+339 |         "key_url": "",
+340 |         "key_hint": "Any key or leave empty",
+341 |         "adapter": "openai",
+342 |         "is_custom": True,
+343 |         "requires_base_url": True,
+344 |     },
+345 | }
+346 | 
+347 | 
+348 | def get_provider_config(provider_id: str) -> Dict[str, Any]:
+349 |     """Get config for a provider. Returns empty dict if not found."""
+350 |     return PROVIDERS.get(provider_id.lower(), {})
+351 | 
+352 | 
+353 | def get_available_providers() -> Dict[str, Any]:
+354 |     """Return provider registry for the frontend."""
+355 |     result = {}
+356 |     for pid, cfg in PROVIDERS.items():
+357 |         result[pid] = {
+358 |             "name": cfg["name"],
+359 |             "description": cfg["description"],
+360 |             "models": cfg["models"],
+361 |             "default_model": cfg["default_model"],
+362 |             "capabilities": cfg["capabilities"],
+363 |             "key_url": cfg["key_url"],
+364 |             "key_hint": cfg["key_hint"],
+365 |             "is_custom": cfg.get("is_custom", False),
+366 |             "is_local": cfg.get("is_local", False),
+367 |             "requires_base_url": cfg.get("requires_base_url", False),
+368 |         }
+369 |     return result
+370 | 
+371 | 
+372 | def resolve_api_key(provider: str, user_key: Optional[str] = None, api_keys: Optional[Dict[str, str]] = None) -> str:
+373 |     """Resolve key from user input dictionary, single user_key, or fallback to env."""
+374 |     if api_keys and provider in api_keys and api_keys[provider].strip():
+375 |         return api_keys[provider].strip()
+376 |     if user_key and user_key.strip():
+377 |         return user_key.strip()
+378 | 
+379 |     env_keys = {
+380 |         "gemini": "GEMINI_API_KEY",
+381 |         "openai": "OPENAI_API_KEY",
+382 |         "claude": "ANTHROPIC_API_KEY",
+383 |         "openrouter": "OPENROUTER_API_KEY",
+384 |         "groq": "GROQ_API_KEY",
+385 |         "deepseek": "DEEPSEEK_API_KEY",
+386 |         "together": "TOGETHER_API_KEY",
+387 |         "mistral": "MISTRAL_API_KEY",
+388 |         "fireworks": "FIREWORKS_API_KEY",
+389 |         "perplexity": "PERPLEXITY_API_KEY",
+390 |         "cohere": "COHERE_API_KEY",
+391 |         "azure_openai": "AZURE_OPENAI_API_KEY",
+392 |         "xai": "XAI_API_KEY",
+393 |         "cerebras": "CEREBRAS_API_KEY",
+394 |         "bedrock": "AWS_ACCESS_KEY_ID",
+395 |     }
+396 |     env_var_name = env_keys.get(provider.lower())
+397 |     if env_var_name:
+398 |         val = os.environ.get(env_var_name)
+399 |         if val:
+400 |             return val
+401 |     return ""
+402 | 
+403 | 
+404 | def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
+405 |     """Extract and parse a JSON object from text that may contain markdown or extra content."""
+406 |     try:
+407 |         return json.loads(text.strip())
+408 |     except (json.JSONDecodeError, ValueError):
+409 |         pass
+410 | 
+411 |     match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+412 |     if match:
+413 |         try:
+414 |             return json.loads(match.group(1).strip())
+415 |         except (json.JSONDecodeError, ValueError):
+416 |             pass
+417 | 
+418 |     depth = 0
+419 |     start = -1
+420 |     for i, ch in enumerate(text):
+421 |         if ch == "{":
+422 |             if depth == 0:
+423 |                 start = i
+424 |             depth += 1
+425 |         elif ch == "}":
+426 |             depth -= 1
+427 |             if depth == 0 and start >= 0:
+428 |                 try:
+429 |                     return json.loads(text[start:i + 1])
+430 |                 except (json.JSONDecodeError, ValueError):
+431 |                     break
+432 |     return None
+433 | 
+434 | 
+435 |
+```
+
+### File: `Backend/providers/claude.py`
+
+> 348 lines | 12.9 KB
+
+```python
+  1 | from typing import List, Dict, Any, AsyncGenerator
+  2 | 
+  3 | def _build_claude_messages(
+  4 |     messages: List[Dict[str, str]],
+  5 |     system_prompt: str,
+  6 | ) -> Dict[str, Any]:
+  7 |     """Convert internal message format to Claude format."""
+  8 |     claude_msgs = []
+  9 |     for msg in messages:
+ 10 |         role = "assistant" if msg.get("role") in ["model", "assistant"] else "user"
+ 11 |         claude_msgs.append({
+ 12 |             "role": role,
+ 13 |             "content": msg.get("content", ""),
+ 14 |         })
+ 15 |     return {
+ 16 |         "system": system_prompt,
+ 17 |         "messages": claude_msgs,
+ 18 |     }
+ 19 | 
+ 20 | 
+ 21 | # ─── OpenAI-Compatible Adapter ───────────────────────────────────────
+ 22 | 
+ 23 | async def _call_openai_compatible(
+ 24 |     config: Dict[str, Any],
+ 25 |     model: str,
+ 26 |     api_key: str,
+ 27 |     messages: List[Dict[str, str]],
+ 28 |     system_prompt: str,
+ 29 |     temperature: float = 0.7,
+ 30 |     json_mode: bool = False,
+ 31 |     json_schema_hint: str = None,
+ 32 |     timeout: float = 30.0,
+ 33 | ) -> str:
+ 34 |     """Non-streaming call to any OpenAI-compatible endpoint."""
+ 35 |     base_url = config["base_url"].rstrip("/")
+ 36 |     chat_path = config.get("chat_path", "/chat/completions")
+ 37 |     
+ 38 |     requires_deployment = config.get("requires_deployment", False)
+ 39 |     if requires_deployment:
+ 40 |         api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+ 41 |         url = f"{base_url}/{model}/chat/completions?api-version={api_version}"
+ 42 |         headers = {
+ 43 |             "Content-Type": "application/json",
+ 44 |             "api-key": api_key,
+ 45 |         }
+ 46 |     else:
+ 47 |         url = f"{base_url}{chat_path}"
+ 48 |         headers = {
+ 49 |             "Content-Type": "application/json",
+ 50 |             "Authorization": f"Bearer {api_key}" if api_key else "",
+ 51 |         }
+ 52 |         if not api_key:
+ 53 |             headers.pop("Authorization", None)
+ 54 | 
+ 55 |     if "openrouter" in base_url:
+ 56 |         headers["HTTP-Referer"] = "https://solospace.app"
+ 57 |         headers["X-Title"] = "Solospace"
+ 58 | 
+ 59 |     oa_msgs = _build_openai_messages(messages, system_prompt, model)
+ 60 | 
+ 61 |     payload: Dict[str, Any] = {
+ 62 |         "model": model,
+ 63 |         "messages": oa_msgs,
+ 64 |         "temperature": temperature,
+ 65 |         "max_tokens": 8192,
+ 66 |     }
+ 67 | 
+ 68 |     if any(m in model.lower() for m in ["o1", "o3", "o4", "deepseek-reasoner"]):
+ 69 |         payload.pop("temperature", None)
+ 70 | 
+ 71 |     if json_mode:
+ 72 |         payload["response_format"] = {"type": "json_object"}
+ 73 |         if json_schema_hint:
+ 74 |             last_msg = oa_msgs[-1] if oa_msgs else {}
+ 75 |             if last_msg.get("role") == "user":
+ 76 |                 last_msg["content"] = f"{last_msg.get('content', '')}\n\nIMPORTANT: Respond ONLY with valid JSON matching this structure:\n{json_schema_hint}"
+ 77 | 
+ 78 |     async with httpx.AsyncClient() as client:
+ 79 |         resp = await client.post(url, json=payload, headers=headers, timeout=timeout)
+ 80 |         if resp.status_code != 200:
+ 81 |             raise Exception(f"Provider error ({resp.status_code}): {resp.text[:500]}")
+ 82 |         data = resp.json()
+ 83 |         return data["choices"][0]["message"]["content"]
+ 84 | 
+ 85 | 
+ 86 | async def _stream_openai_compatible(
+ 87 |     config: Dict[str, Any],
+ 88 |     model: str,
+ 89 |     api_key: str,
+ 90 |     messages: List[Dict[str, str]],
+ 91 |     system_prompt: str,
+ 92 |     temperature: float = 0.7,
+ 93 |     timeout: float = 90.0,
+ 94 | ) -> AsyncGenerator[str, None]:
+ 95 |     """Streaming call to any OpenAI-compatible endpoint. Yields text chunks."""
+ 96 |     base_url = config["base_url"].rstrip("/")
+ 97 |     chat_path = config.get("chat_path", "/chat/completions")
+ 98 |     
+ 99 |     requires_deployment = config.get("requires_deployment", False)
+100 |     if requires_deployment:
+101 |         api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+102 |         url = f"{base_url}/{model}/chat/completions?api-version={api_version}"
+103 |         headers = {
+104 |             "Content-Type": "application/json",
+105 |             "api-key": api_key,
+106 |         }
+107 |     else:
+108 |         url = f"{base_url}{chat_path}"
+109 |         headers = {
+110 |             "Content-Type": "application/json",
+111 |             "Authorization": f"Bearer {api_key}" if api_key else "",
+112 |         }
+113 |         if not api_key:
+114 |             headers.pop("Authorization", None)
+115 | 
+116 |     if "openrouter" in base_url:
+117 |         headers["HTTP-Referer"] = "https://solospace.app"
+118 |         headers["X-Title"] = "Solospace"
+119 | 
+120 |     oa_msgs = _build_openai_messages(messages, system_prompt, model)
+121 | 
+122 |     payload: Dict[str, Any] = {
+123 |         "model": model,
+124 |         "messages": oa_msgs,
+125 |         "temperature": temperature,
+126 |         "max_tokens": 8192,
+127 |         "stream": True,
+128 |     }
+129 |     if any(m in model.lower() for m in ["o1", "o3", "o4", "deepseek-reasoner"]):
+130 |         payload.pop("temperature", None)
+131 | 
+132 |     async with httpx.AsyncClient() as client:
+133 |         async with client.stream("POST", url, json=payload, headers=headers, timeout=timeout) as resp:
+134 |             if resp.status_code != 200:
+135 |                 err_body = await resp.aread()
+136 |                 raise Exception(f"Provider stream error ({resp.status_code}): {err_body.decode()[:500]}")
+137 |             async for line in resp.aiter_lines():
+138 |                 line = line.strip()
+139 |                 if not line or not line.startswith("data:"):
+140 |                     continue
+141 |                 data_str = line[5:].strip()
+142 |                 if data_str == "[DONE]":
+143 |                     break
+144 |                 try:
+145 |                     obj = json.loads(data_str)
+146 |                     delta = obj.get("choices", [{}])[0].get("delta", {})
+147 |                     content = delta.get("content", "")
+148 |                     if content:
+149 |                         yield content
+150 |                 except (json.JSONDecodeError, IndexError, KeyError):
+151 |                     continue
+152 | 
+153 | 
+154 | # ─── Gemini Adapter ──────────────────────────────────────────────────
+155 | 
+156 | GEMINI_SAFETY = [
+157 |     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+158 |     {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+159 |     {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+160 |     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+161 | ]
+162 | 
+163 | 
+164 | async def _call_gemini(
+165 |     config: Dict[str, Any],
+166 |     model: str,
+167 |     api_key: str,
+168 |     messages: List[Dict[str, str]],
+169 |     system_prompt: str,
+170 |     temperature: float = 0.7,
+171 |     json_schema: Dict[str, Any] = None,
+172 |     timeout: float = 30.0,
+173 | ) -> str:
+174 |     """Non-streaming call to Gemini API."""
+175 |     base_url = config["base_url"].rstrip("/")
+176 |     url = f"{base_url}/models/{model}:generateContent?key={api_key}"
+177 | 
+178 |     gemini_data = _build_gemini_contents(messages, system_prompt)
+179 | 
+180 |     payload: Dict[str, Any] = {
+181 |         **gemini_data,
+182 |         "generationConfig": {"temperature": temperature},
+183 |         "safetySettings": GEMINI_SAFETY,
+184 |     }
+185 | 
+186 |     if json_schema:
+187 |         payload["generationConfig"]["responseMimeType"] = "application/json"
+188 |         payload["generationConfig"]["responseSchema"] = json_schema
+189 | 
+190 |     async with httpx.AsyncClient() as client:
+191 |         resp = await client.post(url, json=payload, timeout=timeout)
+192 |         if resp.status_code != 200:
+193 |             raise Exception(f"Gemini error ({resp.status_code}): {resp.text[:500]}")
+194 |         data = resp.json()
+195 |         return data["candidates"][0]["content"]["parts"][-1]["text"]
+196 | 
+197 | 
+198 | async def _stream_gemini(
+199 |     config: Dict[str, Any],
+200 |     model: str,
+201 |     api_key: str,
+202 |     messages: List[Dict[str, str]],
+203 |     system_prompt: str,
+204 |     temperature: float = 0.7,
+205 |     timeout: float = 90.0,
+206 | ) -> AsyncGenerator[str, None]:
+207 |     """Streaming call to Gemini API. Yields text chunks."""
+208 |     base_url = config["base_url"].rstrip("/")
+209 |     url = f"{base_url}/models/{model}:streamGenerateContent?alt=sse&key={api_key}"
+210 | 
+211 |     gemini_data = _build_gemini_contents(messages, system_prompt)
+212 | 
+213 |     payload: Dict[str, Any] = {
+214 |         **gemini_data,
+215 |         "generationConfig": {"temperature": temperature},
+216 |         "safetySettings": GEMINI_SAFETY,
+217 |     }
+218 | 
+219 |     async with httpx.AsyncClient() as client:
+220 |         async with client.stream("POST", url, json=payload, timeout=timeout) as resp:
+221 |             if resp.status_code != 200:
+222 |                 err_body = await resp.aread()
+223 |                 raise Exception(f"Gemini stream error ({resp.status_code}): {err_body.decode()[:500]}")
+224 |             async for line in resp.aiter_lines():
+225 |                 line = line.strip()
+226 |                 if not line or not line.startswith("data:"):
+227 |                     continue
+228 |                 data_str = line[5:].strip()
+229 |                 if not data_str:
+230 |                     continue
+231 |                 try:
+232 |                     obj = json.loads(data_str)
+233 |                     for cand in obj.get("candidates", []):
+234 |                         for part in cand.get("content", {}).get("parts", []):
+235 |                             text = part.get("text", "")
+236 |                             if text:
+237 |                                 yield text
+238 |                 except (json.JSONDecodeError, IndexError, KeyError):
+239 |                     continue
+240 | 
+241 | 
+242 | # ─── Claude Adapter ──────────────────────────────────────────────────
+243 | 
+244 | async def _call_claude(
+245 |     config: Dict[str, Any],
+246 |     model: str,
+247 |     api_key: str,
+248 |     messages: List[Dict[str, str]],
+249 |     system_prompt: str,
+250 |     temperature: float = 0.7,
+251 |     json_mode: bool = False,
+252 |     json_schema_hint: str = None,
+253 |     timeout: float = 30.0,
+254 | ) -> str:
+255 |     """Non-streaming call to Claude API."""
+256 |     base_url = config["base_url"].rstrip("/")
+257 |     url = f"{base_url}/messages"
+258 | 
+259 |     claude_data = _build_claude_messages(messages, system_prompt)
+260 | 
+261 |     headers = {
+262 |         "Content-Type": "application/json",
+263 |         "x-api-key": api_key,
+264 |         "anthropic-version": "2024-10-22",
+265 |     }
+266 | 
+267 |     payload: Dict[str, Any] = {
+268 |         "model": model,
+269 |         "max_tokens": 8192,
+270 |         "temperature": temperature,
+271 |         **claude_data,
+272 |     }
+273 | 
+274 |     if json_mode:
+275 |         json_instruction = "IMPORTANT: You MUST respond ONLY with a single valid JSON object. No markdown, no explanation, no code fences. Just raw JSON."
+276 |         if json_schema_hint:
+277 |             json_instruction += f"\n\nThe JSON should match this structure:\n{json_schema_hint}"
+278 |         payload["system"] = f"{json_instruction}\n\n{claude_data.get('system', '')}"
+279 | 
+280 |     async with httpx.AsyncClient() as client:
+281 |         resp = await client.post(url, json=payload, headers=headers, timeout=timeout)
+282 |         if resp.status_code != 200:
+283 |             raise Exception(f"Claude error ({resp.status_code}): {resp.text[:500]}")
+284 |         data = resp.json()
+285 |         text_parts = []
+286 |         for block in data.get("content", []):
+287 |             if block.get("type") == "text":
+288 |                 text_parts.append(block["text"])
+289 |         return "\n".join(text_parts)
+290 | 
+291 | 
+292 | async def _stream_claude(
+293 |     config: Dict[str, Any],
+294 |     model: str,
+295 |     api_key: str,
+296 |     messages: List[Dict[str, str]],
+297 |     system_prompt: str,
+298 |     temperature: float = 0.7,
+299 |     timeout: float = 90.0,
+300 | ) -> AsyncGenerator[str, None]:
+301 |     """Streaming call to Claude API. Yields text chunks."""
+302 |     base_url = config["base_url"].rstrip("/")
+303 |     url = f"{base_url}/messages"
+304 | 
+305 |     claude_data = _build_claude_messages(messages, system_prompt)
+306 | 
+307 |     headers = {
+308 |         "Content-Type": "application/json",
+309 |         "x-api-key": api_key,
+310 |         "anthropic-version": "2024-10-22",
+311 |     }
+312 | 
+313 |     payload: Dict[str, Any] = {
+314 |         "model": model,
+315 |         "max_tokens": 8192,
+316 |         "temperature": temperature,
+317 |         "stream": True,
+318 |         **claude_data,
+319 |     }
+320 | 
+321 |     async with httpx.AsyncClient() as client:
+322 |         async with client.stream("POST", url, json=payload, headers=headers, timeout=timeout) as resp:
+323 |             if resp.status_code != 200:
+324 |                 err_body = await resp.aread()
+325 |                 raise Exception(f"Claude stream error ({resp.status_code}): {err_body.decode()[:500]}")
+326 |             async for line in resp.aiter_lines():
+327 |                 line = line.strip()
+328 |                 if not line or not line.startswith("data:"):
+329 |                     continue
+330 |                 data_str = line[5:].strip()
+331 |                 if not data_str:
+332 |                     continue
+333 |                 try:
+334 |                     obj = json.loads(data_str)
+335 |                     event_type = obj.get("type", "")
+336 |                     if event_type == "content_block_delta":
+337 |                         delta = obj.get("delta", {})
+338 |                         if delta.get("type") == "text_delta":
+339 |                             text = delta.get("text", "")
+340 |                             if text:
+341 |                                 yield text
+342 |                 except (json.JSONDecodeError, KeyError):
+343 |                     continue
+344 | 
+345 | 
+346 | # ─── Cohere Adapter ──────────────────────────────────────────────────
+347 | 
+348 |
+```
+
+### File: `Backend/providers/gemini.py`
+
+> 262 lines | 9.7 KB
+
+```python
+  1 | from typing import List, Dict, Any, AsyncGenerator
+  2 | 
+  3 | def _build_gemini_contents(
+  4 |     messages: List[Dict[str, str]],
+  5 |     system_prompt: str,
+  6 | ) -> Dict[str, Any]:
+  7 |     """Convert internal message format to Gemini contents format."""
+  8 |     contents = []
+  9 |     for msg in messages:
+ 10 |         role = "model" if msg.get("role") in ["model", "assistant"] else "user"
+ 11 |         contents.append({
+ 12 |             "role": role,
+ 13 |             "parts": [{"text": msg.get("content", "")}],
+ 14 |         })
+ 15 |     return {
+ 16 |         "contents": contents,
+ 17 |         "systemInstruction": {"parts": [{"text": system_prompt}]} if system_prompt else None,
+ 18 |     }
+ 19 | 
+ 20 | 
+ 21 | def _build_claude_messages(
+ 22 |     messages: List[Dict[str, str]],
+ 23 |     system_prompt: str,
+ 24 | ) -> Dict[str, Any]:
+ 25 |     """Convert internal message format to Claude format."""
+ 26 |     claude_msgs = []
+ 27 |     for msg in messages:
+ 28 |         role = "assistant" if msg.get("role") in ["model", "assistant"] else "user"
+ 29 |         claude_msgs.append({
+ 30 |             "role": role,
+ 31 |             "content": msg.get("content", ""),
+ 32 |         })
+ 33 |     return {
+ 34 |         "system": system_prompt,
+ 35 |         "messages": claude_msgs,
+ 36 |     }
+ 37 | 
+ 38 | 
+ 39 | # ─── OpenAI-Compatible Adapter ───────────────────────────────────────
+ 40 | 
+ 41 | async def _call_openai_compatible(
+ 42 |     config: Dict[str, Any],
+ 43 |     model: str,
+ 44 |     api_key: str,
+ 45 |     messages: List[Dict[str, str]],
+ 46 |     system_prompt: str,
+ 47 |     temperature: float = 0.7,
+ 48 |     json_mode: bool = False,
+ 49 |     json_schema_hint: str = None,
+ 50 |     timeout: float = 30.0,
+ 51 | ) -> str:
+ 52 |     """Non-streaming call to any OpenAI-compatible endpoint."""
+ 53 |     base_url = config["base_url"].rstrip("/")
+ 54 |     chat_path = config.get("chat_path", "/chat/completions")
+ 55 |     
+ 56 |     requires_deployment = config.get("requires_deployment", False)
+ 57 |     if requires_deployment:
+ 58 |         api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+ 59 |         url = f"{base_url}/{model}/chat/completions?api-version={api_version}"
+ 60 |         headers = {
+ 61 |             "Content-Type": "application/json",
+ 62 |             "api-key": api_key,
+ 63 |         }
+ 64 |     else:
+ 65 |         url = f"{base_url}{chat_path}"
+ 66 |         headers = {
+ 67 |             "Content-Type": "application/json",
+ 68 |             "Authorization": f"Bearer {api_key}" if api_key else "",
+ 69 |         }
+ 70 |         if not api_key:
+ 71 |             headers.pop("Authorization", None)
+ 72 | 
+ 73 |     if "openrouter" in base_url:
+ 74 |         headers["HTTP-Referer"] = "https://solospace.app"
+ 75 |         headers["X-Title"] = "Solospace"
+ 76 | 
+ 77 |     oa_msgs = _build_openai_messages(messages, system_prompt, model)
+ 78 | 
+ 79 |     payload: Dict[str, Any] = {
+ 80 |         "model": model,
+ 81 |         "messages": oa_msgs,
+ 82 |         "temperature": temperature,
+ 83 |         "max_tokens": 8192,
+ 84 |     }
+ 85 | 
+ 86 |     if any(m in model.lower() for m in ["o1", "o3", "o4", "deepseek-reasoner"]):
+ 87 |         payload.pop("temperature", None)
+ 88 | 
+ 89 |     if json_mode:
+ 90 |         payload["response_format"] = {"type": "json_object"}
+ 91 |         if json_schema_hint:
+ 92 |             last_msg = oa_msgs[-1] if oa_msgs else {}
+ 93 |             if last_msg.get("role") == "user":
+ 94 |                 last_msg["content"] = f"{last_msg.get('content', '')}\n\nIMPORTANT: Respond ONLY with valid JSON matching this structure:\n{json_schema_hint}"
+ 95 | 
+ 96 |     async with httpx.AsyncClient() as client:
+ 97 |         resp = await client.post(url, json=payload, headers=headers, timeout=timeout)
+ 98 |         if resp.status_code != 200:
+ 99 |             raise Exception(f"Provider error ({resp.status_code}): {resp.text[:500]}")
+100 |         data = resp.json()
+101 |         return data["choices"][0]["message"]["content"]
+102 | 
+103 | 
+104 | async def _stream_openai_compatible(
+105 |     config: Dict[str, Any],
+106 |     model: str,
+107 |     api_key: str,
+108 |     messages: List[Dict[str, str]],
+109 |     system_prompt: str,
+110 |     temperature: float = 0.7,
+111 |     timeout: float = 90.0,
+112 | ) -> AsyncGenerator[str, None]:
+113 |     """Streaming call to any OpenAI-compatible endpoint. Yields text chunks."""
+114 |     base_url = config["base_url"].rstrip("/")
+115 |     chat_path = config.get("chat_path", "/chat/completions")
+116 |     
+117 |     requires_deployment = config.get("requires_deployment", False)
+118 |     if requires_deployment:
+119 |         api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+120 |         url = f"{base_url}/{model}/chat/completions?api-version={api_version}"
+121 |         headers = {
+122 |             "Content-Type": "application/json",
+123 |             "api-key": api_key,
+124 |         }
+125 |     else:
+126 |         url = f"{base_url}{chat_path}"
+127 |         headers = {
+128 |             "Content-Type": "application/json",
+129 |             "Authorization": f"Bearer {api_key}" if api_key else "",
+130 |         }
+131 |         if not api_key:
+132 |             headers.pop("Authorization", None)
+133 | 
+134 |     if "openrouter" in base_url:
+135 |         headers["HTTP-Referer"] = "https://solospace.app"
+136 |         headers["X-Title"] = "Solospace"
+137 | 
+138 |     oa_msgs = _build_openai_messages(messages, system_prompt, model)
+139 | 
+140 |     payload: Dict[str, Any] = {
+141 |         "model": model,
+142 |         "messages": oa_msgs,
+143 |         "temperature": temperature,
+144 |         "max_tokens": 8192,
+145 |         "stream": True,
+146 |     }
+147 |     if any(m in model.lower() for m in ["o1", "o3", "o4", "deepseek-reasoner"]):
+148 |         payload.pop("temperature", None)
+149 | 
+150 |     async with httpx.AsyncClient() as client:
+151 |         async with client.stream("POST", url, json=payload, headers=headers, timeout=timeout) as resp:
+152 |             if resp.status_code != 200:
+153 |                 err_body = await resp.aread()
+154 |                 raise Exception(f"Provider stream error ({resp.status_code}): {err_body.decode()[:500]}")
+155 |             async for line in resp.aiter_lines():
+156 |                 line = line.strip()
+157 |                 if not line or not line.startswith("data:"):
+158 |                     continue
+159 |                 data_str = line[5:].strip()
+160 |                 if data_str == "[DONE]":
+161 |                     break
+162 |                 try:
+163 |                     obj = json.loads(data_str)
+164 |                     delta = obj.get("choices", [{}])[0].get("delta", {})
+165 |                     content = delta.get("content", "")
+166 |                     if content:
+167 |                         yield content
+168 |                 except (json.JSONDecodeError, IndexError, KeyError):
+169 |                     continue
+170 | 
+171 | 
+172 | # ─── Gemini Adapter ──────────────────────────────────────────────────
+173 | 
+174 | GEMINI_SAFETY = [
+175 |     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+176 |     {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+177 |     {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+178 |     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+179 | ]
+180 | 
+181 | 
+182 | async def _call_gemini(
+183 |     config: Dict[str, Any],
+184 |     model: str,
+185 |     api_key: str,
+186 |     messages: List[Dict[str, str]],
+187 |     system_prompt: str,
+188 |     temperature: float = 0.7,
+189 |     json_schema: Dict[str, Any] = None,
+190 |     timeout: float = 30.0,
+191 | ) -> str:
+192 |     """Non-streaming call to Gemini API."""
+193 |     base_url = config["base_url"].rstrip("/")
+194 |     url = f"{base_url}/models/{model}:generateContent?key={api_key}"
+195 | 
+196 |     gemini_data = _build_gemini_contents(messages, system_prompt)
+197 | 
+198 |     payload: Dict[str, Any] = {
+199 |         **gemini_data,
+200 |         "generationConfig": {"temperature": temperature},
+201 |         "safetySettings": GEMINI_SAFETY,
+202 |     }
+203 | 
+204 |     if json_schema:
+205 |         payload["generationConfig"]["responseMimeType"] = "application/json"
+206 |         payload["generationConfig"]["responseSchema"] = json_schema
+207 | 
+208 |     async with httpx.AsyncClient() as client:
+209 |         resp = await client.post(url, json=payload, timeout=timeout)
+210 |         if resp.status_code != 200:
+211 |             raise Exception(f"Gemini error ({resp.status_code}): {resp.text[:500]}")
+212 |         data = resp.json()
+213 |         return data["candidates"][0]["content"]["parts"][-1]["text"]
+214 | 
+215 | 
+216 | async def _stream_gemini(
+217 |     config: Dict[str, Any],
+218 |     model: str,
+219 |     api_key: str,
+220 |     messages: List[Dict[str, str]],
+221 |     system_prompt: str,
+222 |     temperature: float = 0.7,
+223 |     timeout: float = 90.0,
+224 | ) -> AsyncGenerator[str, None]:
+225 |     """Streaming call to Gemini API. Yields text chunks."""
+226 |     base_url = config["base_url"].rstrip("/")
+227 |     url = f"{base_url}/models/{model}:streamGenerateContent?alt=sse&key={api_key}"
+228 | 
+229 |     gemini_data = _build_gemini_contents(messages, system_prompt)
+230 | 
+231 |     payload: Dict[str, Any] = {
+232 |         **gemini_data,
+233 |         "generationConfig": {"temperature": temperature},
+234 |         "safetySettings": GEMINI_SAFETY,
+235 |     }
+236 | 
+237 |     async with httpx.AsyncClient() as client:
+238 |         async with client.stream("POST", url, json=payload, timeout=timeout) as resp:
+239 |             if resp.status_code != 200:
+240 |                 err_body = await resp.aread()
+241 |                 raise Exception(f"Gemini stream error ({resp.status_code}): {err_body.decode()[:500]}")
+242 |             async for line in resp.aiter_lines():
+243 |                 line = line.strip()
+244 |                 if not line or not line.startswith("data:"):
+245 |                     continue
+246 |                 data_str = line[5:].strip()
+247 |                 if not data_str:
+248 |                     continue
+249 |                 try:
+250 |                     obj = json.loads(data_str)
+251 |                     for cand in obj.get("candidates", []):
+252 |                         for part in cand.get("content", {}).get("parts", []):
+253 |                             text = part.get("text", "")
+254 |                             if text:
+255 |                                 yield text
+256 |                 except (json.JSONDecodeError, IndexError, KeyError):
+257 |                     continue
+258 | 
+259 | 
+260 | # ─── Claude Adapter ──────────────────────────────────────────────────
+261 | 
+262 |
+```
+
+### File: `Backend/providers/openai_compat.py`
+
+> 203 lines | 7.3 KB
+
+```python
+  1 | from typing import List, Dict, Any, AsyncGenerator
+  2 | 
+  3 | def _build_openai_messages(
+  4 |     messages: List[Dict[str, str]],
+  5 |     system_prompt: str,
+  6 |     model: str,
+  7 | ) -> List[Dict[str, str]]:
+  8 |     """Convert internal message format to OpenAI-compatible messages."""
+  9 |     result = []
+ 10 |     is_reasoning = any(m in model.lower() for m in ["o1", "o3", "o4"])
+ 11 |     if system_prompt:
+ 12 |         result.append({
+ 13 |             "role": "developer" if is_reasoning else "system",
+ 14 |             "content": system_prompt,
+ 15 |         })
+ 16 |     for msg in messages:
+ 17 |         result.append({
+ 18 |             "role": msg.get("role", "user"),
+ 19 |             "content": msg.get("content", ""),
+ 20 |         })
+ 21 |     return result
+ 22 | 
+ 23 | 
+ 24 | def _build_gemini_contents(
+ 25 |     messages: List[Dict[str, str]],
+ 26 |     system_prompt: str,
+ 27 | ) -> Dict[str, Any]:
+ 28 |     """Convert internal message format to Gemini contents format."""
+ 29 |     contents = []
+ 30 |     for msg in messages:
+ 31 |         role = "model" if msg.get("role") in ["model", "assistant"] else "user"
+ 32 |         contents.append({
+ 33 |             "role": role,
+ 34 |             "parts": [{"text": msg.get("content", "")}],
+ 35 |         })
+ 36 |     return {
+ 37 |         "contents": contents,
+ 38 |         "systemInstruction": {"parts": [{"text": system_prompt}]} if system_prompt else None,
+ 39 |     }
+ 40 | 
+ 41 | 
+ 42 | def _build_claude_messages(
+ 43 |     messages: List[Dict[str, str]],
+ 44 |     system_prompt: str,
+ 45 | ) -> Dict[str, Any]:
+ 46 |     """Convert internal message format to Claude format."""
+ 47 |     claude_msgs = []
+ 48 |     for msg in messages:
+ 49 |         role = "assistant" if msg.get("role") in ["model", "assistant"] else "user"
+ 50 |         claude_msgs.append({
+ 51 |             "role": role,
+ 52 |             "content": msg.get("content", ""),
+ 53 |         })
+ 54 |     return {
+ 55 |         "system": system_prompt,
+ 56 |         "messages": claude_msgs,
+ 57 |     }
+ 58 | 
+ 59 | 
+ 60 | # ─── OpenAI-Compatible Adapter ───────────────────────────────────────
+ 61 | 
+ 62 | async def _call_openai_compatible(
+ 63 |     config: Dict[str, Any],
+ 64 |     model: str,
+ 65 |     api_key: str,
+ 66 |     messages: List[Dict[str, str]],
+ 67 |     system_prompt: str,
+ 68 |     temperature: float = 0.7,
+ 69 |     json_mode: bool = False,
+ 70 |     json_schema_hint: str = None,
+ 71 |     timeout: float = 30.0,
+ 72 | ) -> str:
+ 73 |     """Non-streaming call to any OpenAI-compatible endpoint."""
+ 74 |     base_url = config["base_url"].rstrip("/")
+ 75 |     chat_path = config.get("chat_path", "/chat/completions")
+ 76 |     
+ 77 |     requires_deployment = config.get("requires_deployment", False)
+ 78 |     if requires_deployment:
+ 79 |         api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+ 80 |         url = f"{base_url}/{model}/chat/completions?api-version={api_version}"
+ 81 |         headers = {
+ 82 |             "Content-Type": "application/json",
+ 83 |             "api-key": api_key,
+ 84 |         }
+ 85 |     else:
+ 86 |         url = f"{base_url}{chat_path}"
+ 87 |         headers = {
+ 88 |             "Content-Type": "application/json",
+ 89 |             "Authorization": f"Bearer {api_key}" if api_key else "",
+ 90 |         }
+ 91 |         if not api_key:
+ 92 |             headers.pop("Authorization", None)
+ 93 | 
+ 94 |     if "openrouter" in base_url:
+ 95 |         headers["HTTP-Referer"] = "https://solospace.app"
+ 96 |         headers["X-Title"] = "Solospace"
+ 97 | 
+ 98 |     oa_msgs = _build_openai_messages(messages, system_prompt, model)
+ 99 | 
+100 |     payload: Dict[str, Any] = {
+101 |         "model": model,
+102 |         "messages": oa_msgs,
+103 |         "temperature": temperature,
+104 |         "max_tokens": 8192,
+105 |     }
+106 | 
+107 |     if any(m in model.lower() for m in ["o1", "o3", "o4", "deepseek-reasoner"]):
+108 |         payload.pop("temperature", None)
+109 | 
+110 |     if json_mode:
+111 |         payload["response_format"] = {"type": "json_object"}
+112 |         if json_schema_hint:
+113 |             last_msg = oa_msgs[-1] if oa_msgs else {}
+114 |             if last_msg.get("role") == "user":
+115 |                 last_msg["content"] = f"{last_msg.get('content', '')}\n\nIMPORTANT: Respond ONLY with valid JSON matching this structure:\n{json_schema_hint}"
+116 | 
+117 |     async with httpx.AsyncClient() as client:
+118 |         resp = await client.post(url, json=payload, headers=headers, timeout=timeout)
+119 |         if resp.status_code != 200:
+120 |             raise Exception(f"Provider error ({resp.status_code}): {resp.text[:500]}")
+121 |         data = resp.json()
+122 |         return data["choices"][0]["message"]["content"]
+123 | 
+124 | 
+125 | async def _stream_openai_compatible(
+126 |     config: Dict[str, Any],
+127 |     model: str,
+128 |     api_key: str,
+129 |     messages: List[Dict[str, str]],
+130 |     system_prompt: str,
+131 |     temperature: float = 0.7,
+132 |     timeout: float = 90.0,
+133 | ) -> AsyncGenerator[str, None]:
+134 |     """Streaming call to any OpenAI-compatible endpoint. Yields text chunks."""
+135 |     base_url = config["base_url"].rstrip("/")
+136 |     chat_path = config.get("chat_path", "/chat/completions")
+137 |     
+138 |     requires_deployment = config.get("requires_deployment", False)
+139 |     if requires_deployment:
+140 |         api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+141 |         url = f"{base_url}/{model}/chat/completions?api-version={api_version}"
+142 |         headers = {
+143 |             "Content-Type": "application/json",
+144 |             "api-key": api_key,
+145 |         }
+146 |     else:
+147 |         url = f"{base_url}{chat_path}"
+148 |         headers = {
+149 |             "Content-Type": "application/json",
+150 |             "Authorization": f"Bearer {api_key}" if api_key else "",
+151 |         }
+152 |         if not api_key:
+153 |             headers.pop("Authorization", None)
+154 | 
+155 |     if "openrouter" in base_url:
+156 |         headers["HTTP-Referer"] = "https://solospace.app"
+157 |         headers["X-Title"] = "Solospace"
+158 | 
+159 |     oa_msgs = _build_openai_messages(messages, system_prompt, model)
+160 | 
+161 |     payload: Dict[str, Any] = {
+162 |         "model": model,
+163 |         "messages": oa_msgs,
+164 |         "temperature": temperature,
+165 |         "max_tokens": 8192,
+166 |         "stream": True,
+167 |     }
+168 |     if any(m in model.lower() for m in ["o1", "o3", "o4", "deepseek-reasoner"]):
+169 |         payload.pop("temperature", None)
+170 | 
+171 |     async with httpx.AsyncClient() as client:
+172 |         async with client.stream("POST", url, json=payload, headers=headers, timeout=timeout) as resp:
+173 |             if resp.status_code != 200:
+174 |                 err_body = await resp.aread()
+175 |                 raise Exception(f"Provider stream error ({resp.status_code}): {err_body.decode()[:500]}")
+176 |             async for line in resp.aiter_lines():
+177 |                 line = line.strip()
+178 |                 if not line or not line.startswith("data:"):
+179 |                     continue
+180 |                 data_str = line[5:].strip()
+181 |                 if data_str == "[DONE]":
+182 |                     break
+183 |                 try:
+184 |                     obj = json.loads(data_str)
+185 |                     delta = obj.get("choices", [{}])[0].get("delta", {})
+186 |                     content = delta.get("content", "")
+187 |                     if content:
+188 |                         yield content
+189 |                 except (json.JSONDecodeError, IndexError, KeyError):
+190 |                     continue
+191 | 
+192 | 
+193 | # ─── Gemini Adapter ──────────────────────────────────────────────────
+194 | 
+195 | GEMINI_SAFETY = [
+196 |     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+197 |     {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+198 |     {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+199 |     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+200 | ]
+201 | 
+202 | 
+203 |
+```
+
+### File: `Backend/providers/registry.py`
+
+> 357 lines | 15.4 KB
+
+```python
+  1 | from typing import Optional, List, Dict, Any, AsyncGenerator
+  2 | 
+  3 | async def call_provider(
+  4 |     provider: str,
+  5 |     model: Optional[str],
+  6 |     api_key: str,
+  7 |     messages: List[Dict[str, str]],
+  8 |     system_prompt: str = "",
+  9 |     temperature: float = 0.7,
+ 10 |     json_schema: Dict[str, Any] = None,
+ 11 |     json_schema_hint: str = None,
+ 12 |     timeout: float = 30.0,
+ 13 |     fallback_provider: Optional[str] = None,
+ 14 |     api_keys: Optional[Dict[str, str]] = None,
+ 15 |     base_url: Optional[str] = None,
+ 16 | ) -> str:
+ 17 |     """Unified non-streaming call to any provider with retry and fallback routing."""
+ 18 |     config = get_provider_config(provider)
+ 19 |     if not config:
+ 20 |         raise Exception(f"Unknown provider: {provider}")
+ 21 | 
+ 22 |     resolved_model = model or config.get("default_model", "")
+ 23 |     resolved_base_url = base_url or config.get("base_url", "")
+ 24 |     
+ 25 |     cloned_config = dict(config)
+ 26 |     if resolved_base_url:
+ 27 |         cloned_config["base_url"] = resolved_base_url
+ 28 | 
+ 29 |     resolved_key = resolve_api_key(provider, api_key, api_keys)
+ 30 |     if not resolved_key and not cloned_config.get("is_local", False):
+ 31 |         raise Exception(f"API key missing for provider {provider}")
+ 32 | 
+ 33 |     adapter = cloned_config.get("adapter", "openai")
+ 34 |     wants_json = json_schema is not None or json_schema_hint is not None
+ 35 | 
+ 36 |     async def _call():
+ 37 |         if adapter == "gemini":
+ 38 |             return await _call_gemini(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+ 39 |                                        temperature=temperature, json_schema=json_schema, timeout=timeout)
+ 40 |         elif adapter == "claude":
+ 41 |             return await _call_claude(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+ 42 |                                        temperature=temperature, json_mode=wants_json,
+ 43 |                                        json_schema_hint=json_schema_hint, timeout=timeout)
+ 44 |         elif adapter == "cohere":
+ 45 |             return await _call_cohere(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+ 46 |                                        temperature=temperature, json_mode=wants_json,
+ 47 |                                        json_schema_hint=json_schema_hint, timeout=timeout)
+ 48 |         elif adapter == "bedrock":
+ 49 |             return await _call_bedrock(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+ 50 |                                        temperature=temperature, json_mode=wants_json,
+ 51 |                                        json_schema_hint=json_schema_hint, timeout=timeout)
+ 52 |         else:  # openai-compatible
+ 53 |             return await _call_openai_compatible(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+ 54 |                                                  temperature=temperature, json_mode=wants_json,
+ 55 |                                                  json_schema_hint=json_schema_hint, timeout=timeout)
+ 56 | 
+ 57 |     try:
+ 58 |         return await call_with_retry(_call)
+ 59 |     except Exception as e:
+ 60 |         if fallback_provider and fallback_provider.lower() != provider.lower():
+ 61 |             print(f"[FALLBACK] Primary provider {provider} failed: {e}. Routing to fallback {fallback_provider}...")
+ 62 |             fallback_config = get_provider_config(fallback_provider)
+ 63 |             fallback_model = fallback_config.get("default_model", "")
+ 64 |             fallback_key = resolve_api_key(fallback_provider, None, api_keys)
+ 65 |             
+ 66 |             # Extract optional custom base URL for fallback from frontend dictionary if configured
+ 67 |             fallback_base_url = None
+ 68 |             
+ 69 |             return await call_provider(
+ 70 |                 provider=fallback_provider,
+ 71 |                 model=fallback_model,
+ 72 |                 api_key=fallback_key,
+ 73 |                 messages=messages,
+ 74 |                 system_prompt=system_prompt,
+ 75 |                 temperature=temperature,
+ 76 |                 json_schema=json_schema,
+ 77 |                 json_schema_hint=json_schema_hint,
+ 78 |                 timeout=timeout,
+ 79 |                 fallback_provider=None,
+ 80 |                 api_keys=api_keys,
+ 81 |                 base_url=fallback_base_url
+ 82 |             )
+ 83 |         else:
+ 84 |             raise
+ 85 | 
+ 86 | 
+ 87 | async def stream_provider(
+ 88 |     provider: str,
+ 89 |     model: Optional[str],
+ 90 |     api_key: str,
+ 91 |     messages: List[Dict[str, str]],
+ 92 |     system_prompt: str = "",
+ 93 |     temperature: float = 0.7,
+ 94 |     timeout: float = 90.0,
+ 95 |     fallback_provider: Optional[str] = None,
+ 96 |     api_keys: Optional[Dict[str, str]] = None,
+ 97 |     base_url: Optional[str] = None,
+ 98 | ) -> AsyncGenerator[str, None]:
+ 99 |     """Unified streaming call to any provider with retry and fallback routing."""
+100 |     config = get_provider_config(provider)
+101 |     if not config:
+102 |         raise Exception(f"Unknown provider: {provider}")
+103 | 
+104 |     resolved_model = model or config.get("default_model", "")
+105 |     resolved_base_url = base_url or config.get("base_url", "")
+106 |     
+107 |     cloned_config = dict(config)
+108 |     if resolved_base_url:
+109 |         cloned_config["base_url"] = resolved_base_url
+110 | 
+111 |     resolved_key = resolve_api_key(provider, api_key, api_keys)
+112 |     if not resolved_key and not cloned_config.get("is_local", False):
+113 |         raise Exception(f"API key missing for provider {provider}")
+114 | 
+115 |     adapter = cloned_config.get("adapter", "openai")
+116 | 
+117 |     async def _stream():
+118 |         if adapter == "gemini":
+119 |             async for chunk in _stream_gemini(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+120 |                                                temperature=temperature, timeout=timeout):
+121 |                 yield chunk
+122 |         elif adapter == "claude":
+123 |             async for chunk in _stream_claude(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+124 |                                                temperature=temperature, timeout=timeout):
+125 |                 yield chunk
+126 |         elif adapter == "cohere":
+127 |             async for chunk in _stream_cohere(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+128 |                                                temperature=temperature, timeout=timeout):
+129 |                 yield chunk
+130 |         elif adapter == "bedrock":
+131 |             async for chunk in _stream_bedrock(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+132 |                                                temperature=temperature, timeout=timeout):
+133 |                 yield chunk
+134 |         else:  # openai-compatible
+135 |             async for chunk in _stream_openai_compatible(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+136 |                                                          temperature=temperature, timeout=timeout):
+137 |                 yield chunk
+138 | 
+139 |     retries = 0
+140 |     while retries <= MAX_RETRIES:
+141 |         try:
+142 |             async for chunk in _stream():
+143 |                 yield chunk
+144 |             return
+145 |         except Exception as e:
+146 |             retries += 1
+147 |             if retries > MAX_RETRIES:
+148 |                 if fallback_provider and fallback_provider.lower() != provider.lower():
+149 |                     print(f"[FALLBACK STREAM] Primary {provider} failed: {e}. Switching to fallback {fallback_provider}...")
+150 |                     fallback_config = get_provider_config(fallback_provider)
+151 |                     fallback_model = fallback_config.get("default_model", "")
+152 |                     fallback_key = resolve_api_key(fallback_provider, None, api_keys)
+153 |                     
+154 |                     async for chunk in stream_provider(
+155 |                         provider=fallback_provider,
+156 |                         model=fallback_model,
+157 |                         api_key=fallback_key,
+158 |                         messages=messages,
+159 |                         system_prompt=system_prompt,
+160 |                         temperature=temperature,
+161 |                         timeout=timeout,
+162 |                         fallback_provider=None,
+163 |                         api_keys=api_keys,
+164 |                         base_url=None
+165 |                     ):
+166 |                         yield chunk
+167 |                     return
+168 |                 else:
+169 |                     raise
+170 |             delay = min(MAX_DELAY, BASE_DELAY * (2 ** retries))
+171 |             delay += random.uniform(-JITTER_FACTOR * delay, JITTER_FACTOR * delay)
+172 |             await asyncio.sleep(delay)
+173 | 
+174 | 
+175 | async def call_provider_json(
+176 |     provider: str,
+177 |     model: Optional[str],
+178 |     api_key: str,
+179 |     messages: List[Dict[str, str]],
+180 |     system_prompt: str = "",
+181 |     temperature: float = 0.2,
+182 |     json_schema: Dict[str, Any] = None,
+183 |     timeout: float = 30.0,
+184 |     fallback_provider: Optional[str] = None,
+185 |     api_keys: Optional[Dict[str, str]] = None,
+186 |     base_url: Optional[str] = None,
+187 | ) -> Dict[str, Any]:
+188 |     """Unified JSON completions call with fallback validation."""
+189 |     schema_hint = None
+190 |     if json_schema:
+191 |         schema_hint = json.dumps(json_schema, indent=2)
+192 | 
+193 |     response_text = await call_provider(
+194 |         provider=provider,
+195 |         model=model,
+196 |         api_key=api_key,
+197 |         messages=messages,
+198 |         system_prompt=system_prompt,
+199 |         temperature=temperature,
+200 |         json_schema=json_schema,
+201 |         json_schema_hint=schema_hint,
+202 |         timeout=timeout,
+203 |         fallback_provider=fallback_provider,
+204 |         api_keys=api_keys,
+205 |         base_url=base_url
+206 |     )
+207 |     
+208 |     parsed = extract_json_from_text(response_text)
+209 |     if parsed is None:
+210 |         raise ValueError(f"Failed to extract JSON from response: {response_text[:1000]}")
+211 |     return parsed
+212 | 
+213 | 
+214 | # ─── Embedding Abstraction ───────────────────────────────────────────
+215 | 
+216 | async def get_embedding(provider: str, api_key: str, text: str, api_keys: Optional[Dict[str, str]] = None) -> List[float]:
+217 |     """Unified embedding generator."""
+218 |     resolved_key = resolve_api_key(provider, api_key, api_keys)
+219 |     if not resolved_key:
+220 |         return []
+221 | 
+222 |     if provider.lower() == "gemini":
+223 |         url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={resolved_key}"
+224 |         payload = {
+225 |             "model": "models/text-embedding-004",
+226 |             "content": {"parts": [{"text": text}]}
+227 |         }
+228 |         async with httpx.AsyncClient() as client:
+229 |             try:
+230 |                 r = await client.post(url, json=payload, timeout=15.0)
+231 |                 if r.status_code == 200:
+232 |                     return r.json().get("embedding", {}).get("values", [])
+233 |             except Exception as e:
+234 |                 print(f"[EMBEDDING ERROR] Gemini embedding failed: {e}")
+235 |     elif provider.lower() == "openai":
+236 |         url = "https://api.openai.com/v1/embeddings"
+237 |         headers = {
+238 |             "Content-Type": "application/json",
+239 |             "Authorization": f"Bearer {resolved_key}"
+240 |         }
+241 |         payload = {
+242 |             "model": "text-embedding-3-small",
+243 |             "input": text
+244 |         }
+245 |         async with httpx.AsyncClient() as client:
+246 |             try:
+247 |                 r = await client.post(url, json=payload, headers=headers, timeout=15.0)
+248 |                 if r.status_code == 200:
+249 |                     return r.json().get("data", [{}])[0].get("embedding", [])
+250 |             except Exception as e:
+251 |                 print(f"[EMBEDDING ERROR] OpenAI embedding failed: {e}")
+252 |     return []
+253 | 
+254 | 
+255 | # ─── Dynamic Model Fetching ─────────────────────────────────────────
+256 | 
+257 | async def fetch_models_from_provider(
+258 |     provider: str,
+259 |     api_key: str,
+260 |     api_keys: Optional[Dict[str, str]] = None,
+261 |     base_url: Optional[str] = None,
+262 | ) -> List[Dict[str, Any]]:
+263 |     """Fetch available models from the provider's API dynamically."""
+264 |     config = get_provider_config(provider)
+265 |     if not config:
+266 |         return []
+267 |     
+268 |     resolved_key = resolve_api_key(provider, api_key, api_keys)
+269 |     if not resolved_key and not config.get("is_local", False):
+270 |         return []
+271 | 
+272 |     resolved_base_url = base_url or config.get("base_url", "")
+273 |     adapter = config.get("adapter", "openai")
+274 |     base_url_str = resolved_base_url.rstrip("/")
+275 |     
+276 |     if adapter == "gemini":
+277 |         url = f"https://generativelanguage.googleapis.com/v1beta/models?key={resolved_key}"
+278 |         try:
+279 |             async with httpx.AsyncClient(timeout=10.0) as client:
+280 |                 resp = await client.get(url)
+281 |                 if resp.status_code == 200:
+282 |                     data = resp.json()
+283 |                     models = []
+284 |                     for item in data.get("models", []):
+285 |                         supported = item.get("supportedGenerationMethods", [])
+286 |                         if "generateContent" in supported:
+287 |                             model_id = item.get("name", "").replace("models/", "")
+288 |                             if model_id:
+289 |                                 models.append({
+290 |                                     "id": model_id,
+291 |                                     "name": item.get("displayName", model_id),
+292 |                                     "tier": "fast" if "flash" in model_id else "advanced"
+293 |                                 })
+294 |                     if models:
+295 |                         return models
+296 |         except Exception as e:
+297 |             print(f"[FETCH MODELS ERROR] Gemini: {e}")
+298 | 
+299 |     elif adapter == "claude":
+300 |         url = "https://api.anthropic.com/v1/models"
+301 |         headers = {
+302 |             "x-api-key": resolved_key,
+303 |             "anthropic-version": "2024-10-22",
+304 |         }
+305 |         try:
+306 |             async with httpx.AsyncClient(timeout=10.0) as client:
+307 |                 resp = await client.get(url, headers=headers)
+308 |                 if resp.status_code == 200:
+309 |                     data = resp.json()
+310 |                     models = []
+311 |                     for item in data.get("data", []):
+312 |                         model_id = item.get("id", "")
+313 |                         if model_id:
+314 |                             tier = "reasoning" if "opus" in model_id else \
+315 |                                    "fast" if "haiku" in model_id else "advanced"
+316 |                             models.append({
+317 |                                 "id": model_id,
+318 |                                 "name": item.get("display_name", model_id),
+319 |                                 "tier": tier
+320 |                             })
+321 |                     if models:
+322 |                         return models
+323 |         except Exception as e:
+324 |             print(f"[FETCH MODELS ERROR] Claude: {e}")
+325 | 
+326 |     elif adapter in ("openai", "openai-compatible"):
+327 |         if not base_url_str:
+328 |             return config.get("models", [])
+329 |         url = f"{base_url_str}/models"
+330 |         headers = {}
+331 |         if resolved_key:
+332 |             if config.get("requires_deployment"):
+333 |                 headers["api-key"] = resolved_key
+334 |             else:
+335 |                 headers["Authorization"] = f"Bearer {resolved_key}"
+336 | 
+337 |         try:
+338 |             async with httpx.AsyncClient(timeout=10.0) as client:
+339 |                 resp = await client.get(url, headers=headers)
+340 |                 if resp.status_code == 200:
+341 |                     data = resp.json()
+342 |                     models = []
+343 |                     for item in data.get("data", []):
+344 |                         model_id = item.get("id")
+345 |                         if model_id:
+346 |                             models.append({
+347 |                                 "id": model_id,
+348 |                                 "name": model_id,
+349 |                                 "tier": "custom"
+350 |                             })
+351 |                     if models:
+352 |                         return models
+353 |         except Exception as e:
+354 |             print(f"[FETCH MODELS ERROR] Failed to fetch models for {provider}: {e}")
+355 |             
+356 |     return config.get("models", [])
+357 |
 ```
 
 ### File: `Backend/security/__init__.py`
@@ -2589,7 +4304,7 @@ SoloSpace/
 
 ### File: `Backend/main.py`
 
-> 487 lines | 17.5 KB
+> 489 lines | 18.1 KB
 
 ```python
   1 | """
@@ -2985,100 +4700,102 @@ SoloSpace/
 391 | @app.get("/sessions")
 392 | async def get_sessions():
 393 |     sessions = await load_sessions()
-394 |     result = {}
+394 |     result = []
 395 |     for s in sessions:
-396 |         result[s["session_id"]] = {
-397 |             "id": s["session_id"],
+396 |         result.append({
+397 |             "session_id": s["session_id"],
 398 |             "title": s["title"],
 399 |             "prompt": s["prompt"],
 400 |             "mode": s.get("mode", "auto"),
-401 |         }
-402 |     return result
-403 | 
-404 | 
-405 | @app.get("/sessions/{session_id}")
-406 | async def get_session(session_id: str):
-407 |     session = await load_session(session_id)
-408 |     if not session:
-409 |         raise HTTPException(status_code=404, detail="Session not found")
-410 |     return {
-411 |         "id": session["session_id"],
-412 |         "title": session["title"],
-413 |         "prompt": session["prompt"],
-414 |         "mode": session.get("mode", "auto"),
-415 |         "nodes": session.get("nodes", []),
-416 |         "edges": session.get("edges", []),
-417 |         "chatMessages": session.get("chat_messages", []),
-418 |         "agentTalkLogs": session.get("agent_talk_logs", []),
-419 |         "executionState": session.get("execution_state", "setup"),
-420 |         "statusMessage": session.get("status_message", ""),
-421 |         "followUpSuggestions": session.get("follow_up_suggestions", []),
-422 |     }
-423 | 
-424 | 
-425 | @app.delete("/sessions/{session_id}")
-426 | async def delete_session_route(session_id: str):
-427 |     await delete_session(session_id)
-428 |     return {"status": "deleted"}
-429 | 
-430 | 
-431 | @app.post("/sessions/save")
-432 | async def save_session_route(req: SaveSessionRequest):
-433 |     await save_session(
-434 |         session_id=req.session_id,
-435 |         title=req.title,
-436 |         prompt=req.prompt,
-437 |         mode=req.mode,
-438 |         nodes=req.nodes,
-439 |         edges=req.edges,
-440 |         chat_messages=req.chat_messages,
-441 |         agent_talk_logs=req.agent_talk_logs,
-442 |         execution_state=req.execution_state,
-443 |         status_message=req.status_message,
-444 |         follow_up_suggestions=req.follow_up_suggestions,
-445 |     )
-446 |     return {"status": "saved"}
-447 | 
-448 | 
-449 | class TestAgentRequest(BaseModel):
-450 |     node: Dict[str, Any]
-451 |     provider: str
-452 |     api_key: Optional[str] = None
-453 |     api_keys: Optional[Dict[str, str]] = None
-454 |     base_url: Optional[str] = None
-455 | 
-456 | 
-457 | @app.post("/test_agent")
-458 | async def test_agent_route(req: TestAgentRequest):
-459 |     """
-460 |     Test execution of a single agent node.
-461 |     Runs a simple prompt and verifies the LLM connection and system prompt.
-462 |     """
-463 |     from providers import get_provider_config, call_provider
-464 |     provider_config = get_provider_config(req.provider)
-465 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
-466 |     if not api_key and not provider_config.get("is_local", False):
-467 |         raise HTTPException(status_code=400, detail="API Key required.")
-468 | 
-469 |     test_prompt = "Hello! Output a short 3-word test greeting."
-470 |     node = req.node
-471 |     try:
-472 |         response = await call_provider(
-473 |             provider=req.provider,
-474 |             model=req.node.get("data", {}).get("model") or "gemini-2.5-flash",
-475 |             api_key=api_key,
-476 |             messages=[{"role": "user", "content": test_prompt}],
-477 |             system_prompt=node.get("data", {}).get("systemPrompt", "You are a test agent."),
-478 |             temperature=0.7,
-479 |             timeout=10.0,
-480 |             api_keys=req.api_keys,
-481 |             base_url=req.base_url,
-482 |         )
-483 |         return {"status": "success", "response": response}
-484 |     except Exception as e:
-485 |         return {"status": "error", "detail": str(e)}
-486 | 
-487 |
+401 |             "execution_state": s.get("execution_state", "setup"),
+402 |             "status_message": s.get("status_message", ""),
+403 |         })
+404 |     return result
+405 | 
+406 | 
+407 | @app.get("/sessions/{session_id}")
+408 | async def get_session(session_id: str):
+409 |     session = await load_session(session_id)
+410 |     if not session:
+411 |         raise HTTPException(status_code=404, detail="Session not found")
+412 |     return {
+413 |         "id": session["session_id"],
+414 |         "title": session["title"],
+415 |         "prompt": session["prompt"],
+416 |         "mode": session.get("mode", "auto"),
+417 |         "nodes": session.get("nodes", []),
+418 |         "edges": session.get("edges", []),
+419 |         "chatMessages": session.get("chat_messages", []),
+420 |         "agentTalkLogs": session.get("agent_talk_logs", []),
+421 |         "executionState": session.get("execution_state", "setup"),
+422 |         "statusMessage": session.get("status_message", ""),
+423 |         "followUpSuggestions": session.get("follow_up_suggestions", []),
+424 |     }
+425 | 
+426 | 
+427 | @app.delete("/sessions/{session_id}")
+428 | async def delete_session_route(session_id: str):
+429 |     await delete_session(session_id)
+430 |     return {"status": "deleted"}
+431 | 
+432 | 
+433 | @app.post("/sessions/save")
+434 | async def save_session_route(req: SaveSessionRequest):
+435 |     await save_session(
+436 |         session_id=req.session_id,
+437 |         title=req.title,
+438 |         prompt=req.prompt,
+439 |         mode=req.mode,
+440 |         nodes=req.nodes,
+441 |         edges=req.edges,
+442 |         chat_messages=req.chat_messages,
+443 |         agent_talk_logs=req.agent_talk_logs,
+444 |         execution_state=req.execution_state,
+445 |         status_message=req.status_message,
+446 |         follow_up_suggestions=req.follow_up_suggestions,
+447 |     )
+448 |     return {"status": "saved"}
+449 | 
+450 | 
+451 | class TestAgentRequest(BaseModel):
+452 |     node: Dict[str, Any]
+453 |     provider: str
+454 |     api_key: Optional[str] = None
+455 |     api_keys: Optional[Dict[str, str]] = None
+456 |     base_url: Optional[str] = None
+457 | 
+458 | 
+459 | @app.post("/test_agent")
+460 | async def test_agent_route(req: TestAgentRequest):
+461 |     """
+462 |     Test execution of a single agent node.
+463 |     Runs a simple prompt and verifies the LLM connection and system prompt.
+464 |     """
+465 |     from providers import get_provider_config, call_provider
+466 |     provider_config = get_provider_config(req.provider)
+467 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
+468 |     if not api_key and not provider_config.get("is_local", False):
+469 |         raise HTTPException(status_code=400, detail="API Key required.")
+470 | 
+471 |     test_prompt = "Hello! Output a short 3-word test greeting."
+472 |     node = req.node
+473 |     try:
+474 |         response = await call_provider(
+475 |             provider=req.provider,
+476 |             model=req.node.get("data", {}).get("model") or "gemini-2.5-flash",
+477 |             api_key=api_key,
+478 |             messages=[{"role": "user", "content": test_prompt}],
+479 |             system_prompt=node.get("data", {}).get("systemPrompt", "You are a test agent."),
+480 |             temperature=0.7,
+481 |             timeout=10.0,
+482 |             api_keys=req.api_keys,
+483 |             base_url=req.base_url,
+484 |         )
+485 |         return {"status": "success", "response": response}
+486 |     except Exception as e:
+487 |         return {"status": "error", "detail": str(e)}
+488 | 
+489 |
 ```
 
 ### File: `Backend/memory_store.json`
@@ -5230,6 +6947,385 @@ SoloSpace/
 34 |
 ```
 
+### File: `Frontend/app/page.tsx`
+
+> 372 lines | 28.0 KB
+
+```tsx
+  1 | 'use client';
+  2 | 
+  3 | import React, { useState, useEffect, useRef } from "react";
+  4 | import {
+  5 |   Bot, Zap, SquarePlus, Key, History, Settings, User, ChevronRight, ChevronLeft,
+  6 |   HelpCircle, UploadCloud, Eye, Mic, GitFork, ArrowRight, Database, Sliders,
+  7 |   X, Trash2, Globe, Terminal, Sparkles, Copy, Check, Square, DollarSign
+  8 | } from "lucide-react";
+  9 | import { motion, AnimatePresence } from "motion/react";
+ 10 | import { ReactFlowProvider } from '@xyflow/react';
+ 11 | import { useWorkflowStore, ChatMessage, AgentTalkLog } from "@/store/workflowStore";
+ 12 | import FlowArena from "@/components/FlowArena";
+ 13 | import MarkdownRenderer from "@/components/MarkdownRenderer";
+ 14 | import CostDashboard from "@/components/CostDashboard";
+ 15 | import APIKeysModal from "@/components/APIKeysModal";
+ 16 | import { useWebSocket } from "@/store/hooks/useWebSocket";
+ 17 | 
+ 18 | const StreamingText = ({ text, isActive }: { text: string; isActive: boolean }) => (
+ 19 |   <span className="whitespace-pre-wrap font-sans text-neutral-200">
+ 20 |     {text}
+ 21 |     {isActive && <span className="ml-1 inline-block w-1.5 h-4 bg-white align-middle animate-blink" />}
+ 22 |   </span>
+ 23 | );
+ 24 | 
+ 25 | export default function SolospaceApp() {
+ 26 |   return (
+ 27 |     <ReactFlowProvider>
+ 28 |       <SolospaceContent />
+ 29 |     </ReactFlowProvider>
+ 30 |   );
+ 31 | }
+ 32 | 
+ 33 | function SolospaceContent() {
+ 34 |   const sessions = useWorkflowStore((s) => s.sessions);
+ 35 |   const activeSessionId = useWorkflowStore((s) => s.activeSessionId);
+ 36 |   const nodes = useWorkflowStore((s) => s.nodes);
+ 37 |   const edges = useWorkflowStore((s) => s.edges);
+ 38 |   const selectedNodeId = useWorkflowStore((s) => s.selectedNodeId);
+ 39 |   const isOrchestrating = useWorkflowStore((s) => s.isOrchestrating);
+ 40 |   const isThinking = useWorkflowStore((s) => s.isThinking);
+ 41 |   const statusMessage = useWorkflowStore((s) => s.statusMessage);
+ 42 |   const chatMessages = useWorkflowStore((s) => s.chatMessages);
+ 43 |   const agentTalkLogs = useWorkflowStore((s) => s.agentTalkLogs);
+ 44 |   const pendingApproval = useWorkflowStore((s) => s.pendingApproval);
+ 45 |   const liveThoughts = useWorkflowStore((s) => s.liveThoughts);
+ 46 |   const provider = useWorkflowStore((s) => s.provider);
+ 47 |   const model = useWorkflowStore((s) => s.model);
+ 48 |   const followUpSuggestions = useWorkflowStore((s) => s.followUpSuggestions);
+ 49 | 
+ 50 |   const setSelectedNodeId = useWorkflowStore((s) => s.setSelectedNodeId);
+ 51 |   const setNodes = useWorkflowStore((s) => s.setNodes);
+ 52 |   const setEdges = useWorkflowStore((s) => s.setEdges);
+ 53 |   const setExecutionState = useWorkflowStore((s) => s.setExecutionState);
+ 54 |   const updateNodeField = useWorkflowStore((s) => s.updateNodeField);
+ 55 |   const addRule = useWorkflowStore((s) => s.addRule);
+ 56 |   const deleteRule = useWorkflowStore((s) => s.deleteRule);
+ 57 |   const deleteEdge = useWorkflowStore((s) => s.deleteEdge);
+ 58 |   const setChatMessages = useWorkflowStore((s) => s.setChatMessages);
+ 59 |   const createSession = useWorkflowStore((s) => s.createSession);
+ 60 |   const cancelOrchestration = useWorkflowStore((s) => s.cancelOrchestration);
+ 61 |   const fetchSessions = useWorkflowStore((s) => s.fetchSessions);
+ 62 |   const loadSessionFromDb = useWorkflowStore((s) => s.loadSessionFromDb);
+ 63 |   const deleteSessionFromDb = useWorkflowStore((s) => s.deleteSessionFromDb);
+ 64 |   const fetchAvailableProviders = useWorkflowStore((s) => s.fetchAvailableProviders);
+ 65 |   const triggerSteerOrchestration = useWorkflowStore((s) => s.triggerSteerOrchestration);
+ 66 |   const loadPersistedKeys = useWorkflowStore((s) => s.loadPersistedKeys);
+ 67 |   const loadPersistedState = useWorkflowStore((s) => s.loadPersistedState);
+ 68 | 
+ 69 |   const { isConnected, sendApprovalResponse } = useWebSocket(activeSessionId);
+ 70 | 
+ 71 |   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+ 72 |   const chatContainerRef = useRef<HTMLDivElement>(null);
+ 73 |   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
+ 74 |   const textareaRef = useRef<HTMLTextAreaElement>(null);
+ 75 |   const chatEndRef = useRef<HTMLDivElement>(null);
+ 76 | 
+ 77 |   const [workspaceState, setWorkspaceState] = useState<"home" | "active">("home");
+ 78 |   const [currentTab, setCurrentTab] = useState<"chat" | "arena">("chat");
+ 79 |   const [executionMode, setExecutionMode] = useState<"auto" | "custom">("auto");
+ 80 |   const [isSidebarExpanded, setIsSidebarExpanded] = useState<boolean>(true);
+ 81 |   const [isLoadingSession, setIsLoadingSession] = useState<boolean>(false);
+ 82 |   const [isCostDashboardOpen, setIsCostDashboardOpen] = useState(false);
+ 83 |   const [userQuery, setUserQuery] = useState<string>("");
+ 84 |   const [isSecretOpen, setIsSecretOpen] = useState<boolean>(false);
+ 85 |   const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
+ 86 |   const [hoveredSidebarItem, setHoveredSidebarItem] = useState<string | null>(null);
+ 87 |   const [isConfigPanelOpen, setIsConfigPanelOpen] = useState<boolean>(false);
+ 88 |   const [newRuleText, setNewRuleText] = useState<string>("");
+ 89 | 
+ 90 |   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
+ 91 | 
+ 92 |   useEffect(() => {
+ 93 |     if (textareaRef.current) {
+ 94 |       textareaRef.current.style.height = "auto";
+ 95 |       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+ 96 |     }
+ 97 |   }, [userQuery]);
+ 98 | 
+ 99 |   useEffect(() => {
+100 |     if (selectedNodeId) setIsConfigPanelOpen(true);
+101 |     else setIsConfigPanelOpen(false);
+102 |   }, [selectedNodeId]);
+103 | 
+104 |   useEffect(() => {
+105 |     if (shouldAutoScroll) chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+106 |   }, [chatMessages, isThinking, shouldAutoScroll]);
+107 | 
+108 |   useEffect(() => {
+109 |     if (workspaceState === "active" && activeSessionId === null) {
+110 |       setWorkspaceState("home");
+111 |       setCurrentTab("chat");
+112 |       setUserQuery("");
+113 |     }
+114 |   }, [activeSessionId, workspaceState]);
+115 | 
+116 |   useEffect(() => {
+117 |     fetchSessions().catch(e => console.error("Failed to load sessions:", e));
+118 |     fetchAvailableProviders().catch(e => console.error("Failed to load providers:", e));
+119 |     loadPersistedKeys().catch(e => console.error("Failed to load API keys:", e));
+120 |     loadPersistedState().catch(e => console.error("Failed to load state:", e));
+121 |   }, []);
+122 | 
+123 |   useEffect(() => {
+124 |     const handleResize = () => setIsSidebarExpanded(window.innerWidth >= 768);
+125 |     handleResize();
+126 |     window.addEventListener("resize", handleResize);
+127 |     return () => window.removeEventListener("resize", handleResize);
+128 |   }, []);
+129 | 
+130 |   const startOrchestration = (promptText: string) => {
+131 |     if (!promptText.trim()) return;
+132 |     setWorkspaceState("active");
+133 |     setCurrentTab("chat");
+134 |     let sessionId = activeSessionId;
+135 |     if (!sessionId) {
+136 |       // Smart routing: auto (Smart mode) or custom (Custom mode) - quick mode removed
+137 |       sessionId = createSession(promptText, executionMode);
+138 |     }
+139 |     setExecutionState("running");
+140 |     triggerSteerOrchestration(promptText, executionMode !== "custom", executionMode);
+141 |     setUserQuery("");
+142 |   };
+143 | 
+144 |   const handleAddRule = () => {
+145 |     if (!newRuleText.trim() || !selectedNodeId) return;
+146 |     addRule(selectedNodeId, newRuleText.trim());
+147 |     setNewRuleText("");
+148 |   };
+149 | 
+150 |   const activeNodeDetail = nodes.find(n => n.id === selectedNodeId) as any;
+151 | 
+152 |   const ModeSelector = () => (
+153 |     <div className="flex items-center gap-1 bg-neutral-900/40 rounded-full p-0.5 border border-[#1f1f1f]">
+154 |       <button onClick={() => setExecutionMode("auto")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "auto" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Smart</button>
+155 |       <button onClick={() => setExecutionMode("custom")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "custom" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Custom</button>
+156 |     </div>
+157 |   );
+158 | 
+159 |   const handleFileAttach = () => {
+160 |     const input = document.createElement("input");
+161 |     input.type = "file";
+162 |     input.accept = ".txt,.md,.json,.csv,.py,.js,.ts,.tsx,.html,.css,.yaml,.yml,.xml,.ini,.cfg,.pdf,.jpg,.png";
+163 |     input.onchange = (e: any) => {
+164 |       const file = e.target.files?.[0];
+165 |       if (!file) return;
+166 |       const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+167 |       if (['.txt', '.md', '.json', '.csv', '.py', '.js', '.ts', '.tsx', '.html', '.css', '.yaml', '.yml', '.xml', '.ini', '.cfg'].includes(ext)) {
+168 |         const reader = new FileReader();
+169 |         reader.onload = (ev) => setUserQuery((prev) => prev + `\n[Attached: ${file.name}]\n${ev.target?.result as string}\n`);
+170 |         reader.readAsText(file);
+171 |       }
+172 |     };
+173 |     input.click();
+174 |   };
+175 | 
+176 |   return (
+177 |     <div className="flex h-screen w-full bg-black text-[#f5f5f5] overflow-hidden font-sans">
+178 |       <aside className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-30 select-none ${isSidebarExpanded ? "w-64" : "w-[60px]"}`}>
+179 |         <div className="flex items-center gap-3 h-16 border-b border-[#1f1f1f] px-4 justify-between">
+180 |           {isSidebarExpanded ? (
+181 |             <div className="flex items-center gap-2.5">
+182 |               <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
+183 |               <h1 className="text-sm font-bold text-white tracking-tight leading-none">Solospace</h1>
+184 |             </div>
+185 |           ) : (
+186 |             <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center mx-auto"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
+187 |           )}
+188 |           {isSidebarExpanded && <button onClick={() => setIsSidebarExpanded(false)} className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>}
+189 |         </div>
+190 | 
+191 |         <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto custom-scrollbar">
+192 |           <button onClick={() => { useWorkflowStore.getState().abortController?.abort(); setWorkspaceState("home"); setUserQuery(""); useWorkflowStore.setState({ activeSessionId: null, nodes: [], edges: [], chatMessages: [], agentTalkLogs: [], executionState: "setup", statusMessage: "", isThinking: false, isOrchestrating: false, liveThoughts: "", pendingApproval: null, followUpSuggestions: [], abortController: null }); }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
+193 |             <SquarePlus className="w-5 h-5 stroke-[1.8]" />
+194 |             {isSidebarExpanded && <span className="text-xs font-semibold">New Chat</span>}
+195 |           </button>
+196 | 
+197 |           <button onClick={() => setIsSecretOpen(true)} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
+198 |             <Key className="w-5 h-5 stroke-[1.8]" />
+199 |             {isSidebarExpanded && <span className="text-xs font-semibold">API Keys</span>}
+200 |           </button>
+201 | 
+202 |           {isSidebarExpanded && (
+203 |             <div className="pt-6 space-y-2 select-none">
+204 |               <div className="flex items-center gap-1.5 px-3"><History className="w-3.5 h-3.5 text-neutral-600" /><span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest font-mono">Recents</span></div>
+205 |               <div className="space-y-1 max-h-[220px] overflow-y-auto custom-scrollbar">
+206 |                 {Object.values(sessions).length === 0 ? <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span> : (
+207 |                   Object.values(sessions).reverse().map((s) => (
+208 |                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
+209 |                       <button disabled={isLoadingSession} onClick={async () => { setIsLoadingSession(true); try { await loadSessionFromDb(s.id); setWorkspaceState("active"); setCurrentTab("chat"); } catch (err) { console.error(err); } finally { setIsLoadingSession(false); } }} className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${activeSessionId === s.id ? "text-white font-bold" : "text-neutral-500 hover:text-white"}`} title={s.prompt}>{s.title}</button>
+210 |                       <button onClick={async (e) => { e.stopPropagation(); if (confirm(`Delete "${s.title}"?`)) await deleteSessionFromDb(s.id); }} className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+211 |                     </div>
+212 |                   ))
+213 |                 )}
+214 |               </div>
+215 |             </div>
+216 |           )}
+217 |         </nav>
+218 |       </aside>
+219 | 
+220 |       <main className="flex-1 flex flex-col min-w-0 bg-[#000000] relative transition-all duration-300">
+221 |         <header className="flex justify-between items-center w-full px-6 h-16 border-b border-[#141414] shrink-0 z-10 bg-black/85 backdrop-blur-md">
+222 |           <div className="flex items-center gap-2">
+223 |             {isConnected && activeSessionId && (
+224 |               <span className="flex items-center gap-1.5 text-[9px] font-mono text-emerald-400 bg-emerald-950/30 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+225 |                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> LIVE SYNC
+226 |               </span>
+227 |             )}
+228 |           </div>
+229 |           <div className="flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-[2px] rounded-full select-none">
+230 |             <button onClick={() => { if (workspaceState !== "home") setCurrentTab("chat"); }} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${currentTab === "chat" || workspaceState === "home" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>Chat</button>
+231 |             {workspaceState === "active" && (
+232 |               <button onClick={() => setCurrentTab("arena")} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${currentTab === "arena" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>
+233 |                 <GitFork className="w-3 h-3" /> Flow {nodes.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse ml-0.5" />}
+234 |               </button>
+235 |             )}
+236 |           </div>
+237 |           <div className="flex items-center gap-2 select-none">
+238 |             <button onClick={() => setIsCostDashboardOpen(true)} className="text-neutral-400 hover:text-emerald-400 p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer" title="Cost & Token Dashboard"><DollarSign className="w-4 h-4 stroke-[1.8]" /></button>
+239 |             <button onClick={() => alert("Solospace AI OS")} className="text-neutral-400 hover:text-white p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer"><HelpCircle className="w-4 h-4 stroke-[1.8]" /></button>
+240 |           </div>
+241 |         </header>
+242 | 
+243 |         <div className="flex-1 relative overflow-hidden">
+244 |           {workspaceState === "home" && (
+245 |             <div className="absolute inset-0 flex flex-col justify-between overflow-y-auto custom-scrollbar">
+246 |               <div />
+247 |               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
+248 |                 <div className="text-center mb-10 space-y-2 select-none">
+249 |                   <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">What&apos;s on your mind?</h1>
+250 |                   <p className="text-sm text-neutral-400 font-sans">Ask anything. Get a real, complete answer instantly.</p>
+251 |                 </div>
+252 |                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
+253 |                   <div className="flex items-center gap-3">
+254 |                     <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
+255 |                     <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder="Describe your idea, problem, or question..." className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
+256 |                     <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim()} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
+257 |                   </div>
+258 |                 </div>
+259 |                 <div className="flex items-center gap-3 mt-5 select-none">
+260 |                   <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">Mode:</span>
+261 |                   <button onClick={() => setExecutionMode("auto")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "auto" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sparkles className="w-3 h-3 stroke-[2]" /><span>Smart Auto</span></button>
+262 |                   <button onClick={() => setExecutionMode("custom")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "custom" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sliders className="w-3 h-3" /><span>Custom Agent</span></button>
+263 |                 </div>
+264 |               </div>
+265 |               <div />
+266 |             </div>
+267 |           )}
+268 | 
+269 |           {workspaceState === "active" && (
+270 |             <div className="absolute inset-0 flex">
+271 |               {currentTab === "chat" && (
+272 |                 <div className="flex-1 flex flex-col justify-between overflow-hidden bg-black">
+273 |                   <div ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
+274 |                     {isLoadingSession ? (
+275 |                       <div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" /></div>
+276 |                     ) : (
+277 |                       <div className="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto space-y-4 select-text">
+278 |                         {chatMessages.map((msg, msgIdx) => (
+279 |                           <motion.div key={msg.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={`flex w-full ${msg.sender === "user" ? "justify-end" : "justify-start"}`}>
+280 |                             {msg.sender === "user" ? (
+281 |                               <div className="max-w-[72%] rounded-3xl px-5 py-3 bg-[#2f2f2f] text-neutral-100 text-sm leading-relaxed"><p className="whitespace-pre-wrap">{msg.text}</p></div>
+282 |                             ) : (
+283 |                               <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
+284 |                                 <div className="w-full text-neutral-100 text-sm leading-relaxed px-1 py-2">
+285 |                                   {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
+286 |                                   {msg.text && (!isOrchestrating || msgIdx !== chatMessages.length - 1) && (
+287 |                                     <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
+288 |                                       <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
+289 |                                         {copiedMsgId === msg.id ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400 font-medium">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
+290 |                                       </button>
+291 |                                     </div>
+292 |                                   )}
+293 |                                 </div>
+294 |                                 {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && nodes.length > 0 && (
+295 |                                   <button onClick={() => setCurrentTab("arena")} className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max select-none">
+296 |                                     <GitFork className="w-3.5 h-3.5 text-cyan-400" /><span>See Agent Flow</span>
+297 |                                   </button>
+298 |                                 )}
+299 |                               </div>
+300 |                             )}
+301 |                           </motion.div>
+302 |                         ))}
+303 |                         <div ref={chatEndRef} />
+304 |                       </div>
+305 |                     )}
+306 |                   </div>
+307 |                   <div className="px-4 sm:px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
+308 |                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
+309 |                       <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
+310 |                       <textarea ref={textareaRef} rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery); } }} placeholder={isOrchestrating ? "Streaming..." : "Ask a follow-up..."} disabled={isOrchestrating} className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar" />
+311 |                       <div className="flex items-center gap-2 shrink-0">
+312 |                         <ModeSelector />
+313 |                         {isOrchestrating ? (
+314 |                           <button onClick={cancelOrchestration} className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all cursor-pointer"><Square className="w-3.5 h-3.5 text-white fill-white" /></button>
+315 |                         ) : (
+316 |                           <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim() || isThinking} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
+317 |                         )}
+318 |                       </div>
+319 |                     </div>
+320 |                   </div>
+321 |                 </div>
+322 |               )}
+323 |               {currentTab === "arena" && (
+324 |                 <div className="flex-1 relative overflow-hidden bg-[#000000] flex">
+325 |                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#0d0d0d]/90 border border-[#1f1f1f] rounded-full px-4 py-2 backdrop-blur-md shadow-xl pointer-events-auto">
+326 |                     <button onClick={() => setCurrentTab("chat")} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-mono"><ChevronLeft className="w-3.5 h-3.5" /> Back to Chat</button>
+327 |                   </div>
+328 |                   <FlowArena />
+329 |                 </div>
+330 |               )}
+331 |             </div>
+332 |           )}
+333 |         </div>
+334 |       </main>
+335 | 
+336 |       {currentTab === "arena" && isConfigPanelOpen && activeNodeDetail && (
+337 |         <div className="fixed top-0 right-0 h-full w-80 bg-[#0c0c0c]/95 border-l border-[#1f1f1f] z-40 flex flex-col justify-between shadow-2xl transition-transform duration-300 right-panel select-none">
+338 |           <div className="p-5 border-b border-[#1f1f1f] flex justify-between items-center bg-[#0d0d0d]">
+339 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider">{activeNodeDetail.data.name}</h3>
+340 |             <button onClick={() => { setIsConfigPanelOpen(false); setSelectedNodeId(null); }} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
+341 |           </div>
+342 |           <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
+343 |             <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label><input type="text" value={activeNodeDetail.data.name} onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none" /></div>
+344 |             <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label><textarea value={activeNodeDetail.data.systemPrompt} onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed" /></div>
+345 |           </div>
+346 |         </div>
+347 |       )}
+348 | 
+349 |       <AnimatePresence>
+350 |         {isCostDashboardOpen && <CostDashboard isOpen={isCostDashboardOpen} onClose={() => setIsCostDashboardOpen(false)} currentSessionId={activeSessionId} currentSessionCost={0.042} currentModel={model} currentProvider={provider} />}
+351 |         {isSecretOpen && <APIKeysModal isOpen={isSecretOpen} onClose={() => setIsSecretOpen(false)} />}
+352 |         
+353 |         {pendingApproval && (
+354 |           <div className="fixed bottom-6 right-6 w-96 bg-[#0d0d0d] border border-amber-500/50 shadow-[0_0_50px_rgba(245,158,11,0.15)] rounded-2xl p-5 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300 select-none">
+355 |             <div className="flex gap-4 items-start">
+356 |               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 shrink-0"><Sliders className="w-5 h-5 animate-pulse" /></div>
+357 |               <div className="flex-1 space-y-2">
+358 |                 <h4 className="text-xs font-bold text-white">&apos;{(nodes.find(n => n.id === pendingApproval.nodeId)?.data as any)?.name}&apos; wants to use <span className="text-amber-400 font-mono">[{pendingApproval.toolName}]</span></h4>
+359 |                 <p className="text-[10px] text-neutral-400 leading-normal">Action: <span className="text-white font-semibold">{pendingApproval.action}</span> — {pendingApproval.detail}</p>
+360 |                 <div className="pt-3 flex gap-2">
+361 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "approve", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Approve</button>
+362 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "deny", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="px-4 py-2 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Deny</button>
+363 |                 </div>
+364 |               </div>
+365 |             </div>
+366 |           </div>
+367 |         )}
+368 |       </AnimatePresence>
+369 |     </div>
+370 |   );
+371 | }
+372 |
+```
+
 ### File: `Frontend/components/edges/CustomEdge.tsx`
 
 > 148 lines | 4.2 KB
@@ -5735,6 +7831,504 @@ SoloSpace/
 36 |
 ```
 
+### File: `Frontend/components/APIKeysModal.tsx`
+
+> 491 lines | 20.8 KB
+
+```tsx
+  1 | 'use client';
+  2 | 
+  3 | import React, { useState, useEffect } from "react";
+  4 | import { 
+  5 |   X, Key, Eye, EyeOff, ExternalLink, ShieldCheck, AlertCircle, 
+  6 |   Check, Globe, Sliders, Settings, Sparkles, HelpCircle 
+  7 | } from "lucide-react";
+  8 | import { motion, AnimatePresence } from "motion/react";
+  9 | import { useWorkflowStore } from "@/store/workflowStore";
+ 10 | 
+ 11 | interface APIKeysModalProps {
+ 12 |   isOpen: boolean;
+ 13 |   onClose: () => void;
+ 14 | }
+ 15 | 
+ 16 | const FALLBACK_PROVIDERS = {
+ 17 |   gemini: {
+ 18 |     name: "Google Gemini",
+ 19 |     description: "Google's flagship multimodal AI models",
+ 20 |     key_url: "https://aistudio.google.com/apikey",
+ 21 |     key_hint: "AIzaSy...",
+ 22 |     default_model: "gemini-2.5-flash",
+ 23 |     models: [
+ 24 |       { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", tier: "fast" },
+ 25 |       { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", tier: "advanced" },
+ 26 |       { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", tier: "fast" },
+ 27 |       { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite", tier: "fast" }
+ 28 |     ]
+ 29 |   },
+ 30 |   openai: {
+ 31 |     name: "OpenAI",
+ 32 |     description: "GPT-4o and o-series reasoning models",
+ 33 |     key_url: "https://platform.openai.com/api-keys",
+ 34 |     key_hint: "sk-...",
+ 35 |     default_model: "gpt-4o",
+ 36 |     models: [
+ 37 |       { id: "gpt-4o", name: "GPT-4o", tier: "advanced" },
+ 38 |       { id: "gpt-4o-mini", name: "GPT-4o Mini", tier: "fast" },
+ 39 |       { id: "o3-mini", name: "o3-mini", tier: "reasoning" },
+ 40 |       { id: "o1", name: "o1", tier: "reasoning" }
+ 41 |     ]
+ 42 |   },
+ 43 |   claude: {
+ 44 |     name: "Anthropic Claude",
+ 45 |     description: "Sovereign intelligence with Claude 3.5 & 3.7 family",
+ 46 |     key_url: "https://console.anthropic.com/settings/keys",
+ 47 |     key_hint: "sk-ant-...",
+ 48 |     default_model: "claude-sonnet-4-20250514",
+ 49 |     models: [
+ 50 |       { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", tier: "advanced" },
+ 51 |       { id: "claude-3-7-sonnet-20250219", name: "Claude 3.7 Sonnet", tier: "advanced" },
+ 52 |       { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet", tier: "advanced" },
+ 53 |       { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku", tier: "fast" }
+ 54 |     ]
+ 55 |   },
+ 56 |   deepseek: {
+ 57 |     name: "DeepSeek",
+ 58 |     description: "High-intelligence open reasoning and chat models",
+ 59 |     key_url: "https://platform.deepseek.com/api_keys",
+ 60 |     key_hint: "sk-...",
+ 61 |     default_model: "deepseek-chat",
+ 62 |     models: [
+ 63 |       { id: "deepseek-chat", name: "DeepSeek V3", tier: "advanced" },
+ 64 |       { id: "deepseek-reasoner", name: "DeepSeek R1", tier: "reasoning" }
+ 65 |     ]
+ 66 |   },
+ 67 |   groq: {
+ 68 |     name: "Groq",
+ 69 |     description: "Ultra-low-latency LPU model execution",
+ 70 |     key_url: "https://console.groq.com/keys",
+ 71 |     key_hint: "gsk_...",
+ 72 |     default_model: "llama-3.3-70b-versatile",
+ 73 |     models: [
+ 74 |       { id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B", tier: "fast" },
+ 75 |       { id: "deepseek-r1-distill-llama-70b", name: "DeepSeek R1 Distill Llama 70B", tier: "reasoning" },
+ 76 |       { id: "llama-3.1-8b-instant", name: "Llama 3.1 8B Instant", tier: "fast" }
+ 77 |     ]
+ 78 |   },
+ 79 |   openrouter: {
+ 80 |     name: "OpenRouter",
+ 81 |     description: "Consolidated API for hundreds of LLMs",
+ 82 |     key_url: "https://openrouter.ai/keys",
+ 83 |     key_hint: "sk-or-...",
+ 84 |     default_model: "openai/gpt-4o",
+ 85 |     models: [
+ 86 |       { id: "openai/gpt-4o", name: "GPT-4o", tier: "advanced" },
+ 87 |       { id: "anthropic/claude-3.7-sonnet", name: "Claude 3.7 Sonnet", tier: "advanced" },
+ 88 |       { id: "deepseek/deepseek-chat", name: "DeepSeek V3", tier: "open" }
+ 89 |     ]
+ 90 |   },
+ 91 |   ollama: {
+ 92 |     name: "Ollama (Local)",
+ 93 |     description: "Local model hosting engine running on your system",
+ 94 |     key_url: "https://ollama.com",
+ 95 |     key_hint: "No credentials needed",
+ 96 |     default_model: "llama3",
+ 97 |     models: [
+ 98 |       { id: "llama3", name: "Llama 3", tier: "open" },
+ 99 |       { id: "mistral", name: "Mistral", tier: "open" },
+100 |       { id: "phi3", name: "Phi 3", tier: "open" }
+101 |     ]
+102 |   }
+103 | };
+104 | 
+105 | export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
+106 |   const apiKeys = useWorkflowStore((s) => s.apiKeys);
+107 |   const setProviderApiKey = useWorkflowStore((s) => s.setProviderApiKey);
+108 |   const activeProvider = useWorkflowStore((s) => s.provider);
+109 |   const setProvider = useWorkflowStore((s) => s.setProvider);
+110 |   const activeModel = useWorkflowStore((s) => s.model);
+111 |   const setModel = useWorkflowStore((s) => s.setModel);
+112 |   const availableProvidersFromStore = useWorkflowStore((s) => s.availableProviders);
+113 |   const providerBaseUrls = useWorkflowStore((s) => s.providerBaseUrls);
+114 |   const setProviderBaseUrl = useWorkflowStore((s) => s.setProviderBaseUrl);
+115 |   const providerModels = useWorkflowStore((s) => s.providerModels);
+116 |   const fetchProviderModels = useWorkflowStore((s) => s.fetchProviderModels);
+117 |   const fallbackProvider = useWorkflowStore((s) => s.fallbackProvider);
+118 |   const setFallbackProvider = useWorkflowStore((s) => s.setFallbackProvider);
+119 | 
+120 |   // Local Form State
+121 |   const [selectedProvider, setSelectedProvider] = useState<string>("gemini");
+122 |   const [selectedModel, setSelectedModel] = useState<string>("");
+123 |   const [isCustomModelInput, setIsCustomModelInput] = useState<boolean>(false);
+124 |   const [customModelText, setCustomModelText] = useState<string>("");
+125 |   const [apiKeyInput, setApiKeyInput] = useState<string>("");
+126 |   const [baseUrlInput, setUrlInput] = useState<string>("");
+127 |   const [fallbackProv, setFallbackProv] = useState<string>("");
+128 |   const [showKey, setShowKey] = useState<boolean>(false);
+129 |   
+130 |   // Connection Testing State
+131 |   const [isTesting, setIsTesting] = useState<boolean>(false);
+132 |   const [testResult, setTestResult] = useState<{ status: 'idle' | 'success' | 'error'; message: string }>({ status: 'idle', message: '' });
+133 | 
+134 |   // Load backend providers config or fallback
+135 |   const providersConfig: Record<string, any> = Object.keys(availableProvidersFromStore || {}).length > 0 
+136 |     ? availableProvidersFromStore 
+137 |     : FALLBACK_PROVIDERS;
+138 | 
+139 |   // Initialize fields when modal opens
+140 |   useEffect(() => {
+141 |     if (isOpen) {
+142 |       const currentProv = activeProvider || "gemini";
+143 |       setSelectedProvider(currentProv);
+144 |       setSelectedModel(activeModel || "");
+145 |       setFallbackProv(fallbackProvider || "");
+146 |       setApiKeyInput(apiKeys[currentProv] || "");
+147 |       setUrlInput(providerBaseUrls[currentProv] || "");
+148 |       setShowKey(false);
+149 |       setTestResult({ status: 'idle', message: '' });
+150 | 
+151 |       const provConfig = providersConfig[currentProv] || {};
+152 |       const modelsList = providerModels[currentProv] || provConfig.models || [];
+153 |       const isPredefined = modelsList.some((m: any) => m.id === activeModel);
+154 |       if (!isPredefined && activeModel) {
+155 |         setIsCustomModelInput(true);
+156 |         setCustomModelText(activeModel);
+157 |       } else {
+158 |         setIsCustomModelInput(false);
+159 |         setCustomModelText("");
+160 |       }
+161 | 
+162 |       fetchProviderModels(currentProv).catch(() => {});
+163 |     }
+164 |   }, [isOpen]);
+165 | 
+166 |   // Sync inputs when selected provider changes
+167 |   const handleProviderChange = (newProvider: string) => {
+168 |     setSelectedProvider(newProvider);
+169 |     setApiKeyInput(apiKeys[newProvider] || "");
+170 |     setUrlInput(providerBaseUrls[newProvider] || "");
+171 |     setTestResult({ status: 'idle', message: '' });
+172 | 
+173 |     // Pick default model or first model for this new provider
+174 |     const provConfig = providersConfig[newProvider] || {};
+175 |     const modelsList = providerModels[newProvider] || provConfig.models || [];
+176 |     const defaultMod = modelsList.length > 0 ? modelsList[0].id : (provConfig.default_model || "");
+177 |     setSelectedModel(defaultMod);
+178 |     setIsCustomModelInput(modelsList.length === 0);
+179 |     setCustomModelText("");
+180 | 
+181 |     // Fetch latest models list in the background
+182 |     fetchProviderModels(newProvider).catch(() => {});
+183 |   };
+184 | 
+185 |   const handleTestConnection = async () => {
+186 |     setIsTesting(true);
+187 |     setTestResult({ status: 'idle', message: '' });
+188 | 
+189 |     try {
+190 |       const response = await fetch("/api/gemini/test_agent", {
+191 |         method: "POST",
+192 |         headers: { "Content-Type": "application/json" },
+193 |         body: JSON.stringify({
+194 |           node: {
+195 |             id: "test",
+196 |             data: {
+197 |               name: "Test Connection Agent",
+198 |               systemPrompt: "You are a friendly connection validation utility. Keep answers brief.",
+199 |               model: selectedModel
+200 |             }
+201 |           },
+202 |           provider: selectedProvider,
+203 |           api_key: apiKeyInput.trim(),
+204 |           api_keys: { ...apiKeys, [selectedProvider]: apiKeyInput.trim() },
+205 |           base_url: baseUrlInput.trim() || undefined
+206 |         })
+207 |       });
+208 | 
+209 |       const data = await response.json();
+210 |       if (response.ok && data.status === "success") {
+211 |         setTestResult({
+212 |           status: 'success',
+213 |           message: `Connection successful! Output: "${data.response?.substring(0, 50) || 'Success'}"`
+214 |         });
+215 |       } else {
+216 |         setTestResult({
+217 |           status: 'error',
+218 |           message: data.detail || data.error || "Connection failed. Please check credentials and endpoint."
+219 |         });
+220 |       }
+221 |     } catch (e: any) {
+222 |       setTestResult({
+223 |         status: 'error',
+224 |         message: e.message || "Failed to reach the API server. Ensure your backend is running."
+225 |       });
+226 |     } finally {
+227 |       setIsTesting(false);
+228 |     }
+229 |   };
+230 | 
+231 |   const handleSaveSettings = async () => {
+232 |     // Save to Zustand store & IndexedDB
+233 |     await setProviderApiKey(selectedProvider, apiKeyInput.trim());
+234 |     setProviderBaseUrl(selectedProvider, baseUrlInput.trim());
+235 |     setProvider(selectedProvider);
+236 |     setModel(selectedModel);
+237 |     setFallbackProvider(fallbackProv);
+238 |     onClose();
+239 |   };
+240 | 
+241 |   if (!isOpen) return null;
+242 | 
+243 |   const currentProviderInfo = providersConfig[selectedProvider] || {};
+244 |   const modelsList = providerModels[selectedProvider] || currentProviderInfo.models || [];
+245 |   
+246 |   // Custom or local providers require base URL
+247 |   const isCustomOrLocal = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || selectedProvider === 'custom' || currentProviderInfo.is_custom || currentProviderInfo.is_local;
+248 | 
+249 |   return (
+250 |     <motion.div
+251 |       initial={{ opacity: 0 }}
+252 |       animate={{ opacity: 1 }}
+253 |       exit={{ opacity: 0 }}
+254 |       className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
+255 |     >
+256 |       <motion.div
+257 |         initial={{ scale: 0.95 }}
+258 |         animate={{ scale: 1 }}
+259 |         exit={{ scale: 0.95 }}
+260 |         className="w-full max-w-md bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl text-white overflow-y-auto max-h-[90vh] custom-scrollbar"
+261 |       >
+262 |         {/* Close Button */}
+263 |         <button onClick={onClose} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer transition-colors">
+264 |           <X className="w-5 h-5" />
+265 |         </button>
+266 | 
+267 |         {/* Header */}
+268 |         <div className="flex gap-4 items-center mb-6">
+269 |           <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
+270 |             <Key className="w-6 h-6 text-white" />
+271 |           </div>
+272 |           <div>
+273 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">AI Engine Settings</h3>
+274 |             <p className="text-xs text-neutral-400 font-sans mt-0.5">Configure your active AI provider, model routing, and keys.</p>
+275 |           </div>
+276 |         </div>
+277 | 
+278 |         <div className="space-y-4">
+279 |           {/* 1. Provider Selector */}
+280 |           <div className="space-y-1.5">
+281 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Provider</label>
+282 |             <select
+283 |               value={selectedProvider}
+284 |               onChange={(e) => handleProviderChange(e.target.value)}
+285 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
+286 |             >
+287 |               {Object.keys(providersConfig).map((pKey) => (
+288 |                 <option key={pKey} value={pKey}>
+289 |                   {providersConfig[pKey]?.name || pKey}
+290 |                 </option>
+291 |               ))}
+292 |             </select>
+293 |           </div>
+294 | 
+295 |           {/* 2. Model Selector */}
+296 |           <div className="space-y-1.5">
+297 |             <div className="flex justify-between items-center">
+298 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Model</label>
+299 |               {modelsList.length > 0 && (
+300 |                 <button
+301 |                   type="button"
+302 |                   onClick={() => {
+303 |                     const willBeCustom = !isCustomModelInput;
+304 |                     setIsCustomModelInput(willBeCustom);
+305 |                     if (willBeCustom) {
+306 |                       setCustomModelText(selectedModel);
+307 |                     } else {
+308 |                       const defaultMod = modelsList[0]?.id || currentProviderInfo.default_model || "";
+309 |                       setSelectedModel(defaultMod);
+310 |                     }
+311 |                   }}
+312 |                   className="text-[9px] text-cyan-400 hover:underline font-mono cursor-pointer"
+313 |                 >
+314 |                   {isCustomModelInput ? "Select from list" : "Enter custom model ID"}
+315 |                 </button>
+316 |               )}
+317 |             </div>
+318 |             {isCustomModelInput || modelsList.length === 0 ? (
+319 |               <input
+320 |                 type="text"
+321 |                 placeholder="e.g. custom-fine-tune-v1, llama3"
+322 |                 value={isCustomModelInput ? customModelText : selectedModel}
+323 |                 onChange={(e) => {
+324 |                   const val = e.target.value;
+325 |                   if (isCustomModelInput) {
+326 |                     setCustomModelText(val);
+327 |                   }
+328 |                   setSelectedModel(val);
+329 |                 }}
+330 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+331 |               />
+332 |             ) : (
+333 |               <select
+334 |                 value={selectedModel}
+335 |                 onChange={(e) => {
+336 |                   const val = e.target.value;
+337 |                   if (val === "__custom__") {
+338 |                     setIsCustomModelInput(true);
+339 |                     setCustomModelText(selectedModel);
+340 |                   } else {
+341 |                     setSelectedModel(val);
+342 |                   }
+343 |                 }}
+344 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
+345 |               >
+346 |                 {modelsList.map((m: any) => (
+347 |                   <option key={m.id} value={m.id}>
+348 |                     {m.name || m.id} ({m.tier || "standard"})
+349 |                   </option>
+350 |                 ))}
+351 |                 <option value="__custom__">Custom Model ID...</option>
+352 |               </select>
+353 |             )}
+354 |           </div>
+355 | 
+356 |           {/* 3. Custom Base URL Gateway */}
+357 |           <div className="space-y-1.5">
+358 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold flex items-center gap-1">
+359 |               <Globe className="w-3.5 h-3.5" /> Base URL {isCustomOrLocal ? "(Required)" : "(Optional)"}
+360 |             </label>
+361 |             <input
+362 |               type="text"
+363 |               placeholder={currentProviderInfo.base_url || "https://api.provider.com/v1"}
+364 |               value={baseUrlInput}
+365 |               onChange={(e) => setUrlInput(e.target.value)}
+366 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+367 |             />
+368 |           </div>
+369 | 
+370 |           {/* 4. API Key Input */}
+371 |           <div className="space-y-1.5">
+372 |             <div className="flex justify-between items-center">
+373 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
+374 |                 {selectedProvider.toUpperCase()}_API_KEY
+375 |               </label>
+376 |               {currentProviderInfo.key_url && (
+377 |                 <a
+378 |                   href={currentProviderInfo.key_url}
+379 |                   target="_blank"
+380 |                   rel="noreferrer"
+381 |                   className="text-[9px] text-cyan-400 hover:underline flex items-center gap-1 cursor-pointer"
+382 |                 >
+383 |                   Get key <ExternalLink className="w-3 h-3" />
+384 |                 </a>
+385 |               )}
+386 |             </div>
+387 |             <div className="relative">
+388 |               <input
+389 |                 type={showKey ? "text" : "password"}
+390 |                 placeholder={
+391 |                   currentProviderInfo.key_hint
+392 |                     ? `Enter key (starts with ${currentProviderInfo.key_hint})`
+393 |                     : "Enter API key"
+394 |                 }
+395 |                 value={apiKeyInput}
+396 |                 onChange={(e) => setApiKeyInput(e.target.value)}
+397 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl pl-4 pr-12 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+398 |               />
+399 |               <button
+400 |                 type="button"
+401 |                 onClick={() => setShowKey(!showKey)}
+402 |                 className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
+403 |               >
+404 |                 {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+405 |               </button>
+406 |             </div>
+407 |           </div>
+408 | 
+409 |           {/* 5. Fallback Provider Selector */}
+410 |           <div className="space-y-1.5">
+411 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Automatic Fallback</label>
+412 |             <select
+413 |               value={fallbackProv}
+414 |               onChange={(e) => setFallbackProv(e.target.value)}
+415 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
+416 |             >
+417 |               <option value="">No Fallback (Error immediately)</option>
+418 |               {Object.keys(providersConfig)
+419 |                 .filter((pKey) => pKey !== selectedProvider)
+420 |                 .map((pKey) => (
+421 |                   <option key={pKey} value={pKey}>
+422 |                     Fallback: {providersConfig[pKey]?.name || pKey}
+423 |                   </option>
+424 |                 ))}
+425 |             </select>
+426 |           </div>
+427 | 
+428 |           {/* Connection Test pipeline */}
+429 |           <div className="pt-2">
+430 |             <button
+431 |               type="button"
+432 |               onClick={handleTestConnection}
+433 |               disabled={isTesting || (!apiKeyInput && selectedProvider !== "ollama" && selectedProvider !== "lmstudio")}
+434 |               className="w-full py-2 bg-neutral-900 hover:bg-neutral-800 border border-[#1f1f1f] text-neutral-300 hover:text-white font-bold rounded-xl text-xs font-mono transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-20 disabled:scale-100"
+435 |             >
+436 |               {isTesting ? (
+437 |                 <>
+438 |                   <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+439 |                   Testing Pipeline...
+440 |                 </>
+441 |               ) : (
+442 |                 "Test Connection"
+443 |               )}
+444 |             </button>
+445 | 
+446 |             {/* Test Connection Results */}
+447 |             <AnimatePresence>
+448 |               {testResult.status !== 'idle' && (
+449 |                 <motion.div
+450 |                   initial={{ opacity: 0, y: 5 }}
+451 |                   animate={{ opacity: 1, y: 0 }}
+452 |                   exit={{ opacity: 0, y: 5 }}
+453 |                   className={`mt-3 flex items-start gap-2.5 p-3 rounded-xl text-[10px] leading-normal font-mono border ${
+454 |                     testResult.status === 'success'
+455 |                       ? 'bg-emerald-950/20 border-emerald-950/30 text-emerald-400'
+456 |                       : 'bg-rose-950/20 border-rose-950/30 text-rose-400'
+457 |                   }`}
+458 |                 >
+459 |                   {testResult.status === 'success' ? (
+460 |                     <Check className="w-4 h-4 shrink-0 text-emerald-500 mt-0.5" />
+461 |                   ) : (
+462 |                     <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
+463 |                   )}
+464 |                   <span className="whitespace-pre-wrap">{testResult.message}</span>
+465 |                 </motion.div>
+466 |               )}
+467 |             </AnimatePresence>
+468 |           </div>
+469 | 
+470 |           {/* 6. Save and Cancel Buttons */}
+471 |           <div className="pt-4 flex gap-3 border-t border-[#141414]">
+472 |             <button
+473 |               id="save-api-key-btn"
+474 |               onClick={handleSaveSettings}
+475 |               className="flex-1 py-2.5 bg-white hover:bg-neutral-100 text-black font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
+476 |             >
+477 |               Save Settings
+478 |             </button>
+479 |             <button
+480 |               onClick={onClose}
+481 |               className="px-5 py-2.5 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-xl text-xs font-mono transition-colors cursor-pointer"
+482 |             >
+483 |               Cancel
+484 |             </button>
+485 |           </div>
+486 |         </div>
+487 |       </motion.div>
+488 |     </motion.div>
+489 |   );
+490 | }
+491 |
+```
+
 ### File: `Frontend/components/ContextMenu.tsx`
 
 > 191 lines | 6.4 KB
@@ -6224,7 +8818,7 @@ SoloSpace/
 
 ### File: `Frontend/components/ErrorBoundary.tsx`
 
-> 87 lines | 3.1 KB
+> 87 lines | 3.2 KB
 
 ```tsx
  1 | 'use client';
@@ -6310,7 +8904,7 @@ SoloSpace/
 81 |       );
 82 |     }
 83 | 
-84 |     return this.children;
+84 |     return this.props.children;
 85 |   }
 86 | }
 87 |
@@ -7286,7 +9880,7 @@ SoloSpace/
 
 ### File: `Frontend/store/workflowStore.ts`
 
-> 1097 lines | 35.4 KB
+> 1097 lines | 36.5 KB
 
 ```typescript
    1 | import { create } from 'zustand';
@@ -7367,7 +9961,7 @@ SoloSpace/
   76 |   id: string;
   77 |   title: string;
   78 |   prompt: string;
-  79 |   mode: 'auto' | 'custom' | 'quick';
+  79 |   mode: 'auto' | 'custom';  // Smart routing only - quick mode removed
   80 |   nodes: Node[];
   81 |   edges: Edge[];
   82 |   chatMessages: ChatMessage[];
@@ -7436,7 +10030,7 @@ SoloSpace/
  145 |   setPendingApproval: (val: PendingApproval | null) => void;
  146 | 
  147 |   // Session Actions
- 148 |   createSession: (prompt: string, mode: 'auto' | 'custom' | 'quick') => string;
+ 148 |   createSession: (prompt: string, mode: 'auto' | 'custom') => string;  // Smart routing only
  149 |   forkSession: (sessionId: string) => Promise<string | null>;
  150 |   switchSession: (sessionId: string) => void;
  151 |   saveCurrentSession: () => void;
@@ -8770,58 +11364,46 @@ SoloSpace/
 
 ### File: `.gitignore`
 
-> 49 lines | 0.6 KB
+> 37 lines | 0.3 KB
 
 ```text
- 1 | # Dependencies
- 2 | **/node_modules/
- 3 | **/bower_components/
- 4 | 
- 5 | # Next.js build output
- 6 | **/build/
- 7 | **/.next/
- 8 | **/out/
- 9 | 
-10 | # Debug logs
-11 | npm-debug.log*
-12 | yarn-debug.log*
-13 | yarn-error.log*
-14 | lerna-debug.log*
-15 | 
-16 | # Local env files
-17 | **/.env
-18 | **/.env.local
-19 | **/.env.development.local
-20 | **/.env.test.local
-21 | **/.env.production.local
-22 | **/env.local
-23 | !**/.env.example
-24 | 
-25 | # IDEs and editors
-26 | .idea/
-27 | .vscode/
-28 | *.suo
-29 | *.ntvs*
-30 | *.njsproj
-31 | *.sln
-32 | *.sw?
+ 1 | ```
+ 2 | __pycache__/
+ 3 | *.pyc
+ 4 | *.pyo
+ 5 | *.pyd
+ 6 | 
+ 7 | # Dependencies
+ 8 | node_modules/
+ 9 | venv/
+10 | .venv/
+11 | .env
+12 | .env.local
+13 | *.env.*
+14 | 
+15 | # IDE
+16 | .vscode/
+17 | .idea/
+18 | *.swp
+19 | *.swo
+20 | 
+21 | # Logs
+22 | *.log
+23 | 
+24 | # Build
+25 | dist/
+26 | build/
+27 | target/
+28 | 
+29 | # Coverage
+30 | .coverage
+31 | coverage/
+32 | htmlcov/
 33 | 
-34 | # OS files
-35 | .DS_Store
-36 | Thumbs.db
-37 | 
-38 | # TypeScript compilation info
-39 | **/tsconfig.tsbuildinfo
-40 | 
-41 | # Python/Backend patterns
-42 | **/venv/
-43 | **/.venv/
-44 | **/__pycache__/
-45 | *.pyc
-46 | **/solospace.db
-47 | **/memory_store.json
-48 | 
-49 |
+34 | # Python cache
+35 | .mypy_cache/
+36 | .pytest_cache/
+37 | ```
 ```
 
 ### File: `README.md`
