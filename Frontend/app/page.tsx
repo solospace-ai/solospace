@@ -26,13 +26,26 @@ import {
   Sparkles,
   Copy,
   Check,
-  Square
+  Square,
+  DollarSign
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { ReactFlowProvider } from '@xyflow/react';
 import { useWorkflowStore, ChatSession, ChatMessage, AgentTalkLog } from "@/store/workflowStore";
 import FlowArena from "@/components/FlowArena";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
+import { useWebSocket } from "@/store/hooks/useWebSocket";
+import CostDashboard from "@/components/CostDashboard";
+
+// Simple streaming text component to avoid complete markdown parsing on every single token chunk
+const StreamingText = ({ text, isActive }: { text: string; isActive: boolean }) => (
+  <span className="whitespace-pre-wrap font-sans text-neutral-200">
+    {text}
+    {isActive && (
+      <span className="ml-1 inline-block w-1.5 h-4 bg-white align-middle animate-blink" />
+    )}
+  </span>
+);
 
 export default function SolospaceApp() {
   return (
@@ -75,6 +88,8 @@ function SolospaceContent() {
   const setProvider = useWorkflowStore((s) => s.setProvider);
   const setModel = useWorkflowStore((s) => s.setModel);
   const setProviderApiKey = useWorkflowStore((s) => s.setProviderApiKey);
+  const loadPersistedKeys = useWorkflowStore((s) => s.loadPersistedKeys);
+  const loadPersistedState = useWorkflowStore((s) => s.loadPersistedState);
   const fetchAvailableProviders = useWorkflowStore((s) => s.fetchAvailableProviders);
   const fallbackProvider = useWorkflowStore((s) => s.fallbackProvider);
   const providerBaseUrls = useWorkflowStore((s) => s.providerBaseUrls);
@@ -92,6 +107,16 @@ function SolospaceContent() {
   const fetchSessions = useWorkflowStore((s) => s.fetchSessions);
   const loadSessionFromDb = useWorkflowStore((s) => s.loadSessionFromDb);
   const deleteSessionFromDb = useWorkflowStore((s) => s.deleteSessionFromDb);
+  const forkSession = useWorkflowStore((s) => s.forkSession);
+  const { isConnected, sendApprovalResponse } = useWebSocket(activeSessionId);
+
+  const handleForkSession = async () => {
+    if (!activeSessionId) return;
+    const newId = await forkSession(activeSessionId);
+    if (newId) {
+      alert("Session successfully forked!");
+    }
+  };
 
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const copyToClipboard = (text: string, msgId: string) => {
@@ -122,14 +147,257 @@ function SolospaceContent() {
   // Screen and Tab States
   const [workspaceState, setWorkspaceState] = useState<"home" | "active">("home");
   const [currentTab, setCurrentTab] = useState<"chat" | "arena">("chat");
-  const [isAutoMode, setIsAutoMode] = useState<boolean>(true);
+  const [executionMode, setExecutionMode] = useState<"auto" | "custom">("auto");
   const [isSidebarExpanded, setIsSidebarExpanded] = useState<boolean>(true);
   const [isLoadingSession, setIsLoadingSession] = useState<boolean>(false);
+  const [isMobile, setIsMobile] = useState<boolean>(false);
+  const [isBottomSheetOpen, setIsBottomSheetOpen] = useState<boolean>(false);
 
   // Input fields
   const [userQuery, setUserQuery] = useState<string>("");
+  const [attachedFileContent, setAttachedFileContent] = useState<string>("");
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const activePrompt = activeSession ? activeSession.prompt : "";
+  const estimatedTokens = chatMessages.reduce((sum, m) => sum + Math.ceil((m.text?.length || 0) / 4), 0);
+  const formattedTokens = estimatedTokens >= 1000 ? `${(estimatedTokens / 1000).toFixed(1)}k` : `${estimatedTokens}`;
+  const estimatedCost = (estimatedTokens * 0.0005) / 1000;
+
+  // Shortcuts overlay state
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState<boolean>(false);
+
+  // Prompt Library state
+  const [isPromptLibraryOpen, setIsPromptLibraryOpen] = useState<boolean>(false);
+  const [prompts, setPrompts] = useState<Array<{ id: string; text: string; tag: string }>>([
+    { id: "p1", text: "Create a complete Next.js contact form with Tailwind styling and API validation.", tag: "React" },
+    { id: "p2", text: "Write a robust python script to scrape duckduckgo search results safely using beautifulsoup.", tag: "Python" },
+    { id: "p3", text: "Explain the differences between SQL and NoSQL databases with performance tradeoffs.", tag: "Database" },
+  ]);
+  const [promptSearch, setPromptSearch] = useState<string>("");
+  const [newPromptText, setNewPromptText] = useState<string>("");
+  const [newPromptTag, setNewPromptTag] = useState<string>("");
+
+  // Template Library state
+  const [isTemplateLibOpen, setIsTemplateLibOpen] = useState<boolean>(false);
+
+  // Cost Dashboard state
+  const [isCostDashboardOpen, setIsCostDashboardOpen] = useState<boolean>(false);
+
+  // Command Palette state
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
+  const [commandPaletteSearch, setCommandPaletteSearch] = useState<string>("");
+
+  // Voice Input state
+  const [isListening, setIsListening] = useState<boolean>(false);
+  const recognitionRef = useRef<any>(null);
+
+  const toggleVoiceInput = () => {
+    if (typeof window === "undefined") return;
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Web Speech API is not supported in this browser. Please use Chrome, Edge, or Safari.");
+      return;
+    }
+
+    if (isListening) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      setIsListening(false);
+    } else {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = "en-US";
+
+      recognition.onstart = () => {
+        setIsListening(true);
+      };
+
+      recognition.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript;
+        setUserQuery(prev => prev ? prev + " " + transcript : transcript);
+      };
+
+      recognition.onerror = (e: any) => {
+        console.error("Speech recognition error:", e);
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = recognition;
+      try {
+        recognition.start();
+      } catch (err) {
+        console.error("Failed to start speech recognition:", err);
+        setIsListening(false);
+      }
+    }
+  };
+
+  // Load from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem("solospace_prompt_library");
+    if (saved) {
+      try { setPrompts(JSON.parse(saved)); } catch (e) { console.error(e); }
+    }
+  }, []);
+
+  const savePrompt = (text: string, tag: string) => {
+    if (!text.trim()) return;
+    const newPrompt = {
+      id: `prompt-${Date.now()}`,
+      text: text.trim(),
+      tag: tag.trim() || "General",
+    };
+    const updated = [...prompts, newPrompt];
+    setPrompts(updated);
+    localStorage.setItem("solospace_prompt_library", JSON.stringify(updated));
+    setNewPromptText("");
+    setNewPromptTag("");
+  };
+
+  const deletePrompt = (id: string) => {
+    const updated = prompts.filter(p => p.id !== id);
+    setPrompts(updated);
+    localStorage.setItem("solospace_prompt_library", JSON.stringify(updated));
+  };
+
+  const loadTemplate = (templateName: string) => {
+    let newNodes: any[] = [];
+    let newEdges: any[] = [];
+
+    if (templateName === "Code Reviewer") {
+      newNodes = [
+        {
+          id: "analyzer",
+          type: "custom",
+          position: { x: 100, y: 150 },
+          data: { name: "Code Analyzer", tag: "ANALYZER", status: "IDLE", enabled: true, tools: ["Code Executor"], temp: 0.2, objective: "Analyze source code structure and locate syntax/logic errors.", systemPrompt: "You are a code analyzer.", rules: ["Focus on efficiency", "Suggest refactoring"], dependencies: [], toolPermissions: {} }
+        },
+        {
+          id: "auditor",
+          type: "custom",
+          position: { x: 380, y: 150 },
+          data: { name: "Security Auditor", tag: "AUDITOR", status: "IDLE", enabled: true, tools: ["API Connector"], temp: 0.2, objective: "Scan code for SSRF, SQL Injection, key leaks, and library vulnerabilities.", systemPrompt: "You are a security auditor.", rules: ["Be paranoid", "Check all external URLs"], dependencies: ["analyzer"], toolPermissions: {} }
+        },
+        {
+          id: "reviewer",
+          type: "custom",
+          position: { x: 240, y: 350 },
+          data: { name: "Senior Reviewer", tag: "REVIEWER", status: "IDLE", enabled: true, tools: ["Memory"], temp: 0.7, objective: "Synthesize insights and write a concise senior code review summary.", systemPrompt: "You are a senior reviewer.", rules: ["Provide code examples", "Suggest next steps"], dependencies: ["auditor"], toolPermissions: {} }
+        }
+      ];
+      newEdges = [
+        { id: "e-analyzer-auditor", source: "analyzer", target: "auditor", type: "custom", animated: true },
+        { id: "e-auditor-reviewer", source: "auditor", target: "reviewer", type: "custom", animated: true }
+      ];
+    } else if (templateName === "Data Analyst") {
+      newNodes = [
+        {
+          id: "scraper",
+          type: "custom",
+          position: { x: 100, y: 150 },
+          data: { name: "Data Scraper", tag: "SCRAPER", status: "IDLE", enabled: true, tools: ["Web Search", "Browser"], temp: 0.3, objective: "Scrape reference pages and compile raw tables.", systemPrompt: "You are a data scraper.", rules: ["Use DDG search", "Clean raw html"], dependencies: [], toolPermissions: {} }
+        },
+        {
+          id: "parser",
+          type: "custom",
+          position: { x: 380, y: 150 },
+          data: { name: "Data Parser", tag: "PARSER", status: "IDLE", enabled: true, tools: ["Code Executor"], temp: 0.2, objective: "Parse tables, filter outliers, and run mathematical summaries.", systemPrompt: "You are a data parser.", rules: ["Use python pandas", "No external calls"], dependencies: ["scraper"], toolPermissions: {} }
+        }
+      ];
+      newEdges = [
+        { id: "e-scraper-parser", source: "scraper", target: "parser", type: "custom", animated: true }
+      ];
+    } else if (templateName === "Research Assistant") {
+      newNodes = [
+        {
+          id: "researcher",
+          type: "custom",
+          position: { x: 100, y: 150 },
+          data: { name: "Search Specialist", tag: "RESEARCH", status: "IDLE", enabled: true, tools: ["Web Search", "Browser"], temp: 0.5, objective: "Search topics, find verified citations, compile research document.", systemPrompt: "You are a research assistant.", rules: ["Verify claims", "Provide links"], dependencies: [], toolPermissions: {} }
+        },
+        {
+          id: "writer",
+          type: "custom",
+          position: { x: 380, y: 150 },
+          data: { name: "Synthesis Expert", tag: "WRITER", status: "IDLE", enabled: true, tools: ["Memory"], temp: 0.7, objective: "Summarize research and write a final comprehensive essay.", systemPrompt: "You are a synthesis writer.", rules: ["Structured Markdown", "Concise sections"], dependencies: ["researcher"], toolPermissions: {} }
+        }
+      ];
+      newEdges = [
+        { id: "e-researcher-writer", source: "researcher", target: "writer", type: "custom", animated: true }
+      ];
+    } else if (templateName === "Content Writer") {
+      newNodes = [
+        {
+          id: "research",
+          type: "custom",
+          position: { x: 100, y: 150 },
+          data: { name: "Topic Researcher", tag: "RESEARCH", status: "IDLE", enabled: true, tools: ["Web Search"], temp: 0.6, objective: "Research the given keyword and fetch top competitor structures.", systemPrompt: "You are a content researcher.", rules: ["Find top keywords", "No code execution"], dependencies: [], toolPermissions: {} }
+        },
+        {
+          id: "writer",
+          type: "custom",
+          position: { x: 380, y: 150 },
+          data: { name: "Draft Author", tag: "WRITER", status: "IDLE", enabled: true, tools: [], temp: 0.8, objective: "Write a high-quality blog draft using researched keywords.", systemPrompt: "You are a content writer.", rules: ["Engaging hook", "Conversational tone"], dependencies: ["research"], toolPermissions: {} }
+        }
+      ];
+      newEdges = [
+        { id: "e-research-writer", source: "research", target: "writer", type: "custom", animated: true }
+      ];
+    }
+
+    setNodes(newNodes);
+    setEdges(newEdges);
+    alert(`Loaded "${templateName}" template into canvas!`);
+  };
+
+  // Keyboard Shortcuts Effect
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
+
+      if (e.key === "Escape") {
+        setIsConfigPanelOpen(false);
+        setIsSecretOpen(false);
+        setIsProfileOpen(false);
+        setIsShortcutsOpen(false);
+        setIsPromptLibraryOpen(false);
+        setIsTemplateLibOpen(false);
+        setIsCostDashboardOpen(false);
+        setIsCommandPaletteOpen(false);
+        setSelectedNodeId(null);
+      }
+
+      if (cmdOrCtrl && e.key === "1") {
+        e.preventDefault();
+        setCurrentTab("chat");
+      }
+
+      if (cmdOrCtrl && e.key === "2") {
+        e.preventDefault();
+        setCurrentTab("arena");
+      }
+
+      if (cmdOrCtrl && e.key === "k") {
+        e.preventDefault();
+        setIsCommandPaletteOpen(prev => !prev);
+      }
+
+      if (e.key === "?" && document.activeElement?.tagName !== "INPUT" && document.activeElement?.tagName !== "TEXTAREA") {
+        e.preventDefault();
+        setIsShortcutsOpen(prev => !prev);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   useEffect(() => {
     adjustTextareaHeight();
@@ -178,6 +446,7 @@ function SolospaceContent() {
   const [fallbackProviderInput, setFallbackProviderInput] = useState<string>("");
   const [isFetchingModels, setIsFetchingModels] = useState<boolean>(false);
   const [modelsFetchStatus, setModelsFetchStatus] = useState<string>("");
+  const [useCustomModelId, setUseCustomModelId] = useState<boolean>(false);
 
   useEffect(() => {
     if (isSecretOpen) {
@@ -187,8 +456,13 @@ function SolospaceContent() {
       setBaseUrlInput(providerBaseUrls[provider] || "");
       setFallbackProviderInput(fallbackProvider || "");
       setModelsFetchStatus("");
+
+      const pConfig = availableProviders[provider];
+      const modelsList = providerModels[provider] || pConfig?.models || [];
+      const modelExists = modelsList.some((m: any) => m.id === model);
+      setUseCustomModelId(model ? !modelExists : false);
     }
-  }, [isSecretOpen, provider, model, apiKeys, apiKey, providerBaseUrls, fallbackProvider]);
+  }, [isSecretOpen, provider, model, apiKeys, apiKey, providerBaseUrls, fallbackProvider, availableProviders, providerModels]);
 
   // When selectedProvider changes, set selectedModel to its default model, and load key and base url
   useEffect(() => {
@@ -198,6 +472,10 @@ function SolospaceContent() {
       const modelExists = modelsList.some((m: any) => m.id === selectedModel);
       if (!modelExists) {
         setSelectedModel(pConfig.default_model);
+        const defaultExists = modelsList.some((m: any) => m.id === pConfig.default_model);
+        setUseCustomModelId(!defaultExists);
+      } else {
+        setUseCustomModelId(false);
       }
       setApiKeyInput(apiKeys[selectedProvider] || "");
       setBaseUrlInput(providerBaseUrls[selectedProvider] || pConfig.base_url || "");
@@ -235,8 +513,25 @@ function SolospaceContent() {
 
   // Load sessions and available providers from DB on mount
   useEffect(() => {
-    fetchSessions().catch(e => console.error("Failed to load sessions:", e));
-    fetchAvailableProviders().catch(e => console.error("Failed to load providers:", e));
+    const init = async () => {
+      await loadPersistedState();
+      await fetchSessions().catch(e => console.error("Failed to load sessions:", e));
+      await fetchAvailableProviders().catch(e => console.error("Failed to load providers:", e));
+      await loadPersistedKeys().catch(e => console.error("Failed to load persisted keys:", e));
+    };
+    init();
+  }, []);
+
+  // Handle sidebar collapse on mobile/tablet widths (<768px)
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      setIsSidebarExpanded(!mobile);
+    };
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
   }, []);
 
   const handleCloseConfigPanel = () => {
@@ -252,11 +547,11 @@ function SolospaceContent() {
 
     let sessionId = activeSessionId;
     if (!sessionId) {
-      sessionId = createSession(promptText, isAutoMode ? "auto" : "custom");
+      sessionId = createSession(promptText, executionMode === "quick" ? "quick" : executionMode === "custom" ? "custom" : "auto");
     }
 
     setExecutionState("running");
-    triggerSteerOrchestration(promptText, isAutoMode);
+    triggerSteerOrchestration(promptText, executionMode !== "custom", executionMode);
     setUserQuery("");
   };
 
@@ -273,6 +568,59 @@ function SolospaceContent() {
   };
 
   const activeNodeDetail = nodes.find(n => n.id === selectedNodeId) as any;
+
+  // DeepSeek-style mode toggle buttons
+  const ModeSelector = () => (
+    <div className="flex items-center gap-1 bg-neutral-900/40 rounded-full p-0.5 border border-[#1f1f1f]">
+      <button
+        onClick={() => setExecutionMode("auto")}
+        className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${
+          executionMode === "auto"
+            ? "bg-white text-black shadow-md"
+            : "text-neutral-400 hover:text-white"
+        }`}
+      >
+        Smart
+      </button>
+      <button
+        onClick={() => setExecutionMode("custom")}
+        className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${
+          executionMode === "custom"
+            ? "bg-white text-black shadow-md"
+            : "text-neutral-400 hover:text-white"
+        }`}
+      >
+        Custom
+      </button>
+    </div>
+  );
+
+  const handleFileAttach = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".txt,.md,.json,.csv,.py,.js,.ts,.tsx,.html,.css,.yaml,.yml,.xml,.ini,.cfg,.pdf,.jpg,.png";
+    input.onchange = (e: any) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      setAttachedFile(file);
+
+      const textExtensions = ['.txt', '.md', '.json', '.csv', '.py', '.js', '.ts', '.tsx', '.html', '.css', '.yaml', '.yml', '.xml', '.ini', '.cfg'];
+      const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+
+      if (textExtensions.includes(ext) || file.type.indexOf("text/") === 0) {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const content = ev.target?.result as string;
+          setUserQuery((prev) => prev + `\n\n[Attached: ${file.name}]\n${content}\n`);
+          setAttachedFileContent(content);
+        };
+        reader.readAsText(file);
+      } else {
+        alert(`File "${file.name}" attached successfully! Note: PDF and image content will not be injected directly into the prompt text but will be uploaded once backend file tools are fully configured.`);
+      }
+    };
+    input.click();
+  };
 
   // ── Thinking indicator bubble
   const ThinkingBubble = () => (
@@ -353,11 +701,31 @@ function SolospaceContent() {
   };
 
   return (
-    <div className="flex h-screen w-full bg-black text-[#f5f5f5] overflow-hidden font-sans">
+    <div className="flex h-screen w-full bg-black text-[#f5f5f5] overflow-hidden font-sans relative">
+      {/* Mobile Sidebar Overlay */}
+      {isMobile && isSidebarExpanded && (
+        <div
+          onClick={() => setIsSidebarExpanded(false)}
+          className="fixed inset-0 bg-black/60 z-35 animate-fade-in"
+        />
+      )}
+
+      {/* Floating Hamburger Button for Mobile */}
+      {isMobile && !isSidebarExpanded && (
+        <button
+          onClick={() => setIsSidebarExpanded(true)}
+          className="fixed top-4 left-4 z-40 p-2 bg-[#0d0d0d] border border-[#1f1f1f] rounded-xl hover:bg-neutral-800 text-white cursor-pointer shadow-lg active:scale-95 transition-all"
+          title="Open Menu"
+        >
+          <Bot className="w-5 h-5" />
+        </button>
+      )}
 
       <aside
-        className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-30 select-none ${
-          isSidebarExpanded ? "w-64" : "w-[60px]"
+        className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-40 select-none ${
+          isMobile
+            ? (isSidebarExpanded ? "fixed inset-y-0 left-0 w-64 shadow-2xl" : "fixed inset-y-0 left-0 w-0 -translate-x-full overflow-hidden")
+            : (isSidebarExpanded ? "w-64" : "w-[60px]")
         }`}
         onClick={(e) => {
           if (!isSidebarExpanded) {
@@ -518,13 +886,32 @@ function SolospaceContent() {
         {/* Sidebar Footer */}
         <div className="p-2 border-t border-[#1f1f1f] space-y-1 select-none">
           <button
-            onClick={() => alert("Settings panel coming soon.")}
+            onClick={() => setIsSecretOpen(true)}
             className={`w-full flex items-center rounded-lg hover:bg-neutral-900 transition-colors py-2 cursor-pointer ${
               isSidebarExpanded ? "px-3 gap-3 text-neutral-400 hover:text-white" : "justify-center text-neutral-400 hover:text-white"
             }`}
           >
             <Settings className="w-4 h-4" />
-            {isSidebarExpanded && <span className="text-xs">Settings</span>}
+            {isSidebarExpanded && <span className="text-xs">Engine Settings</span>}
+          </button>
+          
+          <button
+            onClick={() => setIsPromptLibraryOpen(true)}
+            className={`w-full flex items-center rounded-lg hover:bg-neutral-900 transition-colors py-2 cursor-pointer ${
+              isSidebarExpanded ? "px-3 gap-3 text-neutral-400 hover:text-white" : "justify-center text-neutral-400 hover:text-white"
+            }`}
+          >
+            <History className="w-4 h-4" />
+            {isSidebarExpanded && <span className="text-xs">Prompt Library</span>}
+          </button>
+          <button
+            onClick={() => setIsCostDashboardOpen(true)}
+            className={`w-full flex items-center rounded-lg hover:bg-neutral-900 transition-colors py-2 cursor-pointer ${
+              isSidebarExpanded ? "px-3 gap-3 text-neutral-400 hover:text-white" : "justify-center text-neutral-400 hover:text-white"
+            }`}
+          >
+            <DollarSign className="w-4 h-4 text-emerald-500" />
+            {isSidebarExpanded && <span className="text-xs">Cost Dashboard</span>}
           </button>
           <button
             onClick={() => setIsProfileOpen(true)}
@@ -545,6 +932,22 @@ function SolospaceContent() {
         {/* Header */}
         <header className="flex justify-between items-center w-full px-6 h-16 border-b border-[#141414] shrink-0 z-10 bg-black/85 backdrop-blur-md">
           <div className="flex items-center gap-2">
+            {workspaceState === "active" && activeSession && (
+              <>
+                <Bot className="w-5 h-5 text-cyan-400" />
+                <span className="text-xs font-mono font-bold text-neutral-300 truncate max-w-[200px]" title={activeSession.title}>
+                  {activeSession.title}
+                </span>
+                <button
+                  onClick={handleForkSession}
+                  className="p-1 text-neutral-500 hover:text-white rounded hover:bg-neutral-900 transition-colors cursor-pointer flex items-center gap-1 text-[10px] font-mono"
+                  title="Fork (duplicate) this session"
+                >
+                  <GitFork className="w-3.5 h-3.5 text-cyan-500" />
+                  <span>Fork</span>
+                </button>
+              </>
+            )}
           </div>
 
           {/* Tab Switcher — Chat always left, Flow/Arena only visible when complex task ran */}
@@ -615,7 +1018,7 @@ function SolospaceContent() {
                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
                   <div className="flex items-center gap-3">
                     <button
-                      onClick={() => alert("File attachment coming soon.")}
+                      onClick={handleFileAttach}
                       className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"
                       title="Attach File"
                     >
@@ -627,7 +1030,9 @@ function SolospaceContent() {
                       value={userQuery}
                       onChange={(e) => setUserQuery(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
+                        const isCmdEnter = e.key === "Enter" && (e.ctrlKey || e.metaKey);
+                        const isPlainEnter = e.key === "Enter" && !e.shiftKey;
+                        if (isPlainEnter || isCmdEnter) {
                           e.preventDefault();
                           if (userQuery.trim()) startOrchestration(userQuery);
                         }
@@ -638,11 +1043,15 @@ function SolospaceContent() {
                     />
                     <div className="flex items-center gap-1.5 shrink-0">
                       <button
-                        onClick={() => alert("Voice input coming soon.")}
-                        className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors cursor-pointer"
-                        title="Voice Input"
+                        onClick={toggleVoiceInput}
+                        className={`p-2 rounded-full transition-colors cursor-pointer ${
+                          isListening 
+                            ? "text-red-500 bg-red-500/10 hover:bg-red-500/20" 
+                            : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"
+                        }`}
+                        title={isListening ? "Stop listening" : "Voice Input"}
                       >
-                        <Mic className="w-5 h-5 stroke-[1.8]" />
+                        <Mic className={`w-5 h-5 stroke-[1.8] ${isListening ? "animate-pulse" : ""}`} />
                       </button>
                       <button
                         id="home-send-btn"
@@ -661,20 +1070,20 @@ function SolospaceContent() {
                 <div className="flex items-center gap-3 mt-5 select-none">
                   <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">Mode:</span>
                   <button
-                    onClick={() => setIsAutoMode(true)}
+                    onClick={() => setExecutionMode("auto")}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${
-                      isAutoMode
+                      executionMode === "auto"
                         ? "bg-white text-black border-white font-bold"
                         : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"
                     }`}
                   >
-                    <Zap className="w-3 h-3 stroke-[2]" />
-                    <span>Auto Agent</span>
+                    <Sparkles className="w-3 h-3 stroke-[2]" />
+                    <span>Smart Agent</span>
                   </button>
                   <button
-                    onClick={() => setIsAutoMode(false)}
+                    onClick={() => setExecutionMode("custom")}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${
-                      !isAutoMode
+                      executionMode === "custom"
                         ? "bg-white text-black border-white font-bold"
                         : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"
                     }`}
@@ -703,14 +1112,29 @@ function SolospaceContent() {
                     className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4"
                   >
                     {isLoadingSession ? (
-                      <div className="flex items-center justify-center h-full">
-                        <div className="flex flex-col items-center gap-3 text-neutral-500">
-                          <div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
-                          <span className="text-xs font-semibold">Loading Session...</span>
+                      <div className="max-w-3xl mx-auto space-y-6 py-4">
+                        <div className="flex gap-4 items-start py-6 border-b border-[#141414] animate-pulse">
+                          <div className="w-8 h-8 rounded-full bg-neutral-900 border border-white/5 shrink-0 flex items-center justify-center">
+                            <Bot className="w-4 h-4 text-neutral-700" />
+                          </div>
+                          <div className="flex-1 space-y-2.5 pt-1">
+                            <div className="h-3.5 bg-neutral-900 rounded w-1/4" />
+                            <div className="h-3 bg-neutral-900 rounded w-3/4" />
+                          </div>
+                        </div>
+                        <div className="flex gap-4 items-start py-6 border-b border-[#141414] animate-pulse">
+                          <div className="w-8 h-8 rounded-full bg-neutral-900 border border-white/5 shrink-0 flex items-center justify-center">
+                            <Bot className="w-4 h-4 text-neutral-700" />
+                          </div>
+                          <div className="flex-1 space-y-2.5 pt-1">
+                            <div className="h-3.5 bg-neutral-900 rounded w-1/3" />
+                            <div className="h-3 bg-neutral-900 rounded w-5/6" />
+                            <div className="h-3 bg-neutral-900 rounded w-2/3" />
+                          </div>
                         </div>
                       </div>
                     ) : (
-                      <div className="max-w-5xl mx-auto space-y-4 select-text">
+                      <div className="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto space-y-4 select-text">
 
                       {chatMessages.map((msg, msgIdx) => (
                         <motion.div
@@ -727,10 +1151,17 @@ function SolospaceContent() {
                           ) : (
                             <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
                               <div className="w-full text-neutral-100 text-sm leading-relaxed px-1 py-2">
-                                <MarkdownRenderer content={msg.text || "*Streaming response...*"} />
+                                {isOrchestrating && msgIdx === chatMessages.length - 1 ? (
+                                  <StreamingText 
+                                    text={msg.text} 
+                                    isActive={isOrchestrating && msgIdx === chatMessages.length - 1}
+                                  />
+                                ) : (
+                                  <MarkdownRenderer content={msg.text || ""} />
+                                )}
                                 
                                 {/* Action Buttons for AI Response */}
-                                {msg.text && (
+                                {msg.text && (!isOrchestrating || msgIdx !== chatMessages.length - 1) && (
                                   <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
                                     <button
                                       onClick={() => copyToClipboard(msg.text, msg.id)}
@@ -795,7 +1226,7 @@ function SolospaceContent() {
                                         <span className="text-[9px] font-mono text-neutral-600">({nodes.length} agents)</span>
                                       </button>
 
-                                      {!isAutoMode && (
+                                      {executionMode === "custom" && (
                                         <button
                                           onClick={() => setCurrentTab("arena")}
                                           className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-neutral-500 rounded-xl text-xs font-semibold text-neutral-400 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max select-none"
@@ -843,13 +1274,32 @@ function SolospaceContent() {
                   </div>
 
                   {/* Bottom input bar */}
-                  <div className="px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
-                    {!isAutoMode && workspaceState === "active" && (
+                  <div className="px-4 sm:px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
+                    {executionMode === "custom" && workspaceState === "active" && (
                       <div className="text-[10px] font-mono text-amber-400 bg-amber-950/30 px-3 py-1 rounded-full self-center border border-amber-500/20 max-w-max select-none">
                         Planning Mode – Edit agents in Flow, then click Proceed
                       </div>
                     )}
                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
+                      <button
+                        id="attach-file-btn"
+                        onClick={handleFileAttach}
+                        className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"
+                        title="Attach File"
+                      >
+                        <UploadCloud className="w-5 h-5 stroke-[1.8]" />
+                      </button>
+                      {chatMessages.length > 0 && (
+                        <div className="flex items-center gap-1.5 shrink-0 select-none">
+                          <span className="text-[10px] font-mono text-neutral-400 bg-neutral-950/80 border border-[#1f1f1f] px-2 py-0.5 rounded-full" title="Estimated history token usage">
+                            ~{formattedTokens} tokens
+                          </span>
+                          <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/20 border border-emerald-500/20 px-2 py-0.5 rounded-full" title="Estimated session cost">
+                            ${estimatedCost.toFixed(4)}
+                          </span>
+                        </div>
+                      )}
+
                       <textarea
                         ref={textareaRef}
                         id="chat-prompt-input"
@@ -857,34 +1307,53 @@ function SolospaceContent() {
                         value={userQuery}
                         onChange={(e) => setUserQuery(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === "Enter" && !e.shiftKey) {
+                          const isCmdEnter = e.key === "Enter" && (e.ctrlKey || e.metaKey);
+                          const isPlainEnter = e.key === "Enter" && !e.shiftKey;
+                          if (isPlainEnter || isCmdEnter) {
                             e.preventDefault();
                             if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery);
                           }
                         }}
-                        placeholder={isOrchestrating ? "Streaming response..." : (isAutoMode ? "Ask a follow-up or new question..." : "Enter a new idea to generate agents (no auto-run)...")}
+                        placeholder={isOrchestrating ? "Streaming response..." : (executionMode === "auto" ? "Ask a follow-up or new question..." : executionMode === "quick" ? "Ask a quick question directly..." : "Enter a new idea to generate agents (no auto-run)...")}
                         disabled={isOrchestrating}
                         className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar"
                       />
-                      {isOrchestrating ? (
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <ModeSelector />
+
                         <button
-                          onClick={cancelOrchestration}
-                          className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all font-semibold cursor-pointer shrink-0"
-                          title="Stop generating"
+                          onClick={toggleVoiceInput}
+                          className={`p-2 rounded-full transition-colors cursor-pointer ${
+                            isListening 
+                              ? "text-red-500 bg-red-500/10 hover:bg-red-500/20" 
+                              : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"
+                          }`}
+                          title={isListening ? "Stop listening" : "Voice Input"}
                         >
-                          <Square className="w-3.5 h-3.5 text-white fill-white" />
+                          <Mic className={`w-5 h-5 stroke-[1.8] ${isListening ? "animate-pulse" : ""}`} />
                         </button>
-                      ) : (
-                        <button
-                          id="chat-send-btn"
-                          onClick={() => startOrchestration(userQuery)}
-                          disabled={!userQuery.trim() || isThinking}
-                          className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer shrink-0"
-                          title="Send message"
-                        >
-                          <ArrowRight className="w-4 h-4 text-black stroke-[3]" />
-                        </button>
-                      )}
+
+                        {isOrchestrating ? (
+                          <button
+                            onClick={cancelOrchestration}
+                            className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all cursor-pointer"
+                            title="Stop generating"
+                          >
+                            <Square className="w-3.5 h-3.5 text-white fill-white" />
+                          </button>
+                        ) : (
+                          <button
+                            id="chat-send-btn"
+                            onClick={() => startOrchestration(userQuery)}
+                            disabled={!userQuery.trim() || isThinking}
+                            className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all cursor-pointer"
+                            title="Send message"
+                          >
+                            <ArrowRight className="w-4 h-4 text-black stroke-[3]" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -907,6 +1376,13 @@ function SolospaceContent() {
                     <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">
                       Agent Flow — {nodes.length} active
                     </span>
+                    <span className="text-neutral-700 text-xs">|</span>
+                    <button
+                      onClick={() => setIsTemplateLibOpen(true)}
+                      className="flex items-center gap-1 text-[10px] font-mono text-cyan-400 hover:text-cyan-300 cursor-pointer"
+                    >
+                      <Sparkles className="w-3 h-3" /> Template Library
+                    </button>
                   </div>
 
                   {/* FLOATING LEFT SIDE Arena Tools Panel */}
@@ -1039,13 +1515,81 @@ function SolospaceContent() {
                 />
               </div>
 
-              {/* Personality */}
+              {/* Output Schema */}
               <div className="space-y-1.5">
-                <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Personality</label>
-                <input
-                  type="text" value={activeNodeDetail.data.personality}
-                  onChange={(e) => updateNodeField(activeNodeDetail.id, { personality: e.target.value })}
-                  className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
+                <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Output Schema (JSON)</label>
+                <textarea
+                  placeholder='e.g. { "type": "object", "properties": { "result": { "type": "string" } } }'
+                  value={activeNodeDetail.data.outputSchema || ""}
+                  onChange={(e) => updateNodeField(activeNodeDetail.id, { outputSchema: e.target.value })}
+                  className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2.5 text-xs text-white focus:border-neutral-500 outline-none font-mono min-h-[60px] resize-none leading-relaxed"
+                />
+              </div>
+
+              {/* Memory Scope & Timeout */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Memory Scope</label>
+                  <select
+                    value={activeNodeDetail.data.memoryScope || "session"}
+                    onChange={(e) => updateNodeField(activeNodeDetail.id, { memoryScope: e.target.value })}
+                    className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2 py-1.5 text-xs text-white focus:border-neutral-500 outline-none"
+                  >
+                    <option value="session">Session</option>
+                    <option value="global">Global</option>
+                    <option value="none">None</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Timeout (sec)</label>
+                  <input
+                    type="number"
+                    min="5"
+                    max="300"
+                    value={activeNodeDetail.data.timeout || 60}
+                    onChange={(e) => updateNodeField(activeNodeDetail.id, { timeout: parseInt(e.target.value) || 60 })}
+                    className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white focus:border-neutral-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Cost Budget & Retry Policy */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Cost Budget ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.00"
+                    max="5.00"
+                    value={activeNodeDetail.data.costBudget || 0.05}
+                    onChange={(e) => updateNodeField(activeNodeDetail.id, { costBudget: parseFloat(e.target.value) || 0.05 })}
+                    className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white focus:border-neutral-500 outline-none"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Retry Policy</label>
+                  <select
+                    value={activeNodeDetail.data.retryPolicy || "1"}
+                    onChange={(e) => updateNodeField(activeNodeDetail.id, { retryPolicy: e.target.value })}
+                    className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2 py-1.5 text-xs text-white focus:border-neutral-500 outline-none"
+                  >
+                    <option value="none">No Retries</option>
+                    <option value="1">1 Retry</option>
+                    <option value="2">2 Retries</option>
+                    <option value="3">3 Retries</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Few Shot Examples */}
+              <div className="space-y-1.5">
+                <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Few-Shot Examples</label>
+                <textarea
+                  placeholder='e.g. Input: "Hello" -> Output: "World"'
+                  value={activeNodeDetail.data.fewShot || ""}
+                  onChange={(e) => updateNodeField(activeNodeDetail.id, { fewShot: e.target.value })}
+                  className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2.5 text-xs text-white focus:border-neutral-500 outline-none min-h-[60px] resize-none leading-relaxed"
                 />
               </div>
 
@@ -1093,26 +1637,18 @@ function SolospaceContent() {
                 </div>
               </div>
 
-              {/* Sliders */}
-              <div className="space-y-4 pt-3 border-t border-[#141414]">
-                {[
-                  { label: "Creativity", key: "temp", min: 0, max: 1, step: 0.05, display: (v: number) => v.toString() },
-                  { label: "Logic / Depth", key: "logic", min: 10, max: 100, step: 5, display: (v: number) => `${v}%` },
-                  { label: "Empathy", key: "empathy", min: 0, max: 100, step: 5, display: (v: number) => `${v}%` }
-                ].map(({ label, key, min, max, step, display }) => (
-                  <div key={key} className="space-y-1">
-                    <div className="flex justify-between items-center text-[9px] font-mono uppercase text-neutral-400 font-bold">
-                      <span>{label}</span>
-                      <span className="text-white">{display(activeNodeDetail.data[key])}</span>
-                    </div>
-                    <input
-                      type="range" min={min} max={max} step={step}
-                      value={activeNodeDetail.data[key]}
-                      onChange={(e) => updateNodeField(activeNodeDetail.id, { [key]: key === "temp" ? parseFloat(e.target.value) : parseInt(e.target.value) })}
-                      className="w-full accent-white h-1 bg-[#1f1f1f] rounded-lg appearance-none cursor-pointer"
-                    />
-                  </div>
-                ))}
+              {/* Creativity (LLM Temp) Slider */}
+              <div className="space-y-1 pt-3 border-t border-[#141414]">
+                <div className="flex justify-between items-center text-[9px] font-mono uppercase text-neutral-400 font-bold">
+                  <span>Creativity (Temperature)</span>
+                  <span className="text-white">{(activeNodeDetail.data.temp ?? 0.7).toString()}</span>
+                </div>
+                <input
+                  type="range" min="0" max="1" step="0.05"
+                  value={activeNodeDetail.data.temp ?? 0.7}
+                  onChange={(e) => updateNodeField(activeNodeDetail.id, { temp: parseFloat(e.target.value) })}
+                  className="w-full accent-white h-1 bg-[#1f1f1f] rounded-lg appearance-none cursor-pointer"
+                />
               </div>
 
               {/* Tool Integrations */}
@@ -1315,22 +1851,52 @@ function SolospaceContent() {
             </div>
 
             {/* Footer */}
-            <div className="p-4 border-t border-[#1f1f1f] bg-[#0d0d0d] grid grid-cols-2 gap-3">
+            <div className="p-4 border-t border-[#1f1f1f] bg-[#0d0d0d] flex flex-col gap-2">
               <button
-                onClick={() => { handleCloseConfigPanel(); }}
-                className="py-2.5 border border-[#1f1f1f] text-xs font-semibold text-neutral-400 hover:text-white rounded-lg transition-colors font-mono cursor-pointer"
-              >
-                Close
-              </button>
-              <button
-                onClick={() => {
-                  alert("Agent configuration saved.");
-                  handleCloseConfigPanel();
+                onClick={async () => {
+                  try {
+                    const resp = await fetch("/api/gemini/test_agent", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        node: activeNodeDetail,
+                        provider: provider,
+                        api_key: apiKeys[provider] || apiKey || "",
+                        api_keys: apiKeys,
+                        base_url: providerBaseUrls[provider] || ""
+                      })
+                    });
+                    const data = await resp.json();
+                    if (data.status === "success") {
+                      alert(`✅ Agent Test Success!\n\nResponse:\n${data.response}`);
+                    } else {
+                      alert(`❌ Agent Test Failed:\n\n${data.detail || data.error || "Unknown error"}`);
+                    }
+                  } catch (err: any) {
+                    alert(`❌ Network Error: ${err.message}`);
+                  }
                 }}
-                className="py-2.5 bg-white hover:bg-neutral-100 text-black text-xs font-bold rounded-lg transition-all font-mono cursor-pointer"
+                className="w-full py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-lg transition-all font-mono cursor-pointer flex items-center justify-center gap-1.5"
               >
-                Save Config
+                <Zap className="w-3.5 h-3.5 fill-white" /> Test Agent
               </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => { handleCloseConfigPanel(); }}
+                  className="py-2 border border-[#1f1f1f] text-xs font-semibold text-neutral-400 hover:text-white rounded-lg transition-colors font-mono cursor-pointer"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={() => {
+                    alert("Agent configuration saved.");
+                    handleCloseConfigPanel();
+                  }}
+                  className="py-2 bg-white hover:bg-neutral-100 text-black text-xs font-bold rounded-lg transition-all font-mono cursor-pointer"
+                >
+                  Save Config
+                </button>
+              </div>
             </div>
           </div>
         ) : (
@@ -1408,50 +1974,71 @@ function SolospaceContent() {
                 <div className="space-y-1.5">
                   <div className="flex justify-between items-center">
                     <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Model</label>
-                    {availableProviders[selectedProvider] && (
-                      <button
-                        onClick={async () => {
-                          setIsFetchingModels(true);
-                          setModelsFetchStatus("Connecting...");
-                          try {
-                            setProviderApiKey(selectedProvider, apiKeyInput.trim());
-                            setProviderBaseUrl(selectedProvider, baseUrlInput.trim());
-                            await fetchProviderModels(selectedProvider);
-                            setModelsFetchStatus("Models loaded successfully!");
-                          } catch (e) {
-                            setModelsFetchStatus("Failed to query models endpoint.");
-                          } finally {
-                            setIsFetchingModels(false);
-                          }
-                        }}
-                        disabled={isFetchingModels}
-                        className="text-[9px] text-cyan-400 hover:underline cursor-pointer disabled:opacity-50 font-mono"
-                      >
-                        {isFetchingModels ? "Fetching..." : "Fetch Models ↻"}
-                      </button>
-                    )}
+                    <div className="flex items-center gap-3">
+                      {availableProviders[selectedProvider] && (
+                        <button
+                          onClick={async () => {
+                            setIsFetchingModels(true);
+                            setModelsFetchStatus("Testing connection...");
+                            try {
+                              setProviderApiKey(selectedProvider, apiKeyInput.trim());
+                              setProviderBaseUrl(selectedProvider, baseUrlInput.trim());
+                              await fetchProviderModels(selectedProvider);
+                              setModelsFetchStatus("✅ Connection successful — models loaded!");
+                            } catch (e) {
+                              setModelsFetchStatus("❌ Connection failed. Check your API key.");
+                            } finally {
+                              setIsFetchingModels(false);
+                            }
+                          }}
+                          disabled={isFetchingModels || (!apiKeyInput.trim() && !availableProviders[selectedProvider]?.is_local && !availableProviders[selectedProvider]?.is_custom)}
+                          className="text-[9px] text-emerald-400 hover:underline cursor-pointer disabled:opacity-50 font-mono"
+                        >
+                          {isFetchingModels ? "Testing..." : "Test Connection ↗"}
+                        </button>
+                      )}
+                      <label className="flex items-center gap-1 text-[9px] text-neutral-500 hover:text-neutral-400 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={useCustomModelId}
+                          onChange={(e) => setUseCustomModelId(e.target.checked)}
+                          className="accent-white w-2.5 h-2.5"
+                        />
+                        <span>Custom ID</span>
+                      </label>
+                    </div>
                   </div>
-                  {(providerModels[selectedProvider] || availableProviders[selectedProvider]?.models)?.length > 0 ? (
-                    <select
-                      value={selectedModel}
-                      onChange={(e) => setSelectedModel(e.target.value)}
-                      className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
-                    >
-                      {(providerModels[selectedProvider] || availableProviders[selectedProvider].models).map((m: any) => (
-                        <option key={m.id} value={m.id}>{m.name || m.id} {m.tier ? `(${m.tier})` : ""}</option>
-                      ))}
-                    </select>
-                  ) : (
+                  {useCustomModelId ? (
                     <input
                       type="text"
-                      placeholder="e.g. gpt-4o, llama3, custom-deployment-id"
+                      placeholder="e.g. claude-sonnet-4-20250514"
                       value={selectedModel}
                       onChange={(e) => setSelectedModel(e.target.value)}
-                      className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
+                      className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
                     />
+                  ) : (
+                    (providerModels[selectedProvider] || availableProviders[selectedProvider]?.models)?.length > 0 ? (
+                      <select
+                        value={selectedModel}
+                        onChange={(e) => setSelectedModel(e.target.value)}
+                        className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
+                      >
+                        {(providerModels[selectedProvider] || availableProviders[selectedProvider].models).map((m: any) => (
+                          <option key={m.id} value={m.id}>{m.name || m.id} {m.tier ? `(${m.tier})` : ""}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        placeholder="e.g. gpt-4o, llama3, custom-deployment-id"
+                        value={selectedModel}
+                        onChange={(e) => setSelectedModel(e.target.value)}
+                        className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500"
+                      />
+                    )
                   )}
                   {modelsFetchStatus && (
-                    <p className={`text-[8px] font-mono ${modelsFetchStatus.toLowerCase().includes("failed") ? "text-red-400" : "text-emerald-400"}`}>
+                    <p className={`text-[8px] font-mono ${modelsFetchStatus.toLowerCase().includes("failed") || modelsFetchStatus.toLowerCase().includes("❌") ? "text-red-400" : "text-emerald-400"}`}>
                       {modelsFetchStatus}
                     </p>
                   )}
@@ -1512,15 +2099,53 @@ function SolospaceContent() {
                 <div className="pt-4 flex gap-3">
                   <button
                     id="save-api-key-btn"
-                    onClick={() => {
-                      setProvider(selectedProvider);
-                      setModel(selectedModel);
-                      setProviderApiKey(selectedProvider, apiKeyInput.trim());
-                      setProviderBaseUrl(selectedProvider, baseUrlInput.trim());
-                      setFallbackProvider(fallbackProviderInput);
-                      setIsSecretOpen(false);
+                    disabled={isFetchingModels}
+                    onClick={async () => {
+                      const isLocal = availableProviders[selectedProvider]?.is_local;
+                      if (!isLocal && !apiKeyInput.trim()) {
+                        setModelsFetchStatus("❌ API key is required for this provider.");
+                        return;
+                      }
+
+                      setIsFetchingModels(true);
+                      setModelsFetchStatus("Validating API key...");
+
+                      try {
+                        const tempApiKeys = { ...apiKeys, [selectedProvider]: apiKeyInput.trim() };
+                        const resp = await fetch("/api/gemini/models", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            provider: selectedProvider,
+                            api_key: apiKeyInput.trim(),
+                            api_keys: tempApiKeys,
+                            base_url: baseUrlInput.trim()
+                          })
+                        });
+
+                        if (!resp.ok) {
+                          const errData = await resp.json().catch(() => ({}));
+                          throw new Error(errData.error || errData.detail || `HTTP error ${resp.status}`);
+                        }
+
+                        const data = await resp.json();
+                        if (!isLocal && (!data.models || data.models.length === 0)) {
+                          throw new Error("No models returned. API key may be invalid or restricted.");
+                        }
+
+                        setProvider(selectedProvider);
+                        setModel(selectedModel);
+                        await setProviderApiKey(selectedProvider, apiKeyInput.trim());
+                        setProviderBaseUrl(selectedProvider, baseUrlInput.trim());
+                        setFallbackProvider(fallbackProviderInput);
+                        setIsSecretOpen(false);
+                      } catch (e: any) {
+                        setModelsFetchStatus(`❌ Validation failed: ${e.message || e}`);
+                      } finally {
+                        setIsFetchingModels(false);
+                      }
                     }}
-                    className="flex-1 py-2.5 bg-white hover:bg-neutral-100 text-black font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
+                    className="flex-1 py-2.5 bg-white hover:bg-neutral-100 disabled:opacity-50 text-black font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
                   >
                     Save Settings
                   </button>
@@ -1570,6 +2195,14 @@ function SolospaceContent() {
                     <span className="text-neutral-500">Sessions:</span>
                     <span className="text-white font-bold">{Object.values(sessions).length}</span>
                   </div>
+                  <div className="flex justify-between items-center bg-black py-2 px-3 rounded text-[10px] border border-[#141414] font-mono">
+                    <span className="text-neutral-500">Session Cost:</span>
+                    <span className="text-emerald-400 font-bold">${estimatedCost.toFixed(4)}</span>
+                  </div>
+                  <div className="flex justify-between items-center bg-black py-2 px-3 rounded text-[10px] border border-[#141414] font-mono">
+                    <span className="text-neutral-500">Accumulated Cost:</span>
+                    <span className="text-emerald-400 font-bold">${estimatedCost.toFixed(4)}</span>
+                  </div>
                 </div>
                 <button
                   onClick={() => setIsProfileOpen(false)}
@@ -1603,17 +2236,12 @@ function SolospaceContent() {
                 <div className="pt-3 flex gap-2">
                   <button
                     onClick={() => {
-                      const sessId = pendingApproval.sessionId || activeSessionId || "";
-                      fetch("/api/gemini/approve", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          sessionId: sessId,
-                          nodeId: pendingApproval.nodeId,
-                          toolName: pendingApproval.toolName,
-                          action: "approve"
-                        })
-                      }).catch(e => console.error("Failed to approve tool:", e));
+                      sendApprovalResponse(
+                        pendingApproval.nodeId,
+                        pendingApproval.toolName,
+                        "approve",
+                        pendingApproval.logId
+                      );
 
                       const node = nodes.find(n => n.id === pendingApproval.nodeId);
                       if (node) {
@@ -1633,17 +2261,12 @@ function SolospaceContent() {
                   </button>
                   <button
                     onClick={() => {
-                      const sessId = pendingApproval.sessionId || activeSessionId || "";
-                      fetch("/api/gemini/approve", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          sessionId: sessId,
-                          nodeId: pendingApproval.nodeId,
-                          toolName: pendingApproval.toolName,
-                          action: "deny"
-                        })
-                      }).catch(e => console.error("Failed to deny tool:", e));
+                      sendApprovalResponse(
+                        pendingApproval.nodeId,
+                        pendingApproval.toolName,
+                        "deny",
+                        pendingApproval.logId
+                      );
 
                       const node = nodes.find(n => n.id === pendingApproval.nodeId);
                       if (node) {
@@ -1665,6 +2288,351 @@ function SolospaceContent() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* KEYBOARD SHORTCUTS OVERLAY */}
+        {isShortcutsOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
+          >
+            <motion.div
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              className="w-full max-w-sm bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl space-y-4"
+            >
+              <button onClick={() => setIsShortcutsOpen(false)} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+              <div className="flex gap-3 items-center border-b border-[#141414] pb-3">
+                <Terminal className="w-5 h-5 text-cyan-400" />
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">Keyboard Shortcuts</h3>
+              </div>
+              <div className="space-y-3 font-mono text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-neutral-400">Switch to Chat Tab</span>
+                  <span className="bg-neutral-900 border border-[#1f1f1f] px-2 py-0.5 rounded text-neutral-200">Ctrl + 1</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-neutral-400">Switch to Flow Tab</span>
+                  <span className="bg-neutral-900 border border-[#1f1f1f] px-2 py-0.5 rounded text-neutral-200">Ctrl + 2</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-neutral-400">AI Engine Settings</span>
+                  <span className="bg-neutral-900 border border-[#1f1f1f] px-2 py-0.5 rounded text-neutral-200">Ctrl + K</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-neutral-400">Close Active Panel</span>
+                  <span className="bg-neutral-900 border border-[#1f1f1f] px-2 py-0.5 rounded text-neutral-200 font-bold">ESC</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-neutral-400">Toggle Shortcuts Overlay</span>
+                  <span className="bg-neutral-900 border border-[#1f1f1f] px-2 py-0.5 rounded text-neutral-200">?</span>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* PROMPT LIBRARY MODAL */}
+        {isPromptLibraryOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
+          >
+            <motion.div
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              className="w-full max-w-lg bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl flex flex-col max-h-[85vh]"
+            >
+              <button onClick={() => setIsPromptLibraryOpen(false)} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+              
+              <div className="flex gap-3 items-center border-b border-[#141414] pb-4 mb-4 shrink-0">
+                <History className="w-5 h-5 text-cyan-400" />
+                <div>
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">Prompt Library</h3>
+                  <p className="text-[10px] text-neutral-500">Save and reload your frequently used system prompts.</p>
+                </div>
+              </div>
+
+              {/* Add New Prompt */}
+              <div className="bg-[#050505] border border-[#1f1f1f] p-3 rounded-xl space-y-2 mb-4 shrink-0">
+                <div className="flex justify-between items-center">
+                  <span className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Add to Library</span>
+                </div>
+                <textarea
+                  placeholder="Enter prompt content..."
+                  value={newPromptText}
+                  onChange={(e) => setNewPromptText(e.target.value)}
+                  className="w-full bg-black border border-[#1f1f1f] rounded-lg p-2 text-xs text-white focus:border-neutral-500 outline-none resize-none h-16 leading-relaxed"
+                />
+                <div className="flex gap-2 justify-between">
+                  <input
+                    type="text"
+                    placeholder="Tag (e.g. React, SQL)"
+                    value={newPromptTag}
+                    onChange={(e) => setNewPromptTag(e.target.value)}
+                    className="bg-black border border-[#1f1f1f] rounded-lg px-3 py-1.5 text-xs text-white focus:border-neutral-500 outline-none w-1/3"
+                  />
+                  <button
+                    onClick={() => savePrompt(newPromptText, newPromptTag)}
+                    disabled={!newPromptText.trim()}
+                    className="px-4 py-1.5 bg-white text-black text-xs font-bold rounded-lg hover:bg-neutral-200 transition-colors disabled:opacity-30 cursor-pointer"
+                  >
+                    Save Prompt
+                  </button>
+                </div>
+              </div>
+
+              {/* Search */}
+              <div className="mb-3 shrink-0">
+                <input
+                  type="text"
+                  placeholder="Search saved prompts..."
+                  value={promptSearch}
+                  onChange={(e) => setPromptSearch(e.target.value)}
+                  className="w-full bg-[#050505] border border-[#1f1f1f] rounded-xl px-4 py-2.5 text-xs text-white outline-none focus:border-neutral-500"
+                />
+              </div>
+
+              {/* Prompts list */}
+              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2">
+                {prompts.filter(p => p.text.toLowerCase().includes(promptSearch.toLowerCase()) || p.tag.toLowerCase().includes(promptSearch.toLowerCase())).length === 0 ? (
+                  <div className="text-center py-8 text-xs text-neutral-500">No prompts found matching search.</div>
+                ) : (
+                  prompts
+                    .filter(p => p.text.toLowerCase().includes(promptSearch.toLowerCase()) || p.tag.toLowerCase().includes(promptSearch.toLowerCase()))
+                    .map((p) => (
+                      <div key={p.id} className="bg-[#050505] border border-[#1f1f1f] p-3 rounded-xl space-y-2 hover:border-neutral-700 transition-colors group">
+                        <div className="flex justify-between items-start">
+                          <span className="text-[8px] font-mono font-bold text-cyan-400 bg-cyan-950/40 border border-cyan-800/30 px-1.5 py-0.5 rounded uppercase tracking-wider">{p.tag}</span>
+                          <button
+                            onClick={() => deletePrompt(p.id)}
+                            className="opacity-0 group-hover:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <p className="text-xs text-neutral-300 leading-relaxed font-sans">{p.text}</p>
+                        <div className="flex justify-end pt-1">
+                          <button
+                            onClick={() => {
+                              setUserQuery(p.text);
+                              setIsPromptLibraryOpen(false);
+                            }}
+                            className="text-[10px] font-mono text-white hover:underline cursor-pointer flex items-center gap-1 font-bold"
+                          >
+                            Use Prompt →
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* AGENT TEMPLATE LIBRARY MODAL */}
+        {isTemplateLibOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
+          >
+            <motion.div
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              className="w-full max-w-xl bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl flex flex-col max-h-[85vh]"
+            >
+              <button onClick={() => setIsTemplateLibOpen(false)} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex gap-3 items-center border-b border-[#141414] pb-4 mb-5 shrink-0">
+                <Sparkles className="w-5 h-5 text-cyan-400" />
+                <div>
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">Agent Template Library</h3>
+                  <p className="text-[10px] text-neutral-500">Inject pre-configured agent orchestration teams directly into the workspace.</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 flex-1 overflow-y-auto custom-scrollbar pr-1">
+                {[
+                  { name: "Code Reviewer", desc: "Specialist team consisting of Code Analyzer, Security Auditor, and Senior Reviewer.", tools: "Code Exec, API Call, Memory", icon: "code" },
+                  { name: "Data Analyst", desc: "Data collection and scraping workflow using Browser, Web Search, and Parser.", tools: "Browser, Web Search, Code Exec", icon: "science" },
+                  { name: "Research Assistant", desc: "Deep study workflow consisting of Search Specialist and Synthesis Writer.", tools: "Web Search, Browser, Memory", icon: "globe" },
+                  { name: "Content Writer", desc: "Content marketing team featuring Keyword Researcher and Draft Writer.", tools: "Web Search, Memory", icon: "bot" },
+                ].map((tpl) => (
+                  <div
+                    key={tpl.name}
+                    className="bg-[#050505] border border-[#1f1f1f] p-4 rounded-xl flex flex-col justify-between hover:border-cyan-500/50 hover:shadow-[0_0_15px_rgba(6,182,212,0.1)] transition-all group"
+                  >
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-start">
+                        <h4 className="text-xs font-bold text-white font-mono uppercase tracking-wider">{tpl.name}</h4>
+                        <span className="text-neutral-500"><Sparkles className="w-4 h-4 text-cyan-500" /></span>
+                      </div>
+                      <p className="text-[10.5px] text-neutral-400 leading-relaxed font-sans">{tpl.desc}</p>
+                      <div className="text-[9px] font-mono text-neutral-600">
+                        Tools: <span className="text-neutral-400">{tpl.tools}</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        loadTemplate(tpl.name);
+                        setIsTemplateLibOpen(false);
+                      }}
+                      className="mt-4 w-full py-2 bg-neutral-900 border border-[#1f1f1f] hover:bg-neutral-800 text-white hover:text-cyan-400 text-[10px] font-mono font-bold rounded-lg transition-colors cursor-pointer"
+                    >
+                      Load Template
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* COST DASHBOARD MODAL */}
+        <CostDashboard
+          isOpen={isCostDashboardOpen}
+          onClose={() => setIsCostDashboardOpen(false)}
+          currentSessionId={activeSessionId}
+          currentSessionCost={estimatedCost}
+          currentModel={model}
+          currentProvider={provider}
+        />
+
+        {/* COMMAND PALETTE OVERLAY */}
+        {isCommandPaletteOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-start justify-center z-50 p-6 pt-[15vh] select-none"
+            onClick={() => setIsCommandPaletteOpen(false)}
+          >
+            <motion.div
+              initial={{ y: -20, scale: 0.98 }}
+              animate={{ y: 0, scale: 1 }}
+              exit={{ y: -20, scale: 0.98 }}
+              className="w-full max-w-xl bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[60vh]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3 px-4 py-3.5 border-b border-[#141414] bg-[#050505]">
+                <Terminal className="w-5 h-5 text-cyan-400 shrink-0" />
+                <input
+                  type="text"
+                  placeholder="Type a command or search..."
+                  value={commandPaletteSearch}
+                  onChange={(e) => setCommandPaletteSearch(e.target.value)}
+                  className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0"
+                  autoFocus
+                />
+                <span className="text-[10px] font-mono text-neutral-500 bg-neutral-900 border border-[#1f1f1f] px-2 py-0.5 rounded uppercase">ESC to close</span>
+              </div>
+
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-2">
+                {[
+                  { name: "New Chat Session", desc: "Create a clean slate workspace for agent flows", action: () => { createSession("New Session", executionMode); setWorkspaceState("home"); }, category: "General Actions" },
+                  { name: "Configure API Keys (BYOK)", desc: "Open provider key manager and base URLs", action: () => setIsSecretOpen(true), category: "General Actions" },
+                  { name: "Open Prompt Library", desc: "Access saved agent system prompts", action: () => setIsPromptLibraryOpen(true), category: "General Actions" },
+                  { name: "View Cost Dashboard", desc: "Inspect real-time token counts & pricing budgets", action: () => setIsCostDashboardOpen(true), category: "General Actions" },
+                  { name: "Toggle Shortcuts Overlay", desc: "Show complete list of system hotkeys", action: () => setIsShortcutsOpen(true), category: "General Actions" },
+
+                  { name: "Load Code Reviewer Template", desc: "Initialize 3-agent software review pipeline", action: () => loadTemplate("Code Reviewer"), category: "Orchestration Templates" },
+                  { name: "Load Data Analyst Template", desc: "Initialize scraper & computational parser nodes", action: () => loadTemplate("Data Analyst"), category: "Orchestration Templates" },
+                  { name: "Load Research Assistant Template", desc: "Initialize double-agent search and synthesis pipeline", action: () => loadTemplate("Research Assistant"), category: "Orchestration Templates" },
+                  { name: "Load Content Writer Template", desc: "Initialize Competitor Research & Draft Author nodes", action: () => loadTemplate("Content Writer"), category: "Orchestration Templates" },
+
+                  { name: "Switch to Chat View", desc: "Interact with agents via conversational interface", action: () => { if (workspaceState !== "home") setCurrentTab("chat"); }, category: "Navigation" },
+                  { name: "Switch to Flow Arena Canvas", desc: "Inspect and wire agent dependencies visually", action: () => { if (workspaceState === "active") setCurrentTab("arena"); }, category: "Navigation" }
+                ]
+                .filter(cmd => 
+                  cmd.name.toLowerCase().includes(commandPaletteSearch.toLowerCase()) || 
+                  cmd.desc.toLowerCase().includes(commandPaletteSearch.toLowerCase()) ||
+                  cmd.category.toLowerCase().includes(commandPaletteSearch.toLowerCase())
+                )
+                .reduce((acc, cmd) => {
+                  const found = acc.find(g => g.category === cmd.category);
+                  if (found) {
+                    found.items.push(cmd);
+                  } else {
+                    acc.push({ category: cmd.category, items: [cmd] });
+                  }
+                  return acc;
+                }, [] as Array<{ category: string; items: any[] }>)
+                .map((group) => (
+                  <div key={group.category} className="space-y-1 mb-3">
+                    <span className="px-3 text-[9px] font-bold font-mono text-neutral-500 uppercase tracking-wider block mt-2">{group.category}</span>
+                    {group.items.map((cmd) => (
+                      <button
+                        key={cmd.name}
+                        onClick={() => {
+                          cmd.action();
+                          setIsCommandPaletteOpen(false);
+                          setCommandPaletteSearch("");
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-900/60 border border-transparent hover:border-[#1f1f1f] transition-all flex justify-between items-center group/item cursor-pointer"
+                      >
+                        <div>
+                          <span className="text-xs font-semibold text-neutral-200 block group-hover/item:text-cyan-400 transition-colors font-mono">{cmd.name}</span>
+                          <span className="text-[10px] text-neutral-500 leading-relaxed font-sans">{cmd.desc}</span>
+                        </div>
+                        <span className="text-[10px] font-mono text-neutral-600 group-hover/item:text-cyan-500/80 transition-colors font-bold">RUN →</span>
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* MOBILE CANVAS BOTTOM SHEET */}
+        {isMobile && workspaceState === "active" && (
+          <>
+            {/* Toggle trigger bar */}
+            {!isBottomSheetOpen && (
+              <button
+                onClick={() => setIsBottomSheetOpen(true)}
+                className="fixed bottom-20 left-1/2 -translate-x-1/2 z-40 bg-gradient-to-r from-cyan-600 to-blue-600 border border-cyan-500/50 hover:from-cyan-500 hover:to-blue-500 text-white text-[10px] font-mono font-bold px-4 py-2 rounded-full shadow-lg flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+              >
+                <GitFork className="w-3.5 h-3.5" /> Show Agent Flow
+              </button>
+            )}
+
+            {/* Bottom Sheet */}
+            <div
+              className="mobile-bottom-sheet"
+              style={{
+                transform: isBottomSheetOpen ? 'translateY(0)' : 'translateY(100%)',
+                pointerEvents: isBottomSheetOpen ? 'all' : 'none',
+              }}
+            >
+              <div
+                className="mobile-bottom-sheet-header"
+                onClick={() => setIsBottomSheetOpen(false)}
+              >
+                <div className="mobile-bottom-sheet-handle" />
+              </div>
+              <div className="h-[calc(55vh-40px)] relative">
+                <FlowArena />
+              </div>
+            </div>
+          </>
         )}
 
       </AnimatePresence>

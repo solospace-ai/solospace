@@ -18,9 +18,9 @@ export const CustomEdge = ({
 }: EdgeProps) => {
   const [isHovered, setIsHovered] = useState(false);
   const deleteEdge = useWorkflowStore((s) => s.deleteEdge);
-  const edges = useWorkflowStore((s) => s.edges);  // Bug 6: needed for parallel edge offset
+  const edges = useWorkflowStore((s) => s.edges);  // Bug 6: needed for parallel Y-offset
 
-  // Bug 6: Calculate Y offset for parallel edges between the same pair of nodes
+  // Y offset for parallel edges between the same pair of nodes
   const parallelEdges = edges.filter(
     e => (e.source === source && e.target === target) ||
          (e.source === target && e.target === source)
@@ -31,9 +31,9 @@ export const CustomEdge = ({
 
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
-    sourceY: sourceY + offset,  // Bug 6: offset to separate parallel edges
+    sourceY: sourceY + offset,
     targetX,
-    targetY: targetY + offset,  // Bug 6: offset to separate parallel edges
+    targetY: targetY + offset,
     sourcePosition,
     targetPosition,
   });
@@ -46,7 +46,6 @@ export const CustomEdge = ({
       onMouseLeave={() => setIsHovered(false)}
       className="group"
     >
-      {/* Bug 5: Arrow marker definition — unique per edge id to avoid conflicts */}
       <defs>
         <marker
           id={`arrowhead-${id}`}
@@ -63,6 +62,12 @@ export const CustomEdge = ({
             opacity={isHovered ? 1 : 0.75}
           />
         </marker>
+        
+        {/* Glow filter */}
+        <filter id={`glow-${id}`} x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="2" result="blur" />
+          <feComposite in="SourceGraphic" in2="blur" operator="over" />
+        </filter>
       </defs>
 
       {/* Background thicker glow path */}
@@ -73,14 +78,14 @@ export const CustomEdge = ({
         fill="none"
         stroke={strokeColor}
         strokeWidth={6}
-        strokeOpacity={isHovered ? 0.35 : 0.15}
+        strokeOpacity={isHovered ? 0.45 : 0.18}
+        filter={`url(#glow-${id})`}
         style={{
           transition: 'stroke-width 0.2s, stroke-opacity 0.2s',
-          filter: `drop-shadow(0 0 4px ${strokeColor})`,
         }}
       />
 
-      {/* Main Core Path — Bug 5: markerEnd for directional arrow */}
+      {/* Main Core Path */}
       <path
         id={id}
         className="react-flow__edge-path connection-line"
@@ -94,6 +99,15 @@ export const CustomEdge = ({
           ...style,
         }}
       />
+
+      {/* Animated data packet flowing along bezier path */}
+      <circle r="3" fill="#ffffff" filter={`url(#glow-${id})`}>
+        <animateMotion
+          dur="3s"
+          repeatCount="indefinite"
+          path={edgePath}
+        />
+      </circle>
 
       {/* Invisible thicker interaction path for easier hovering */}
       <path

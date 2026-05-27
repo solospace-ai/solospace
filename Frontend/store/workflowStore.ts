@@ -1,4 +1,7 @@
 import { create } from 'zustand';
+import { parseSSEStream, mergeCanvasState } from './hooks/useSSEStream';
+import { get as idbGet, set as idbSet, del as idbDel } from 'idb-keyval';
+import { encryptKey, decryptKey } from '../lib/crypto';
 import {
   Node,
   Edge,
@@ -73,7 +76,7 @@ export interface ChatSession {
   id: string;
   title: string;
   prompt: string;
-  mode: 'auto' | 'custom';
+  mode: 'auto' | 'custom' | 'quick';
   nodes: Node[];
   edges: Edge[];
   chatMessages: ChatMessage[];
@@ -104,7 +107,9 @@ export interface WorkflowState {
   availableProviders: Record<string, any>;
   setProvider: (provider: string) => void;
   setModel: (model: string) => void;
-  setProviderApiKey: (provider: string, key: string) => void;
+  setProviderApiKey: (provider: string, key: string) => Promise<void>;
+  loadPersistedKeys: () => Promise<void>;
+  loadPersistedState: () => Promise<void>;
   fetchAvailableProviders: () => Promise<void>;
   fallbackProvider: string;
   setFallbackProvider: (provider: string) => void;
@@ -140,24 +145,27 @@ export interface WorkflowState {
   setPendingApproval: (val: PendingApproval | null) => void;
 
   // Session Actions
-  createSession: (prompt: string, mode: 'auto' | 'custom') => string;
+  createSession: (prompt: string, mode: 'auto' | 'custom' | 'quick') => string;
+  forkSession: (sessionId: string) => Promise<string | null>;
   switchSession: (sessionId: string) => void;
   saveCurrentSession: () => void;
   fetchSessions: () => Promise<void>;
   loadSessionFromDb: (sessionId: string) => Promise<void>;
   deleteSessionFromDb: (sessionId: string) => Promise<void>;
 
-  triggerSteerOrchestration: (promptText: string, execute?: boolean) => void;
+  triggerSteerOrchestration: (promptText: string, execute?: boolean, mode?: string) => void;
   triggerCustomExecution: () => Promise<void>;
 }
 
 let saveTimeout: any = null;
 const debounceSave = (currentSessionId: string, get: any, set: any) => {
   if (saveTimeout) clearTimeout(saveTimeout);
-  saveTimeout = setTimeout(() => {
+  saveTimeout = setTimeout(async () => {
     // Re-verify the session is still active before saving to prevent stale writes
     const activeId = get().activeSessionId;
     if (activeId !== currentSessionId) return;
+
+    let updatedSession: any = null;
 
     set((state: any) => {
       // Only save if the session still exists
@@ -176,8 +184,35 @@ const debounceSave = (currentSessionId: string, get: any, set: any) => {
         statusMessage: state.statusMessage,
         followUpSuggestions: state.followUpSuggestions
       };
+      updatedSession = currentSession;
       return { sessions: { ...state.sessions, [currentSessionId]: currentSession } };
     });
+
+    if (updatedSession) {
+      try {
+        await fetch("/api/gemini/sessions/save", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            session_id: updatedSession.id,
+            title: updatedSession.title,
+            prompt: updatedSession.prompt,
+            mode: updatedSession.mode,
+            nodes: updatedSession.nodes,
+            edges: updatedSession.edges,
+            chat_messages: updatedSession.chatMessages,
+            agent_talk_logs: updatedSession.agentTalkLogs,
+            execution_state: updatedSession.executionState,
+            status_message: updatedSession.statusMessage,
+            follow_up_suggestions: updatedSession.followUpSuggestions || [],
+          }),
+        });
+      } catch (e) {
+        console.error("Failed to save session to SQLite DB:", e);
+      }
+    }
   }, 500);
 };
 
@@ -202,7 +237,60 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   availableProviders: {},
   setProvider: (provider) => set({ provider }),
   setModel: (model) => set({ model }),
-  setProviderApiKey: (provider, key) => set((state) => ({ apiKeys: { ...state.apiKeys, [provider]: key } })),
+  setProviderApiKey: async (provider, key) => {
+    set((state) => ({ apiKeys: { ...state.apiKeys, [provider]: key } }));
+    try {
+      if (key) {
+        const encrypted = await encryptKey(key);
+        await idbSet(`apikey_${provider}`, encrypted);
+      } else {
+        await idbDel(`apikey_${provider}`);
+      }
+    } catch (e) {
+      console.error(`Failed to encrypt/persist key for provider ${provider}:`, e);
+    }
+  },
+  loadPersistedKeys: async () => {
+    try {
+      const state = get();
+      const providers = ['gemini', 'openai', 'anthropic', 'groq', 'deepseek', 'openrouter', 'ollama'];
+      const loadedKeys: Record<string, string> = {};
+      for (const p of providers) {
+        const encrypted = await idbGet<string>(`apikey_${p}`);
+        if (encrypted) {
+          try {
+            const decrypted = await decryptKey(encrypted);
+            loadedKeys[p] = decrypted;
+          } catch (err) {
+            console.error(`Failed to decrypt key for provider ${p}:`, err);
+          }
+        }
+      }
+      set({ apiKeys: { ...state.apiKeys, ...loadedKeys } });
+    } catch (e) {
+      console.error("Failed to load persisted API keys:", e);
+    }
+  },
+  loadPersistedState: async () => {
+    try {
+      const raw = await idbGet<string>('solospace_workflow_state');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        set({
+          activeSessionId: parsed.activeSessionId ?? null,
+          sessions: parsed.sessions ?? {},
+          nodes: parsed.nodes ?? [],
+          edges: parsed.edges ?? [],
+          provider: parsed.provider ?? "gemini",
+          model: parsed.model ?? "gemini-2.5-flash",
+          fallbackProvider: parsed.fallbackProvider ?? "",
+          providerBaseUrls: parsed.providerBaseUrls ?? {},
+        });
+      }
+    } catch (e) {
+      console.error("Failed to load persisted state from IndexedDB:", e);
+    }
+  },
   fetchAvailableProviders: async () => {
     try {
       const resp = await fetch("/api/gemini/providers");
@@ -462,6 +550,65 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     return sessionId;
   },
 
+  forkSession: async (sessionId) => {
+    const sourceSession = get().sessions[sessionId];
+    if (!sourceSession) return null;
+
+    const newSessionId = `forked-${Date.now()}`;
+    const newTitle = `${sourceSession.title} (Fork)`;
+    
+    const newSession: ChatSession = {
+      id: newSessionId,
+      title: newTitle,
+      prompt: sourceSession.prompt,
+      mode: sourceSession.mode,
+      nodes: JSON.parse(JSON.stringify(sourceSession.nodes || [])),
+      edges: JSON.parse(JSON.stringify(sourceSession.edges || [])),
+      chatMessages: JSON.parse(JSON.stringify(sourceSession.chatMessages || [])),
+      agentTalkLogs: JSON.parse(JSON.stringify(sourceSession.agentTalkLogs || [])),
+      executionState: sourceSession.executionState || "setup",
+      statusMessage: sourceSession.statusMessage || "",
+      followUpSuggestions: sourceSession.followUpSuggestions || []
+    };
+
+    set((state) => ({
+      sessions: { ...state.sessions, [newSessionId]: newSession },
+      activeSessionId: newSessionId,
+      nodes: newSession.nodes,
+      edges: newSession.edges,
+      chatMessages: newSession.chatMessages,
+      agentTalkLogs: newSession.agentTalkLogs,
+      executionState: newSession.executionState,
+      statusMessage: newSession.statusMessage,
+      followUpSuggestions: newSession.followUpSuggestions,
+      selectedNodeId: null
+    }));
+
+    try {
+      await fetch("/api/gemini/sessions/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: newSession.id,
+          title: newSession.title,
+          prompt: newSession.prompt,
+          mode: newSession.mode,
+          nodes: newSession.nodes,
+          edges: newSession.edges,
+          chat_messages: newSession.chatMessages,
+          agent_talk_logs: newSession.agentTalkLogs,
+          execution_state: newSession.executionState,
+          status_message: newSession.statusMessage,
+          follow_up_suggestions: newSession.followUpSuggestions,
+        }),
+      });
+    } catch (e) {
+      console.error("Failed to save forked session to DB", e);
+    }
+
+    return newSessionId;
+  },
+
   switchSession: (sessionId) => {
     const currentSessionId = get().activeSessionId;
     if (currentSessionId) {
@@ -537,21 +684,21 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
 
   loadSessionFromDb: async (sessionId: string) => {
     try {
-      const response = await fetch(`/api/gemini/sessions?id=${sessionId}`);
+      const response = await fetch(`/api/gemini/sessions/${sessionId}`);
       if (response.ok) {
         const fullSession = await response.json();
         const session: ChatSession = {
-          id: fullSession.session_id,
+          id: fullSession.id,
           title: fullSession.title,
           prompt: fullSession.prompt,
           mode: fullSession.mode,
           nodes: fullSession.nodes,
           edges: fullSession.edges,
-          chatMessages: fullSession.chat_messages,
-          agentTalkLogs: fullSession.agent_talk_logs,
-          executionState: fullSession.execution_state,
-          statusMessage: fullSession.status_message,
-          followUpSuggestions: fullSession.follow_up_suggestions
+          chatMessages: fullSession.chatMessages,
+          agentTalkLogs: fullSession.agentTalkLogs,
+          executionState: fullSession.executionState,
+          statusMessage: fullSession.statusMessage,
+          followUpSuggestions: fullSession.followUpSuggestions
         };
         
         set((state) => ({
@@ -580,7 +727,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     }
 
     try {
-      const response = await fetch(`/api/gemini/sessions?id=${sessionId}`, {
+      const response = await fetch(`/api/gemini/sessions/${sessionId}`, {
         method: "DELETE"
       });
       if (response.ok) {
@@ -611,7 +758,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     }
   },
 
-  triggerSteerOrchestration: async (promptText, execute = true) => {
+  triggerSteerOrchestration: async (promptText, execute = true, mode) => {
     if (!promptText.trim()) return;
 
     // Abort any active orchestration
@@ -621,6 +768,9 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     }
 
     const controller = new AbortController();
+
+    const preExistingNodes = [...get().nodes];
+    const preExistingEdges = [...get().edges];
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
@@ -673,7 +823,10 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           provider: get().provider,
           model: get().model,
           fallback_provider: get().fallbackProvider || null,
-          base_url: get().providerBaseUrls[get().provider] || null
+          base_url: get().providerBaseUrls[get().provider] || null,
+          existing_nodes: preExistingNodes,
+          existing_edges: preExistingEdges,
+          mode: mode || (execute ? "auto" : "custom")
         }),
         signal: controller.signal
       });
@@ -683,97 +836,47 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
         throw new Error(errData.detail || `Server status error: ${response.status}`);
       }
 
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      if (!reader) throw new Error("No response stream body reader.");
-
       let assistantResponse = "";
       let thinkingSummary = "";
-      let buffer = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() || "";
-
-        for (const part of parts) {
-          if (!part.trim()) continue;
-
-          const lines = part.split("\n");
-          let eventType = "text";
-          let dataLines: string[] = [];
-
-          for (const line of lines) {
-            if (line.startsWith("event: ")) {
-              eventType = line.slice(7);
-            } else if (line.startsWith("data: ")) {
-              dataLines.push(line.slice(6));
-            } else if (line.startsWith("data:")) {
-              dataLines.push(line.slice(5));
-            }
+      const handlers = {
+        onText: (token: string) => {
+          assistantResponse += token;
+          set((state) => ({
+            isThinking: false,
+            chatMessages: state.chatMessages.map(m =>
+              m.id === aiMsgId ? { ...m, text: assistantResponse } : m
+            )
+          }));
+        },
+        onThinking: (thought: string) => {
+          thinkingSummary += thought;
+          set((state) => ({
+            liveThoughts: thinkingSummary,
+            chatMessages: state.chatMessages.map(m =>
+              m.id === aiMsgId ? { ...m, thinkingSummary } : m
+            )
+          }));
+        },
+        onStatus: (msg: string) => set({ statusMessage: msg }),
+        onMetadata: (meta: Record<string, any>) => {
+          const { nodes: mergedNodes, edges: mergedEdges } = mergeCanvasState(
+            preExistingNodes, preExistingEdges,
+            meta.nodes || [], meta.edges || []
+          );
+          set({ nodes: mergedNodes, edges: mergedEdges, agentTalkLogs: meta.agent_talk || [], followUpSuggestions: meta.follow_up_suggestions || [] });
+          const talk = meta.agent_talk || [];
+          if (talk.length > 0) {
+            const latest = talk[talk.length - 1];
+            set({ statusMessage: `⚙️ **${latest.senderName}** completed — ${latest.text?.substring(0, 80) ?? ''}${(latest.text?.length ?? 0) > 80 ? '...' : ''}` });
           }
+        },
+        onToolApproval: (approval: Record<string, any>) => set({ pendingApproval: approval as any }),
+        onDone: () => {},
+        onError: (err: Error) => { throw err; },
+      };
 
-          const dataContent = dataLines.join("\n");
-
-          if (eventType === "text") {
-            try {
-              const textVal = JSON.parse(dataContent);
-              assistantResponse += textVal;
-              set((state) => ({
-                isThinking: false, // Turn off thinking dots on first text token
-                chatMessages: state.chatMessages.map(m =>
-                  m.id === aiMsgId ? { ...m, text: assistantResponse } : m
-                )
-              }));
-            } catch (e) {
-              console.error("Text SSE parse error", e);
-            }
-          } else if (eventType === "thinking") {
-            try {
-              const thoughtVal = JSON.parse(dataContent);
-              thinkingSummary += thoughtVal;
-              set((state) => ({
-                liveThoughts: thinkingSummary,
-                chatMessages: state.chatMessages.map(m =>
-                  m.id === aiMsgId ? { ...m, thinkingSummary: thinkingSummary } : m
-                )
-              }));
-            } catch (e) {
-              console.error("Thinking SSE parse error", e);
-            }
-          } else if (eventType === "status") {
-            try {
-              const statusVal = JSON.parse(dataContent);
-              set({ statusMessage: typeof statusVal === "string" ? statusVal : "" });
-            } catch (e) {
-              console.error("Status SSE parse error", e);
-            }
-          } else if (eventType === "metadata") {
-            try {
-              const meta = JSON.parse(dataContent);
-              set({
-                nodes: meta.nodes || [],
-                edges: meta.edges || [],
-                agentTalkLogs: meta.agent_talk || [],
-                followUpSuggestions: meta.follow_up_suggestions || []  // Bug 2: populate suggestions
-              });
-            } catch (e) {
-              console.error("Metadata SSE parse error", e);
-            }
-          } else if (eventType === "tool_approval") {
-            try {
-              const approval = JSON.parse(dataContent);
-              set({ pendingApproval: approval });
-            } catch (e) {
-              console.error("Tool approval SSE parse error", e);
-            }
-          }
-        }
-      }
+      await parseSSEStream(response, handlers, controller.signal);
 
       if (!assistantResponse) {
         const fallbackMsg = "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again.";
@@ -821,6 +924,9 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     }
 
     const controller = new AbortController();
+
+    const preExistingNodes = [...get().nodes];
+    const preExistingEdges = [...get().edges];
 
     const sessionId = get().activeSessionId;
     if (!sessionId) return;
@@ -886,91 +992,45 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
 
       let assistantResponse = "";
       let thinkingSummary = "";
-      let buffer = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() || "";
-
-        for (const part of parts) {
-          if (!part.trim()) continue;
-
-          const lines = part.split("\n");
-          let eventType = "text";
-          let dataLines: string[] = [];
-
-          for (const line of lines) {
-            if (line.startsWith("event: ")) {
-              eventType = line.slice(7);
-            } else if (line.startsWith("data: ")) {
-              dataLines.push(line.slice(6));
-            } else if (line.startsWith("data:")) {
-              dataLines.push(line.slice(5));
-            }
+      const customHandlers = {
+        onText: (token: string) => {
+          assistantResponse += token;
+          set((state) => ({
+            isThinking: false,
+            chatMessages: state.chatMessages.map(m =>
+              m.id === aiMsgId ? { ...m, text: assistantResponse } : m
+            )
+          }));
+        },
+        onThinking: (thought: string) => {
+          thinkingSummary += thought;
+          set((state) => ({
+            liveThoughts: thinkingSummary,
+            chatMessages: state.chatMessages.map(m =>
+              m.id === aiMsgId ? { ...m, thinkingSummary } : m
+            )
+          }));
+        },
+        onStatus: (msg: string) => set({ statusMessage: msg }),
+        onMetadata: (meta: Record<string, any>) => {
+          const { nodes: mergedNodes, edges: mergedEdges } = mergeCanvasState(
+            preExistingNodes, preExistingEdges,
+            meta.nodes || [], meta.edges || []
+          );
+          set({ nodes: mergedNodes, edges: mergedEdges, agentTalkLogs: meta.agent_talk || [], followUpSuggestions: meta.follow_up_suggestions || [] });
+          const talk = meta.agent_talk || [];
+          if (talk.length > 0) {
+            const latest = talk[talk.length - 1];
+            set({ statusMessage: `⚙️ **${latest.senderName}** completed — ${latest.text?.substring(0, 80) ?? ''}${(latest.text?.length ?? 0) > 80 ? '...' : ''}` });
           }
+        },
+        onToolApproval: (approval: Record<string, any>) => set({ pendingApproval: approval as any }),
+        onDone: () => {},
+        onError: (err: Error) => { throw err; },
+      };
 
-          const dataContent = dataLines.join("\n");
-
-          if (eventType === "text") {
-            try {
-              const textVal = JSON.parse(dataContent);
-              assistantResponse += textVal;
-              set((state) => ({
-                isThinking: false,
-                chatMessages: state.chatMessages.map(m =>
-                  m.id === aiMsgId ? { ...m, text: assistantResponse } : m
-                )
-              }));
-            } catch (e) {
-              console.error("Text SSE parse error", e);
-            }
-          } else if (eventType === "thinking") {
-            try {
-              const thoughtVal = JSON.parse(dataContent);
-              thinkingSummary += thoughtVal;
-              set((state) => ({
-                liveThoughts: thinkingSummary,
-                chatMessages: state.chatMessages.map(m =>
-                  m.id === aiMsgId ? { ...m, thinkingSummary: thinkingSummary } : m
-                )
-              }));
-            } catch (e) {
-              console.error("Thinking SSE parse error", e);
-            }
-          } else if (eventType === "status") {
-            try {
-              const statusVal = JSON.parse(dataContent);
-              set({ statusMessage: typeof statusVal === "string" ? statusVal : "" });
-            } catch (e) {
-              console.error("Status SSE parse error", e);
-            }
-          } else if (eventType === "metadata") {
-            try {
-              const meta = JSON.parse(dataContent);
-              set({
-                nodes: meta.nodes || [],
-                edges: meta.edges || [],
-                agentTalkLogs: meta.agent_talk || [],
-                followUpSuggestions: meta.follow_up_suggestions || []  // Bug 2: populate suggestions
-              });
-            } catch (e) {
-              console.error("Metadata SSE parse error", e);
-            }
-          } else if (eventType === "tool_approval") {
-            try {
-              const approval = JSON.parse(dataContent);
-              set({ pendingApproval: approval });
-            } catch (e) {
-              console.error("Tool approval SSE parse error", e);
-            }
-          }
-        }
-      }
+      await parseSSEStream(response, customHandlers, controller.signal);
 
       if (!assistantResponse) {
         const fallbackMsg = "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again.";
@@ -1011,3 +1071,26 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     }
   }
 }));
+
+let persistTimeout: any = null;
+useWorkflowStore.subscribe((state) => {
+  if (typeof window === 'undefined') return;
+  if (persistTimeout) clearTimeout(persistTimeout);
+  persistTimeout = setTimeout(async () => {
+    try {
+      const stateToPersist = {
+        activeSessionId: state.activeSessionId,
+        sessions: state.sessions,
+        nodes: state.nodes,
+        edges: state.edges,
+        provider: state.provider,
+        model: state.model,
+        fallbackProvider: state.fallbackProvider,
+        providerBaseUrls: state.providerBaseUrls,
+      };
+      await idbSet('solospace_workflow_state', JSON.stringify(stateToPersist));
+    } catch (e) {
+      console.error("Failed to persist state to IndexedDB:", e);
+    }
+  }, 500);
+});

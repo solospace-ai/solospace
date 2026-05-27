@@ -16,10 +16,10 @@ import httpx
 
 # ─── Retry / Backoff Configuration ──────────────────────────────────
 
-MAX_RETRIES = 3
-BASE_DELAY = 1.0
-MAX_DELAY = 10.0
-JITTER_FACTOR = 0.5
+MAX_RETRIES = 2          # ── PERF: Reduced from 3 → 2
+BASE_DELAY = 0.5         # ── PERF: Reduced from 1.0 → 0.5
+MAX_DELAY = 5.0          # ── PERF: Reduced from 10.0 → 5.0
+JITTER_FACTOR = 0.3      # ── PERF: Reduced from 0.5 → 0.3
 
 async def call_with_retry(func, *args, **kwargs):
     """Call a provider function with exponential backoff and jitter."""
@@ -49,6 +49,11 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
             {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "tier": "fast"},
             {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "tier": "advanced"},
             {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "tier": "fast"},
+            {"id": "gemini-2.5-flash-lite", "name": "Gemini 2.5 Flash Lite", "tier": "fast"},
+            {"id": "gemini-2.0-flash-lite", "name": "Gemini 2.0 Flash Lite", "tier": "fast"},
+            {"id": "gemma-3-27b-it", "name": "Gemma 3 27B IT", "tier": "open"},
+            {"id": "gemma-3-12b-it", "name": "Gemma 3 12B IT", "tier": "open"},
+            {"id": "gemma-3-4b-it", "name": "Gemma 3 4B IT", "tier": "open"},
         ],
         "capabilities": ["chat", "streaming", "json_schema", "embeddings"],
         "key_url": "https://aistudio.google.com/apikey",
@@ -62,9 +67,13 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "chat_path": "/chat/completions",
         "default_model": "gpt-4o",
         "models": [
+            {"id": "gpt-4.1", "name": "GPT-4.1", "tier": "advanced"},
+            {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini", "tier": "fast"},
+            {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano", "tier": "fast"},
             {"id": "gpt-4o", "name": "GPT-4o", "tier": "advanced"},
             {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "tier": "fast"},
-            {"id": "gpt-4-turbo", "name": "GPT-4 Turbo", "tier": "advanced"},
+            {"id": "o4-mini", "name": "o4-mini", "tier": "reasoning"},
+            {"id": "o3", "name": "o3", "tier": "reasoning"},
             {"id": "o3-mini", "name": "o3-mini", "tier": "reasoning"},
             {"id": "o1", "name": "o1", "tier": "reasoning"},
         ],
@@ -78,11 +87,13 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "description": "Claude Sonnet 4, Opus, Haiku family",
         "base_url": "https://api.anthropic.com/v1",
         "chat_path": "/messages",
-        "default_model": "claude-3-5-sonnet-20241022",
+        "default_model": "claude-sonnet-4-20250514",
         "models": [
+            {"id": "claude-sonnet-4-20250514", "name": "Claude Sonnet 4", "tier": "advanced"},
+            {"id": "claude-opus-4-20250115", "name": "Claude Opus 4", "tier": "reasoning"},
+            {"id": "claude-3-7-sonnet-20250219", "name": "Claude 3.7 Sonnet", "tier": "advanced"},
             {"id": "claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet", "tier": "advanced"},
             {"id": "claude-3-5-haiku-20241022", "name": "Claude 3.5 Haiku", "tier": "fast"},
-            {"id": "claude-3-opus-20240229", "name": "Claude 3 Opus", "tier": "advanced"},
         ],
         "capabilities": ["chat", "streaming"],
         "key_url": "https://console.anthropic.com/settings/keys",
@@ -98,6 +109,7 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "models": [
             {"id": "openai/gpt-4o", "name": "GPT-4o", "tier": "advanced"},
             {"id": "anthropic/claude-sonnet-4", "name": "Claude Sonnet 4", "tier": "advanced"},
+            {"id": "anthropic/claude-3.7-sonnet", "name": "Claude 3.7 Sonnet", "tier": "advanced"},
             {"id": "google/gemini-2.5-flash-preview", "name": "Gemini 2.5 Flash", "tier": "fast"},
             {"id": "meta-llama/llama-3.1-405b-instruct", "name": "Llama 3.1 405B", "tier": "open"},
             {"id": "deepseek/deepseek-chat", "name": "DeepSeek V3", "tier": "open"},
@@ -116,6 +128,8 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "default_model": "llama-3.3-70b-versatile",
         "models": [
             {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B", "tier": "fast"},
+            {"id": "qwen3-32b", "name": "Qwen 3 32B", "tier": "fast"},
+            {"id": "deepseek-r1-distill-llama-70b", "name": "DeepSeek R1 Distill Llama 70B", "tier": "reasoning"},
             {"id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B Instant", "tier": "fast"},
             {"id": "mixtral-8x7b-32768", "name": "Mixtral 8x7B", "tier": "fast"},
             {"id": "gemma2-9b-it", "name": "Gemma 2 9B", "tier": "fast"},
@@ -164,8 +178,8 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "default_model": "mistral-large-latest",
         "models": [
             {"id": "mistral-large-latest", "name": "Mistral Large", "tier": "advanced"},
-            {"id": "mistral-medium-latest", "name": "Mistral Medium", "tier": "fast"},
-            {"id": "codestral-latest", "name": "Codestral", "tier": "code"},
+            {"id": "mistral-medium-3", "name": "Mistral Medium 3", "tier": "fast"},
+            {"id": "codestral-2501", "name": "Codestral 2501", "tier": "code"},
             {"id": "open-mistral-nemo", "name": "Mistral Nemo (Free)", "tier": "fast"},
         ],
         "capabilities": ["chat", "streaming", "json_mode"],
@@ -197,6 +211,8 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "default_model": "sonar-pro",
         "models": [
             {"id": "sonar-pro", "name": "Sonar Pro", "tier": "advanced"},
+            {"id": "sonar-deep-research", "name": "Sonar Deep Research", "tier": "advanced"},
+            {"id": "sonar-reasoning", "name": "Sonar Reasoning", "tier": "reasoning"},
             {"id": "sonar", "name": "Sonar", "tier": "fast"},
         ],
         "capabilities": ["chat", "streaming"],
@@ -237,8 +253,10 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "name": "AWS Bedrock",
         "description": "AWS Bedrock models using boto3 runtime",
         "base_url": "",
-        "default_model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "default_model": "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
         "models": [
+            {"id": "us.anthropic.claude-3-7-sonnet-20250219-v1:0", "name": "Claude 3.7 Sonnet (US)", "tier": "advanced"},
+            {"id": "anthropic.claude-3-7-sonnet-20250219-v1:0", "name": "Claude 3.7 Sonnet", "tier": "advanced"},
             {"id": "anthropic.claude-3-5-sonnet-20241022-v2:0", "name": "Claude 3.5 Sonnet v2", "tier": "advanced"},
             {"id": "anthropic.claude-3-5-haiku-20241022-v1:0", "name": "Claude 3.5 Haiku", "tier": "fast"},
             {"id": "meta.llama3-3-70b-instruct-v1:0", "name": "Llama 3.3 70B", "tier": "advanced"},
@@ -266,13 +284,15 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
     },
     "xai": {
         "name": "xAI Grok",
-        "description": "Grok-2 and Grok-2-mini models",
+        "description": "Grok-3 and Grok-2 reasoning models",
         "base_url": "https://api.x.ai/v1",
         "chat_path": "/chat/completions",
-        "default_model": "grok-2",
+        "default_model": "grok-3",
         "models": [
-            {"id": "grok-2", "name": "Grok-2", "tier": "advanced"},
-            {"id": "grok-2-mini", "name": "Grok-2-mini", "tier": "fast"},
+            {"id": "grok-3", "name": "Grok 3", "tier": "advanced"},
+            {"id": "grok-3-mini", "name": "Grok 3 Mini", "tier": "fast"},
+            {"id": "grok-2", "name": "Grok 2", "tier": "advanced"},
+            {"id": "grok-2-mini", "name": "Grok 2-mini", "tier": "fast"},
         ],
         "capabilities": ["chat", "streaming", "json_mode"],
         "key_url": "https://x.ai/api-keys",
@@ -419,7 +439,7 @@ def _build_openai_messages(
 ) -> List[Dict[str, str]]:
     """Convert internal message format to OpenAI-compatible messages."""
     result = []
-    is_reasoning = any(m in model.lower() for m in ["o1", "o3"])
+    is_reasoning = any(m in model.lower() for m in ["o1", "o3", "o4"])
     if system_prompt:
         result.append({
             "role": "developer" if is_reasoning else "system",
@@ -516,7 +536,7 @@ async def _call_openai_compatible(
         "max_tokens": 8192,
     }
 
-    if any(m in model.lower() for m in ["o1", "o3", "deepseek-reasoner"]):
+    if any(m in model.lower() for m in ["o1", "o3", "o4", "deepseek-reasoner"]):
         payload.pop("temperature", None)
 
     if json_mode:
@@ -577,7 +597,7 @@ async def _stream_openai_compatible(
         "max_tokens": 8192,
         "stream": True,
     }
-    if any(m in model.lower() for m in ["o1", "o3", "deepseek-reasoner"]):
+    if any(m in model.lower() for m in ["o1", "o3", "o4", "deepseek-reasoner"]):
         payload.pop("temperature", None)
 
     async with httpx.AsyncClient() as client:
@@ -712,12 +732,12 @@ async def _call_claude(
     headers = {
         "Content-Type": "application/json",
         "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
+        "anthropic-version": "2024-10-22",
     }
 
     payload: Dict[str, Any] = {
         "model": model,
-        "max_tokens": 4096,
+        "max_tokens": 8192,
         "temperature": temperature,
         **claude_data,
     }
@@ -758,12 +778,12 @@ async def _stream_claude(
     headers = {
         "Content-Type": "application/json",
         "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
+        "anthropic-version": "2024-10-22",
     }
 
     payload: Dict[str, Any] = {
         "model": model,
-        "max_tokens": 4096,
+        "max_tokens": 8192,
         "temperature": temperature,
         "stream": True,
         **claude_data,
@@ -945,7 +965,7 @@ async def _call_bedrock(
     body = {
         "messages": conversation,
         "temperature": temperature,
-        "max_tokens": 4096
+        "max_tokens": 8192
     }
     if json_mode:
         body["responseFormat"] = {"type": "json_object"}
@@ -972,7 +992,7 @@ async def _call_bedrock(
             modelId=model,
             messages=converse_messages,
             system=system_blocks,
-            inferenceConfig={"temperature": temperature, "maxTokens": 4096}
+            inferenceConfig={"temperature": temperature, "maxTokens": 8192}
         )
         return resp["output"]["message"]["content"][0]["text"]
     except Exception as e:
@@ -1019,7 +1039,7 @@ async def _stream_bedrock(
             modelId=model,
             messages=converse_messages,
             system=system_blocks,
-            inferenceConfig={"temperature": temperature, "maxTokens": 4096}
+            inferenceConfig={"temperature": temperature, "maxTokens": 8192}
         )
         for event in resp.get("stream", []):
             if "contentBlockDelta" in event:
@@ -1302,13 +1322,62 @@ async def fetch_models_from_provider(
         return []
 
     resolved_base_url = base_url or config.get("base_url", "")
-    if not resolved_base_url:
-        return config.get("models", [])
-
     adapter = config.get("adapter", "openai")
     base_url_str = resolved_base_url.rstrip("/")
     
-    if adapter in ("openai", "openai-compatible"):
+    if adapter == "gemini":
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={resolved_key}"
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    models = []
+                    for item in data.get("models", []):
+                        supported = item.get("supportedGenerationMethods", [])
+                        if "generateContent" in supported:
+                            model_id = item.get("name", "").replace("models/", "")
+                            if model_id:
+                                models.append({
+                                    "id": model_id,
+                                    "name": item.get("displayName", model_id),
+                                    "tier": "fast" if "flash" in model_id else "advanced"
+                                })
+                    if models:
+                        return models
+        except Exception as e:
+            print(f"[FETCH MODELS ERROR] Gemini: {e}")
+
+    elif adapter == "claude":
+        url = "https://api.anthropic.com/v1/models"
+        headers = {
+            "x-api-key": resolved_key,
+            "anthropic-version": "2024-10-22",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(url, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    models = []
+                    for item in data.get("data", []):
+                        model_id = item.get("id", "")
+                        if model_id:
+                            tier = "reasoning" if "opus" in model_id else \
+                                   "fast" if "haiku" in model_id else "advanced"
+                            models.append({
+                                "id": model_id,
+                                "name": item.get("display_name", model_id),
+                                "tier": tier
+                            })
+                    if models:
+                        return models
+        except Exception as e:
+            print(f"[FETCH MODELS ERROR] Claude: {e}")
+
+    elif adapter in ("openai", "openai-compatible"):
+        if not base_url_str:
+            return config.get("models", [])
         url = f"{base_url_str}/models"
         headers = {}
         if resolved_key:
@@ -1331,7 +1400,8 @@ async def fetch_models_from_provider(
                                 "name": model_id,
                                 "tier": "custom"
                             })
-                    return models
+                    if models:
+                        return models
         except Exception as e:
             print(f"[FETCH MODELS ERROR] Failed to fetch models for {provider}: {e}")
             

@@ -204,3 +204,59 @@ body {
   transform: scale(1.6) !important;
   box-shadow: 0 0 14px rgba(6, 182, 212, 0.9) !important;
 }
+
+@keyframes typewriterBlink {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
+}
+
+.animate-blink {
+  animation: typewriterBlink 0.8s step-end infinite;
+}
+
+/* Progress bar animation */
+@keyframes progress-slide {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(0%); }
+  100% { transform: translateX(100%); }
+}
+
+.animate-progress-slide {
+  animation: progress-slide 2s ease-in-out infinite;
+}
+
+/* Mobile Bottom Sheet Styles */
+.mobile-bottom-sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background-color: #0d0d0d;
+  border-top: 1px solid #1f1f1f;
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
+  z-index: 45;
+  box-shadow: 0 -10px 40px rgba(0,0,0,0.8);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.mobile-bottom-sheet-header {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  user-select: none;
+  background-color: #0a0a0a;
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
+  border-bottom: 1px solid #141414;
+}
+
+.mobile-bottom-sheet-handle {
+  width: 40px;
+  height: 4px;
+  background-color: #2e2e2e;
+  border-radius: 2px;
+}
+

@@ -17,11 +17,15 @@ export const metadata: Metadata = {
   description: 'An advanced agent orchestration workspace featuring rich conversation steering and active node clustering.',
 };
 
+import { ErrorBoundary } from '@/components/ErrorBoundary';
+
 export default function RootLayout({children}: {children: React.ReactNode}) {
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} dark`}>
       <body className="font-sans antialiased bg-black text-[#e5e2e1]" suppressHydrationWarning>
-        {children}
+        <ErrorBoundary>
+          {children}
+        </ErrorBoundary>
       </body>
     </html>
   );
