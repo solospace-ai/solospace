@@ -4,14 +4,13 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   Bot, Zap, SquarePlus, Key, History, Settings, User, ChevronRight, ChevronLeft,
   HelpCircle, UploadCloud, Eye, Mic, GitFork, ArrowRight, Database, Sliders,
-  X, Trash2, Globe, Terminal, Sparkles, Copy, Check, Square, DollarSign
+  X, Trash2, Globe, Terminal, Sparkles, Copy, Check, Square, Pencil, RefreshCw
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { ReactFlowProvider } from '@xyflow/react';
 import { useWorkflowStore, ChatMessage, AgentTalkLog } from "@/store/workflowStore";
 import FlowArena from "@/components/FlowArena";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
-import CostDashboard from "@/components/CostDashboard";
 import APIKeysModal from "@/components/APIKeysModal";
 import { useWebSocket } from "@/store/hooks/useWebSocket";
 
@@ -79,13 +78,15 @@ function SolospaceContent() {
   const [executionMode, setExecutionMode] = useState<"auto" | "custom">("auto");
   const [isSidebarExpanded, setIsSidebarExpanded] = useState<boolean>(true);
   const [isLoadingSession, setIsLoadingSession] = useState<boolean>(false);
-  const [isCostDashboardOpen, setIsCostDashboardOpen] = useState(false);
   const [userQuery, setUserQuery] = useState<string>("");
   const [isSecretOpen, setIsSecretOpen] = useState<boolean>(false);
   const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
   const [hoveredSidebarItem, setHoveredSidebarItem] = useState<string | null>(null);
   const [isConfigPanelOpen, setIsConfigPanelOpen] = useState<boolean>(false);
   const [newRuleText, setNewRuleText] = useState<string>("");
+  const [isTemplatesExpanded, setIsTemplatesExpanded] = useState<boolean>(true);
+
+  const isEchoHouseMode = useWorkflowStore(s => s.activeSessionId ? s.sessions[s.activeSessionId]?.mode === 'echohouse' : false);
 
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
 
@@ -114,10 +115,28 @@ function SolospaceContent() {
   }, [activeSessionId, workspaceState]);
 
   useEffect(() => {
-    fetchSessions().catch(e => console.error("Failed to load sessions:", e));
-    fetchAvailableProviders().catch(e => console.error("Failed to load providers:", e));
-    loadPersistedKeys().catch(e => console.error("Failed to load API keys:", e));
-    loadPersistedState().catch(e => console.error("Failed to load state:", e));
+    const init = async () => {
+      await fetchSessions().catch(e => console.error("Failed to load sessions:", e));
+      await fetchAvailableProviders().catch(e => console.error("Failed to load providers:", e));
+      await loadPersistedKeys().catch(e => console.error("Failed to load API keys:", e));
+      await loadPersistedState().catch(e => console.error("Failed to load state:", e));
+      if (useWorkflowStore.getState().isOrchestrating) {
+        useWorkflowStore.setState({
+          isOrchestrating: false,
+          isThinking: false,
+          abortController: null
+        });
+      }
+    };
+    init();
+
+    const handleUnload = () => {
+      useWorkflowStore.getState().saveCurrentSession();
+    };
+    window.addEventListener("beforeunload", handleUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleUnload);
+    };
   }, []);
 
   useEffect(() => {
@@ -127,8 +146,115 @@ function SolospaceContent() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  const startOrchestration = (promptText: string) => {
+  const startOrchestration = async (promptText: string) => {
     if (!promptText.trim()) return;
+
+    if (isEchoHouseMode) {
+      const userMsgId = Date.now().toString();
+      const userMsg: ChatMessage = {
+        id: userMsgId,
+        sender: "user",
+        text: promptText,
+        speakerName: "You (Self)",
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      setChatMessages((prev) => [...prev, userMsg]);
+      setUserQuery("");
+      setCurrentTab("arena");
+
+      const selfNode = {
+        id: "self-node",
+        type: "custom",
+        position: { x: 300, y: 200 },
+        data: {
+          name: "You (Self)",
+          tag: "SELF",
+          icon: "bot",
+          objective: promptText.length > 120 ? promptText.substring(0, 120) + "..." : promptText,
+          systemPrompt: "You are the user themselves, experiencing this problem from the inside.",
+          status: "IDLE" as const,
+          enabled: true,
+          isEchoHouseAgent: true,
+          echohouseRole: "self",
+          echohouseProblem: promptText,
+          rules: [],
+          dependencies: [],
+          tools: [],
+          toolPermissions: {},
+          temp: 0.7,
+          logic: 70,
+          empathy: 50,
+          priority: 5,
+          toolLogs: [],
+          personality: "",
+          senderId: "self-node"
+        }
+      };
+      setNodes([selfNode]);
+      setEdges([]);
+
+      try {
+        const activeProv = useWorkflowStore.getState().provider;
+        const apiKey = useWorkflowStore.getState().apiKeys[activeProv] || useWorkflowStore.getState().apiKey || "";
+        const resp = await fetch("/api/gemini/echohouse/init", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            problem_text: promptText,
+            provider: activeProv,
+            model: useWorkflowStore.getState().model,
+            api_key: apiKey,
+            api_keys: useWorkflowStore.getState().apiKeys,
+            base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null
+          })
+        });
+        if (resp.ok) {
+          const suggestedCast = await resp.json();
+          const nodesList = [selfNode];
+          suggestedCast.forEach((member: any, idx: number) => {
+            if (member.is_self || member.role === "self") return;
+            
+            const angle = (idx * 2 * Math.PI) / (suggestedCast.length - 1 || 1);
+            const x = 300 + Math.cos(angle) * 250;
+            const y = 200 + Math.sin(angle) * 200;
+            
+            nodesList.push({
+              id: `echo-agent-${idx}-${Date.now()}`,
+              type: "custom",
+              position: { x: Math.max(50, x), y: Math.max(50, y) },
+              data: {
+                name: member.inferred_name,
+                tag: member.role.toUpperCase().replace(/\s+/g, "_"),
+                icon: "science",
+                objective: `Provide perspective as ${member.inferred_name} (${member.role}).`,
+                systemPrompt: `You are ${member.inferred_name}, whose role in the user's life is ${member.role}. From your perspective about their situation: ${member.inferred_problem}`,
+                status: "IDLE" as const,
+                enabled: true,
+                isEchoHouseAgent: true,
+                echohouseRole: member.role,
+                echohouseProblem: member.inferred_problem,
+                rules: [],
+                dependencies: [],
+                tools: [],
+                toolPermissions: {},
+                temp: 0.8,
+                logic: 70,
+                empathy: 50,
+                priority: 5,
+                toolLogs: [],
+                personality: "",
+                senderId: `echo-agent-${idx}-${Date.now()}`
+              }
+            });
+          });
+          setNodes(nodesList);
+        }
+      } catch (e) {
+        console.error("Failed to suggest cast:", e);
+      }
+      return;
+    }
+
     setWorkspaceState("active");
     setCurrentTab("chat");
     let sessionId = activeSessionId;
@@ -136,6 +262,17 @@ function SolospaceContent() {
     setExecutionState("running");
     triggerSteerOrchestration(promptText, executionMode !== "custom", executionMode);
     setUserQuery("");
+  };
+
+  const handleRegenerate = () => {
+    const lastAIIdx = chatMessages.findLastIndex(m => m.sender === "ai");
+    if (lastAIIdx === -1) return;
+    
+    const lastUserMsg = chatMessages.slice(0, lastAIIdx).findLast(m => m.sender === "user");
+    if (!lastUserMsg) return;
+
+    setChatMessages((prev) => prev.slice(0, lastAIIdx));
+    startOrchestration(lastUserMsg.text);
   };
 
   const handleAddRule = () => {
@@ -172,7 +309,7 @@ function SolospaceContent() {
 
   return (
     <div className="flex h-screen w-full bg-black text-[#f5f5f5] overflow-hidden font-sans">
-      <aside className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-30 select-none ${isSidebarExpanded ? "w-64" : "w-[60px]"}`}>
+      <aside onClick={() => { if (!isSidebarExpanded) setIsSidebarExpanded(true); }} className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-30 select-none cursor-pointer ${isSidebarExpanded ? "w-64 cursor-default" : "w-[60px]"}`}>
         <div className="flex items-center gap-3 h-16 border-b border-[#1f1f1f] px-4 justify-between">
           {isSidebarExpanded ? (
             <div className="flex items-center gap-2.5">
@@ -182,19 +319,60 @@ function SolospaceContent() {
           ) : (
             <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center mx-auto"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
           )}
-          {isSidebarExpanded && <button onClick={() => setIsSidebarExpanded(false)} className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>}
+          {isSidebarExpanded && <button onClick={(e) => { e.stopPropagation(); setIsSidebarExpanded(false); }} className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>}
         </div>
 
         <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto custom-scrollbar">
-          <button onClick={() => { useWorkflowStore.getState().abortController?.abort(); setWorkspaceState("home"); setUserQuery(""); useWorkflowStore.setState({ activeSessionId: null, nodes: [], edges: [], chatMessages: [], agentTalkLogs: [], executionState: "setup", statusMessage: "", isThinking: false, isOrchestrating: false, liveThoughts: "", pendingApproval: null, followUpSuggestions: [], abortController: null }); }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
+          <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); useWorkflowStore.getState().abortController?.abort(); setWorkspaceState("home"); setUserQuery(""); useWorkflowStore.setState({ activeSessionId: null, nodes: [], edges: [], chatMessages: [], agentTalkLogs: [], executionState: "setup", statusMessage: "", isThinking: false, isOrchestrating: false, liveThoughts: "", pendingApproval: null, followUpSuggestions: [], abortController: null }); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
             <SquarePlus className="w-5 h-5 stroke-[1.8]" />
             {isSidebarExpanded && <span className="text-xs font-semibold">New Chat</span>}
           </button>
 
-          <button onClick={() => setIsSecretOpen(true)} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
+          <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsSecretOpen(true); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
             <Key className="w-5 h-5 stroke-[1.8]" />
             {isSidebarExpanded && <span className="text-xs font-semibold">API Keys</span>}
           </button>
+
+          {/* Templates Section */}
+          <div className="pt-2 select-none">
+            {isSidebarExpanded ? (
+              <>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setIsTemplatesExpanded(!isTemplatesExpanded); }}
+                  className="w-full flex items-center justify-between px-3 py-1.5 text-neutral-600 hover:text-neutral-400 cursor-pointer"
+                >
+                  <span className="text-[10px] font-bold uppercase tracking-widest font-mono">Templates</span>
+                  <ChevronRight className={`w-3.5 h-3.5 transition-transform duration-200 ${isTemplatesExpanded ? "rotate-90" : ""}`} />
+                </button>
+                {isTemplatesExpanded && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      createSession("EchoHouse Simulation", "echohouse");
+                      setWorkspaceState("active");
+                      setCurrentTab("chat");
+                    }}
+                    className="w-full flex items-center rounded-lg transition-all duration-150 py-2.5 px-3 gap-3 hover:bg-neutral-900 text-neutral-200 cursor-pointer"
+                  >
+                    <Globe className="w-5 h-5 stroke-[1.8]" />
+                    <span className="text-xs font-semibold">EchoHouse</span>
+                  </button>
+                )}
+              </>
+            ) : (
+              <button
+                onClick={() => {
+                  createSession("EchoHouse Simulation", "echohouse");
+                  setWorkspaceState("active");
+                  setCurrentTab("chat");
+                }}
+                className="w-full flex items-center justify-center rounded-lg transition-all duration-150 py-2.5 hover:bg-neutral-900 text-neutral-400 cursor-pointer"
+                title="EchoHouse Template"
+              >
+                <Globe className="w-5 h-5 stroke-[1.8]" />
+              </button>
+            )}
+          </div>
 
           {isSidebarExpanded && (
             <div className="pt-6 space-y-2 select-none">
@@ -203,8 +381,8 @@ function SolospaceContent() {
                 {Object.values(sessions).length === 0 ? <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span> : (
                   Object.values(sessions).reverse().map((s) => (
                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
-                      <button disabled={isLoadingSession} onClick={async () => { setIsLoadingSession(true); try { await loadSessionFromDb(s.id); setWorkspaceState("active"); setCurrentTab("chat"); } catch (err) { console.error(err); } finally { setIsLoadingSession(false); } }} className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${activeSessionId === s.id ? "text-white font-bold" : "text-neutral-500 hover:text-white"}`} title={s.prompt}>{s.title}</button>
-                      <button onClick={async (e) => { e.stopPropagation(); if (confirm(`Delete "${s.title}"?`)) await deleteSessionFromDb(s.id); }} className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+                      <button disabled={isLoadingSession} onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsLoadingSession(true); try { await loadSessionFromDb(s.id); setWorkspaceState("active"); setCurrentTab("chat"); } catch (err) { console.error(err); } finally { setIsLoadingSession(false); } } }} className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${activeSessionId === s.id ? "text-white font-bold" : "text-neutral-500 hover:text-white"}`} title={s.prompt}>{s.title}</button>
+                      <button onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); if (confirm(`Delete "${s.title}"?`)) await deleteSessionFromDb(s.id); } }} className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
                     </div>
                   ))
                 )}
@@ -214,7 +392,7 @@ function SolospaceContent() {
         </nav>
       </aside>
 
-      <main className="flex-1 flex flex-col min-w-0 bg-[#000000] relative transition-all duration-300">
+      <main onClick={() => { if (isSidebarExpanded && window.innerWidth < 768) setIsSidebarExpanded(false); }} className="flex-1 flex flex-col min-w-0 bg-[#000000] relative transition-all duration-300">
         <header className="flex justify-between items-center w-full px-6 h-16 border-b border-[#141414] shrink-0 z-10 bg-black/85 backdrop-blur-md">
           <div className="flex items-center gap-2">
             {isConnected && activeSessionId && (
@@ -232,7 +410,6 @@ function SolospaceContent() {
             )}
           </div>
           <div className="flex items-center gap-2 select-none">
-            <button onClick={() => setIsCostDashboardOpen(true)} className="text-neutral-400 hover:text-emerald-400 p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer" title="Cost & Token Dashboard"><DollarSign className="w-4 h-4 stroke-[1.8]" /></button>
             <button onClick={() => alert("Solospace AI OS")} className="text-neutral-400 hover:text-white p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer"><HelpCircle className="w-4 h-4 stroke-[1.8]" /></button>
           </div>
         </header>
@@ -243,13 +420,17 @@ function SolospaceContent() {
               <div />
               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
                 <div className="text-center mb-10 space-y-2 select-none">
-                  <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">What&apos;s on your mind?</h1>
-                  <p className="text-sm text-neutral-400 font-sans">Ask anything. Get a real, complete answer instantly.</p>
+                  <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">
+                    {isEchoHouseMode ? "What is your problem in life?" : "What's on your mind?"}
+                  </h1>
+                  <p className="text-sm text-neutral-400 font-sans">
+                    {isEchoHouseMode ? "Describe your struggle below to initialize the simulation." : "Ask anything. Get a real, complete answer instantly."}
+                  </p>
                 </div>
                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
                   <div className="flex items-center gap-3">
                     <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
-                    <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder="Describe your idea, problem, or question..." className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
+                    <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder={isEchoHouseMode ? "What is your problem in life?" : "Describe your idea, problem, or question..."} className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
                     <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim()} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
                   </div>
                 </div>
@@ -272,31 +453,86 @@ function SolospaceContent() {
                       <div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" /></div>
                     ) : (
                       <div className="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto space-y-4 select-text">
-                        {chatMessages.map((msg, msgIdx) => (
-                          <motion.div key={msg.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={`flex w-full ${msg.sender === "user" ? "justify-end" : "justify-start"}`}>
-                            {msg.sender === "user" ? (
-                              <div className="max-w-[72%] rounded-3xl px-5 py-3 bg-[#2f2f2f] text-neutral-100 text-sm leading-relaxed"><p className="whitespace-pre-wrap">{msg.text}</p></div>
-                            ) : (
-                              <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
-                                <div className="w-full text-neutral-100 text-sm leading-relaxed px-1 py-2">
-                                  {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
-                                  {msg.text && (!isOrchestrating || msgIdx !== chatMessages.length - 1) && (
-                                    <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
-                                      <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
-                                        {copiedMsgId === msg.id ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400 font-medium">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
+                        {chatMessages.length === 0 ? (
+                          <div className="flex flex-col items-center justify-center py-20 text-center space-y-2 select-none">
+                            <h1 className="text-2xl font-bold text-white">
+                              {isEchoHouseMode ? "What is your problem in life?" : "What's on your mind?"}
+                            </h1>
+                            <p className="text-xs text-neutral-500">
+                              {isEchoHouseMode ? "Type your struggle below to initialize the simulation." : "Start a conversation to see AI response."}
+                            </p>
+                          </div>
+                        ) : (
+                          chatMessages.map((msg, msgIdx) => (
+                            <motion.div key={msg.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={`flex w-full ${msg.sender === "user" ? "justify-end" : "justify-start"}`}>
+                              {msg.sender === "user" ? (
+                                <div className="flex flex-col items-end space-y-1 max-w-[72%] group">
+                                  {msg.speakerName && (
+                                    <span className="text-[10px] font-mono text-neutral-500 mr-2">{msg.speakerName}</span>
+                                  )}
+                                  <div className="rounded-3xl px-5 py-3 bg-[#2f2f2f] text-neutral-100 text-sm leading-relaxed"><p className="whitespace-pre-wrap">{msg.text}</p></div>
+                                  <div className="flex items-center gap-3 mt-1.5 text-neutral-500 select-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 mr-2">
+                                    <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
+                                      {copiedMsgId === msg.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                                      <span>{copiedMsgId === msg.id ? "Copied" : "Copy"}</span>
+                                    </button>
+                                    <button onClick={() => { setUserQuery(msg.text); textareaRef.current?.focus(); textareaRef.current?.scrollIntoView({ behavior: "smooth" }); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
+                                      <Pencil className="w-3 h-3" />
+                                      <span>Edit</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
+                                  {msg.speakerName === "insight" && (
+                                    <div className="w-full flex items-center gap-4 my-6">
+                                      <div className="h-px flex-1 bg-[#1f1f1f]" />
+                                      <span className="text-[10px] font-mono text-neutral-500 tracking-wider uppercase">Simulation Analysis</span>
+                                      <div className="h-px flex-1 bg-[#1f1f1f]" />
+                                    </div>
+                                  )}
+                                  {msg.speakerName && msg.speakerName !== "insight" && (
+                                    <span className="text-[10px] font-mono text-neutral-500 ml-1">{msg.speakerName}</span>
+                                  )}
+                                  <div className="w-full text-neutral-100 text-sm leading-relaxed px-1 py-2">
+                                    {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
+                                    {msg.text && (!isOrchestrating || msgIdx !== chatMessages.length - 1) && (
+                                      <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
+                                        <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
+                                          {copiedMsgId === msg.id ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400 font-medium">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
+                                        </button>
+                                        {!isEchoHouseMode && msgIdx === chatMessages.length - 1 && !isOrchestrating && (
+                                          <button onClick={handleRegenerate} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
+                                            <RefreshCw className="w-3.5 h-3.5" />
+                                            <span>Regenerate</span>
+                                          </button>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                  {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && nodes.length > 0 && (
+                                    <div className="flex gap-3 mt-4 select-none">
+                                      <button onClick={() => setCurrentTab("arena")} className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max">
+                                        <GitFork className="w-3.5 h-3.5 text-cyan-400" /><span>See Agent Flow</span>
                                       </button>
+                                      {!isEchoHouseMode && useWorkflowStore.getState().executionState === "paused" && (
+                                        <button
+                                          onClick={async () => {
+                                            setExecutionState("running");
+                                            await useWorkflowStore.getState().triggerCustomExecution();
+                                          }}
+                                          className="px-4 py-2 bg-white hover:bg-neutral-200 rounded-xl text-xs font-bold text-black transition-all flex items-center gap-1.5 cursor-pointer max-w-max"
+                                        >
+                                          Proceed
+                                        </button>
+                                      )}
                                     </div>
                                   )}
                                 </div>
-                                {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && nodes.length > 0 && (
-                                  <button onClick={() => setCurrentTab("arena")} className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max select-none">
-                                    <GitFork className="w-3.5 h-3.5 text-cyan-400" /><span>See Agent Flow</span>
-                                  </button>
-                                )}
-                              </div>
-                            )}
-                          </motion.div>
-                        ))}
+                              )}
+                            </motion.div>
+                          ))
+                        )}
                         <div ref={chatEndRef} />
                       </div>
                     )}
@@ -304,7 +540,7 @@ function SolospaceContent() {
                   <div className="px-4 sm:px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
                       <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
-                      <textarea ref={textareaRef} rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery); } }} placeholder={isOrchestrating ? "Streaming..." : "Ask a follow-up..."} disabled={isOrchestrating} className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar" />
+                      <textarea ref={textareaRef} rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery); } }} placeholder={isOrchestrating ? "Streaming..." : isEchoHouseMode ? "What is your problem in life?" : "Ask a follow-up..."} disabled={isOrchestrating} className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar" />
                       <div className="flex items-center gap-2 shrink-0">
                         <ModeSelector />
                         {isOrchestrating ? (
@@ -322,7 +558,7 @@ function SolospaceContent() {
                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#0d0d0d]/90 border border-[#1f1f1f] rounded-full px-4 py-2 backdrop-blur-md shadow-xl pointer-events-auto">
                     <button onClick={() => setCurrentTab("chat")} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-mono"><ChevronLeft className="w-3.5 h-3.5" /> Back to Chat</button>
                   </div>
-                  <FlowArena />
+                  <FlowArena onProceed={() => setCurrentTab("chat")} />
                 </div>
               )}
             </div>
@@ -337,14 +573,83 @@ function SolospaceContent() {
             <button onClick={() => { setIsConfigPanelOpen(false); setSelectedNodeId(null); }} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
           </div>
           <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
-            <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label><input type="text" value={activeNodeDetail.data.name} onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none" /></div>
-            <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label><textarea value={activeNodeDetail.data.systemPrompt} onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed" /></div>
+            {activeNodeDetail.data.isEchoHouseAgent ? (
+              <>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label>
+                  <input
+                    type="text"
+                    value={activeNodeDetail.data.name}
+                    onChange={(e) => {
+                      const nameVal = e.target.value;
+                      const roleVal = activeNodeDetail.data.echohouseRole || "";
+                      const probVal = activeNodeDetail.data.echohouseProblem || "";
+                      updateNodeField(activeNodeDetail.id, {
+                        name: nameVal,
+                        systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+                        objective: nameVal === "You (Self)" || roleVal === "self"
+                          ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
+                          : `Provide perspective as ${nameVal} (${roleVal}).`
+                      });
+                    }}
+                    className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Role</label>
+                  <input
+                    type="text"
+                    value={activeNodeDetail.data.echohouseRole}
+                    disabled={activeNodeDetail.data.echohouseRole === "self"}
+                    onChange={(e) => {
+                      const nameVal = activeNodeDetail.data.name || "";
+                      const roleVal = e.target.value;
+                      const probVal = activeNodeDetail.data.echohouseProblem || "";
+                      updateNodeField(activeNodeDetail.id, {
+                        echohouseRole: roleVal,
+                        tag: roleVal.toUpperCase().replace(/\s+/g, '_'),
+                        systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+                        objective: `Provide perspective as ${nameVal} (${roleVal}).`
+                      });
+                    }}
+                    className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none disabled:opacity-40"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">
+                    {activeNodeDetail.data.echohouseRole === "self" ? "Your problem in life" : "What do they think about your situation?"}
+                  </label>
+                  <textarea
+                    value={activeNodeDetail.data.echohouseProblem}
+                    onChange={(e) => {
+                      const nameVal = activeNodeDetail.data.name || "";
+                      const roleVal = activeNodeDetail.data.echohouseRole || "";
+                      const probVal = e.target.value;
+                      updateNodeField(activeNodeDetail.id, {
+                        echohouseProblem: probVal,
+                        systemPrompt: roleVal === "self"
+                          ? "You are the user themselves, experiencing this problem from the inside."
+                          : `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+                        objective: roleVal === "self"
+                          ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
+                          : `Provide perspective as ${nameVal} (${roleVal}).`
+                      });
+                    }}
+                    className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[100px] resize-none leading-relaxed"
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label><input type="text" value={activeNodeDetail.data.name} onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none" /></div>
+                <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label><textarea value={activeNodeDetail.data.systemPrompt} onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed" /></div>
+              </>
+            )}
           </div>
         </div>
       )}
 
       <AnimatePresence>
-        {isCostDashboardOpen && <CostDashboard isOpen={isCostDashboardOpen} onClose={() => setIsCostDashboardOpen(false)} currentSessionId={activeSessionId} currentSessionCost={0.042} currentModel={model} currentProvider={provider} />}
         {isSecretOpen && <APIKeysModal isOpen={isSecretOpen} onClose={() => setIsSecretOpen(false)} />}
         
         {pendingApproval && (

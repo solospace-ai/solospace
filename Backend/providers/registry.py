@@ -1,4 +1,210 @@
+import json
+import random
+import asyncio
+import httpx
 from typing import Optional, List, Dict, Any, AsyncGenerator
+
+from .base import (
+    get_provider_config,
+    resolve_api_key,
+    PROVIDERS,
+    extract_json_from_text,
+    call_with_retry,
+    MAX_RETRIES,
+    BASE_DELAY,
+    MAX_DELAY,
+    JITTER_FACTOR,
+)
+from .gemini import _call_gemini, _stream_gemini
+from .claude import _call_claude, _stream_claude
+from .openai_compat import _call_openai_compatible, _stream_openai_compatible
+
+
+# ─── Cohere Adapter ──────────────────────────────────────────────────
+
+async def _call_cohere(
+    config: Dict[str, Any],
+    model: str,
+    api_key: str,
+    messages: List[Dict[str, str]],
+    system_prompt: str,
+    temperature: float = 0.7,
+    json_mode: bool = False,
+    json_schema_hint: str = None,
+    timeout: float = 30.0,
+) -> str:
+    url = "https://api.cohere.ai/v2/chat"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    
+    cohere_msgs = []
+    if system_prompt:
+        cohere_msgs.append({"role": "system", "content": system_prompt})
+    for msg in messages:
+        role = "assistant" if msg.get("role") in ["model", "assistant"] else "user"
+        cohere_msgs.append({"role": role, "content": msg.get("content", "")})
+
+    payload = {
+        "model": model or "command-r-plus",
+        "messages": cohere_msgs,
+        "temperature": temperature,
+    }
+    
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(url, json=payload, headers=headers, timeout=timeout)
+        if resp.status_code != 200:
+            raise Exception(f"Cohere error ({resp.status_code}): {resp.text[:500]}")
+        data = resp.json()
+        return data["message"]["content"][0]["text"]
+
+
+async def _stream_cohere(
+    config: Dict[str, Any],
+    model: str,
+    api_key: str,
+    messages: List[Dict[str, str]],
+    system_prompt: str,
+    temperature: float = 0.7,
+    timeout: float = 90.0,
+) -> AsyncGenerator[str, None]:
+    url = "https://api.cohere.ai/v2/chat"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    
+    cohere_msgs = []
+    if system_prompt:
+        cohere_msgs.append({"role": "system", "content": system_prompt})
+    for msg in messages:
+        role = "assistant" if msg.get("role") in ["model", "assistant"] else "user"
+        cohere_msgs.append({"role": role, "content": msg.get("content", "")})
+
+    payload = {
+        "model": model or "command-r-plus",
+        "messages": cohere_msgs,
+        "temperature": temperature,
+        "stream": True,
+    }
+
+    async with httpx.AsyncClient() as client:
+        async with client.stream("POST", url, json=payload, headers=headers, timeout=timeout) as resp:
+            if resp.status_code != 200:
+                err_body = await resp.aread()
+                raise Exception(f"Cohere stream error ({resp.status_code}): {err_body.decode()[:500]}")
+            async for line in resp.aiter_lines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    event_type = obj.get("type", "")
+                    if event_type == "content-delta":
+                        text = obj.get("delta", {}).get("message", {}).get("content", {}).get("text", "")
+                        if text:
+                            yield text
+                except Exception:
+                    continue
+
+
+# ─── AWS Bedrock Adapter ─────────────────────────────────────────────
+
+async def _call_bedrock(
+    config: Dict[str, Any],
+    model: str,
+    api_key: str,
+    messages: List[Dict[str, str]],
+    system_prompt: str,
+    temperature: float = 0.7,
+    json_mode: bool = False,
+    json_schema_hint: str = None,
+    timeout: float = 30.0,
+) -> str:
+    import boto3
+    session = boto3.Session()
+    client = session.client(service_name="bedrock-runtime")
+    
+    converse_msgs = []
+    for msg in messages:
+        role = "assistant" if msg.get("role") in ["model", "assistant"] else "user"
+        converse_msgs.append({
+            "role": role,
+            "content": [{"text": msg.get("content", "")}]
+        })
+    
+    system_config = []
+    if system_prompt:
+        system_config.append({"text": system_prompt})
+
+    loop = asyncio.get_event_loop()
+    def _run():
+        return client.converse(
+            modelId=model,
+            messages=converse_msgs,
+            system=system_config,
+            inferenceConfig={
+                "temperature": temperature,
+                "maxTokens": 4096
+            }
+        )
+        
+    resp = await loop.run_in_executor(None, _run)
+    return resp["output"]["message"]["content"][0]["text"]
+
+
+async def _stream_bedrock(
+    config: Dict[str, Any],
+    model: str,
+    api_key: str,
+    messages: List[Dict[str, str]],
+    system_prompt: str,
+    temperature: float = 0.7,
+    timeout: float = 90.0,
+) -> AsyncGenerator[str, None]:
+    import boto3
+    session = boto3.Session()
+    client = session.client(service_name="bedrock-runtime")
+    
+    converse_msgs = []
+    for msg in messages:
+        role = "assistant" if msg.get("role") in ["model", "assistant"] else "user"
+        converse_msgs.append({
+            "role": role,
+            "content": [{"text": msg.get("content", "")}]
+        })
+        
+    system_config = []
+    if system_prompt:
+        system_config.append({"text": system_prompt})
+
+    loop = asyncio.get_event_loop()
+    def _run_stream():
+        return client.converse_stream(
+            modelId=model,
+            messages=converse_msgs,
+            system=system_config,
+            inferenceConfig={
+                "temperature": temperature,
+                "maxTokens": 4096
+            }
+        )
+        
+    response = await loop.run_in_executor(None, _run_stream)
+    stream = response.get("stream")
+    if stream:
+        for event in stream:
+            if "contentBlockDelta" in event:
+                text = event["contentBlockDelta"]["delta"].get("text", "")
+                if text:
+                    yield text
+
+
+# ─── Registry Operations ─────────────────────────────────────────────
 
 async def call_provider(
     provider: str,
@@ -63,7 +269,6 @@ async def call_provider(
             fallback_model = fallback_config.get("default_model", "")
             fallback_key = resolve_api_key(fallback_provider, None, api_keys)
             
-            # Extract optional custom base URL for fallback from frontend dictionary if configured
             fallback_base_url = None
             
             return await call_provider(
@@ -314,9 +519,9 @@ async def fetch_models_from_provider(
                             tier = "reasoning" if "opus" in model_id else \
                                    "fast" if "haiku" in model_id else "advanced"
                             models.append({
-                                "id": model_id,
-                                "name": item.get("display_name", model_id),
-                                "tier": tier
+                                    "id": model_id,
+                                    "name": item.get("display_name", model_id),
+                                    "tier": tier
                             })
                     if models:
                         return models

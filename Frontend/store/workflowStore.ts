@@ -52,6 +52,7 @@ export interface ChatMessage {
   text: string;
   thinkingSummary?: string;
   timestamp: string;
+  speakerName?: string;
 }
 
 export interface AgentTalkLog {
@@ -76,7 +77,7 @@ export interface ChatSession {
   id: string;
   title: string;
   prompt: string;
-  mode: 'auto' | 'custom';  // Smart routing only - quick mode removed
+  mode: 'auto' | 'custom' | 'echohouse';
   nodes: Node[];
   edges: Edge[];
   chatMessages: ChatMessage[];
@@ -144,8 +145,7 @@ export interface WorkflowState {
   setAgentTalkLogs: (logs: AgentTalkLog[] | ((prev: AgentTalkLog[]) => AgentTalkLog[])) => void;
   setPendingApproval: (val: PendingApproval | null) => void;
 
-  // Session Actions
-  createSession: (prompt: string, mode: 'auto' | 'custom') => string;  // Smart routing only
+  createSession: (prompt: string, mode: 'auto' | 'custom' | 'echohouse') => string;
   forkSession: (sessionId: string) => Promise<string | null>;
   switchSession: (sessionId: string) => void;
   saveCurrentSession: () => void;
@@ -155,6 +155,7 @@ export interface WorkflowState {
 
   triggerSteerOrchestration: (promptText: string, execute?: boolean, mode?: string) => void;
   triggerCustomExecution: () => Promise<void>;
+  triggerEchoHouseSimulation: () => Promise<void>;
 }
 
 let saveTimeout: any = null;
@@ -253,7 +254,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   loadPersistedKeys: async () => {
     try {
       const state = get();
-      const providers = ['gemini', 'openai', 'anthropic', 'groq', 'deepseek', 'openrouter', 'ollama'];
+      const providers = ['gemini', 'openai', 'anthropic', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia'];
       const loadedKeys: Record<string, string> = {};
       for (const p of providers) {
         const encrypted = await idbGet<string>(`apikey_${p}`);
@@ -312,15 +313,21 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       const state = get();
       const apiKey = state.apiKeys[providerId] || state.apiKey || "";
       const baseUrl = state.providerBaseUrls[providerId] || "";
-      const resp = await fetch("/api/gemini/models", {
-        method: "POST",
+      const isOllama = providerId === "ollama";
+      
+      const endpoint = isOllama ? "/api/gemini/ollama" : "/api/gemini/models";
+      const method = isOllama ? "GET" : "POST";
+      const body = isOllama ? undefined : JSON.stringify({
+        provider: providerId,
+        api_key: apiKey,
+        api_keys: state.apiKeys,
+        base_url: baseUrl
+      });
+
+      const resp = await fetch(endpoint, {
+        method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: providerId,
-          api_key: apiKey,
-          api_keys: state.apiKeys,
-          base_url: baseUrl
-        })
+        body
       });
       if (resp.ok) {
         const data = await resp.json();
@@ -518,8 +525,10 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
   setPendingApproval: (val) => set({ pendingApproval: val }),
 
-  // Session Actions
   createSession: (prompt, mode) => {
+    const ctrl = get().abortController;
+    if (ctrl) ctrl.abort();
+
     const sessionId = Date.now().toString();
     const newSession: ChatSession = {
       id: sessionId,
@@ -544,7 +553,13 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       agentTalkLogs: [],
       executionState: "setup",
       statusMessage: "",
-      followUpSuggestions: []
+      followUpSuggestions: [],
+      isOrchestrating: false,
+      isThinking: false,
+      liveThoughts: "",
+      pendingApproval: null,
+      selectedNodeId: null,
+      abortController: null
     }));
 
     return sessionId;
@@ -610,6 +625,9 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   switchSession: (sessionId) => {
+    const ctrl = get().abortController;
+    if (ctrl) ctrl.abort();
+
     const currentSessionId = get().activeSessionId;
     if (currentSessionId) {
       const currentSession: ChatSession = {
@@ -639,9 +657,14 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
         chatMessages: newSession.chatMessages,
         agentTalkLogs: newSession.agentTalkLogs,
         executionState: newSession.executionState,
-        statusMessage: newSession.statusMessage,
-        followUpSuggestions: newSession.followUpSuggestions || [],
-        selectedNodeId: null
+        statusMessage: "",
+        followUpSuggestions: [],
+        selectedNodeId: null,
+        isOrchestrating: false,
+        isThinking: false,
+        liveThoughts: "",
+        pendingApproval: null,
+        abortController: null
       });
     }
   },
@@ -683,6 +706,9 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   loadSessionFromDb: async (sessionId: string) => {
+    const ctrl = get().abortController;
+    if (ctrl) ctrl.abort();
+
     try {
       const response = await fetch(`/api/gemini/sessions/${sessionId}`);
       if (response.ok) {
@@ -709,9 +735,14 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           chatMessages: session.chatMessages,
           agentTalkLogs: session.agentTalkLogs,
           executionState: session.executionState,
-          statusMessage: session.statusMessage,
-          followUpSuggestions: session.followUpSuggestions || [],
-          selectedNodeId: null
+          statusMessage: "",
+          followUpSuggestions: [],
+          selectedNodeId: null,
+          isOrchestrating: false,
+          isThinking: false,
+          liveThoughts: "",
+          pendingApproval: null,
+          abortController: null
         }));
       }
     } catch (e) {
@@ -772,6 +803,10 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     const preExistingNodes = [...get().nodes];
     const preExistingEdges = [...get().edges];
 
+    const chatMsgs = get().chatMessages;
+    const lastMsg = chatMsgs[chatMsgs.length - 1];
+    const isDuplicate = lastMsg && lastMsg.sender === "user" && lastMsg.text === promptText;
+
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
       sender: "user",
@@ -780,7 +815,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     };
 
     set((state) => ({
-      chatMessages: [...state.chatMessages, userMsg],
+      chatMessages: isDuplicate ? state.chatMessages : [...state.chatMessages, userMsg],
       isOrchestrating: true,
       isThinking: true,
       statusMessage: "",
@@ -1062,6 +1097,125 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           edges: [],
           followUpSuggestions: []
         }));
+      }
+      set({ abortController: null, isThinking: false, isOrchestrating: false });
+      get().saveCurrentSession();
+    } finally {
+      set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
+      get().saveCurrentSession();
+    }
+  },
+
+  triggerEchoHouseSimulation: async () => {
+    const activeSessionId = get().activeSessionId;
+    if (!activeSessionId) return;
+
+    const selfNode = get().nodes.find(n => (n.data as any).echohouseRole === "self");
+    if (!selfNode) return;
+    const problemText = (selfNode.data as any).echohouseProblem || "";
+
+    const cast = get().nodes
+      .filter(n => (n.data as any).isEchoHouseAgent === true)
+      .map(n => ({
+        inferred_name: n.data.name,
+        role: (n.data as any).echohouseRole || "",
+        inferred_problem: (n.data as any).echohouseProblem || "",
+        is_self: (n.data as any).echohouseRole === "self"
+      }));
+
+    // Abort any active orchestration
+    const currentController = get().abortController;
+    if (currentController) {
+      currentController.abort();
+    }
+
+    const controller = new AbortController();
+
+    set({
+      isOrchestrating: true,
+      isThinking: true,
+      statusMessage: "Initializing social simulation...",
+      liveThoughts: "",
+      agentTalkLogs: [],
+      followUpSuggestions: [],
+      abortController: controller
+    });
+    get().saveCurrentSession();
+
+    try {
+      const activeProv = get().provider;
+      const apiKey = get().apiKeys[activeProv] || get().apiKey || "";
+      const response = await fetch("/api/gemini/echohouse/simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: activeSessionId,
+          problem_text: problemText,
+          cast: cast,
+          provider: activeProv,
+          model: get().model,
+          api_key: apiKey,
+          api_keys: get().apiKeys,
+          base_url: get().providerBaseUrls[activeProv] || null
+        }),
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({ detail: "Simulation failed." }));
+        throw new Error(errData.detail || `Server status error: ${response.status}`);
+      }
+
+      let currentStreamingMsgId = "";
+      let currentText = "";
+
+      const handlers = {
+        onText: (token: string) => {
+          if (!currentStreamingMsgId) return;
+          currentText += token;
+          set((state) => ({
+            isThinking: false,
+            chatMessages: state.chatMessages.map(m =>
+              m.id === currentStreamingMsgId ? { ...m, text: currentText } : m
+            )
+          }));
+        },
+        onThinking: () => {},
+        onStatus: (msg: string) => set({ statusMessage: msg }),
+        onMetadata: (meta: Record<string, any>) => {
+          if (meta.active_speaker) {
+            const isSelf = meta.active_speaker === "You (Self)" || (meta.active_speaker || "").toLowerCase() === "self";
+            const newMsgId = `echo-msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            
+            const newMsg: ChatMessage = {
+              id: newMsgId,
+              sender: isSelf ? "user" : "ai",
+              text: "",
+              speakerName: meta.active_speaker,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            };
+
+            set((state) => ({
+              chatMessages: [...state.chatMessages, newMsg]
+            }));
+
+            currentStreamingMsgId = newMsgId;
+            currentText = "";
+          }
+        },
+        onToolApproval: () => {},
+        onDone: () => {},
+        onError: (err: Error) => { throw err; },
+      };
+
+      await parseSSEStream(response, handlers, controller.signal);
+      set({ abortController: null });
+      get().saveCurrentSession();
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        console.log("EchoHouse simulation manually aborted.");
+      } else {
+        console.error("EchoHouse simulation stream error:", err);
       }
       set({ abortController: null, isThinking: false, isOrchestrating: false });
       get().saveCurrentSession();

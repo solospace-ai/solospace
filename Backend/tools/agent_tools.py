@@ -5,12 +5,10 @@ All I/O is async. SSRF protection is applied to all external URL calls.
 import os
 import sys
 import json
-import math
 import asyncio
 import tempfile
 import subprocess
 import datetime
-import threading
 from typing import List, Optional, Dict, Any
 
 import httpx
@@ -178,40 +176,9 @@ async def execute_api_call(
         return f"API call failed: {str(e)}"
 
 
-# ─── Memory (File-based, thread-safe legacy — ChromaDB upgrade in vector_store.py) ───
-
-MEMORY_FILE = "memory_store.json"
-MAX_MEMORIES = 200
-_memory_lock = threading.Lock()
+# ─── Memory (ChromaDB upgrade in vector_store.py) ───
 
 
-def _load_memories() -> List[Dict[str, Any]]:
-    with _memory_lock:
-        if os.path.exists(MEMORY_FILE):
-            try:
-                with open(MEMORY_FILE, "r") as f:
-                    return json.load(f)
-            except Exception:
-                pass
-    return []
-
-
-def _save_memories(memories: List[Dict[str, Any]]):
-    with _memory_lock:
-        try:
-            with open(MEMORY_FILE, "w") as f:
-                json.dump(memories, f, indent=2)
-        except Exception as e:
-            print(f"[MEMORY ERROR] {e}")
-
-
-def _cosine_similarity(v1: List[float], v2: List[float]) -> float:
-    if not v1 or not v2 or len(v1) != len(v2):
-        return 0.0
-    dot = sum(a * b for a, b in zip(v1, v2))
-    n1 = math.sqrt(sum(a * a for a in v1))
-    n2 = math.sqrt(sum(b * b for b in v2))
-    return (dot / (n1 * n2)) if n1 and n2 else 0.0
 
 
 async def store_memory(

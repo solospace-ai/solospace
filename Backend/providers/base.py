@@ -342,6 +342,44 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "is_custom": True,
         "requires_base_url": True,
     },
+    "alibaba": {
+        "name": "Alibaba Cloud (Qwen)",
+        "description": "Qwen model family via DashScope OpenAI-compatible endpoint",
+        "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "chat_path": "/chat/completions",
+        "default_model": "qwen-turbo",
+        "adapter": "openai",
+        "models": [
+            { "id": "qwen-turbo", "name": "Qwen Turbo", "tier": "fast" },
+            { "id": "qwen-plus", "name": "Qwen Plus", "tier": "advanced" },
+            { "id": "qwen-max", "name": "Qwen Max", "tier": "advanced" },
+            { "id": "qwen-long", "name": "Qwen Long", "tier": "advanced" },
+            { "id": "qwen2.5-72b-instruct", "name": "Qwen 2.5 72B Instruct", "tier": "advanced" },
+            { "id": "qwen2.5-14b-instruct", "name": "Qwen 2.5 14B Instruct", "tier": "fast" }
+        ],
+        "key_url": "https://www.alibabacloud.com/help/en/model-studio/developer-reference/api-key",
+        "key_hint": "sk-...",
+        "capabilities": ["chat", "streaming", "json_mode"],
+    },
+    "nvidia": {
+        "name": "NVIDIA NIM",
+        "description": "NVIDIA NIM inference microservices — optimized open models",
+        "base_url": "https://integrate.api.nvidia.com/v1",
+        "chat_path": "/chat/completions",
+        "default_model": "meta/llama-3.1-70b-instruct",
+        "adapter": "openai",
+        "models": [
+            { "id": "meta/llama-3.1-70b-instruct", "name": "Llama 3.1 70B Instruct", "tier": "advanced" },
+            { "id": "meta/llama-3.1-8b-instruct", "name": "Llama 3.1 8B Instruct", "tier": "fast" },
+            { "id": "mistralai/mixtral-8x7b-instruct-v0.1", "name": "Mixtral 8x7B Instruct", "tier": "fast" },
+            { "id": "microsoft/phi-3-mini-128k-instruct", "name": "Phi-3 Mini 128K", "tier": "fast" },
+            { "id": "google/gemma-2-9b-it", "name": "Gemma 2 9B IT", "tier": "fast" },
+            { "id": "nvidia/llama3-chatqa-1.5-70b", "name": "ChatQA 1.5 70B", "tier": "advanced" }
+        ],
+        "key_url": "https://build.nvidia.com",
+        "key_hint": "nvapi-...",
+        "capabilities": ["chat", "streaming", "json_mode"],
+    },
 }
 
 
@@ -392,6 +430,8 @@ def resolve_api_key(provider: str, user_key: Optional[str] = None, api_keys: Opt
         "xai": "XAI_API_KEY",
         "cerebras": "CEREBRAS_API_KEY",
         "bedrock": "AWS_ACCESS_KEY_ID",
+        "alibaba": "ALIBABA_API_KEY",
+        "nvidia": "NVIDIA_API_KEY",
     }
     env_var_name = env_keys.get(provider.lower())
     if env_var_name:

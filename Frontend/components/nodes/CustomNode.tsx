@@ -181,32 +181,36 @@ export const CustomNode = ({ id, data, selected }: NodeProps & { data: CanvasNod
       )}
 
       {/* ── Left Handle (IN) ────────────────────────────────── */}
-      <div className="absolute group/in" style={{ top: 22, left: -8, zIndex: 10 }}>
-        <Handle
-          type="target"
-          position={Position.Left}
-          id="input"
-          isConnectable
-          className="!w-3 !h-3 !bg-neutral-950 !border-2 !border-rose-500 !rounded-full !shadow-[0_0_8px_rgba(244,63,94,0.5)] hover:!scale-125 !transition-transform"
-        />
-        <span className="pointer-events-none select-none absolute left-5 top-1/2 -translate-y-1/2 text-[7px] font-mono font-bold text-rose-400 bg-rose-950/90 border border-rose-500/30 px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover/in:opacity-100 transition-opacity duration-100">
-          IN
-        </span>
-      </div>
+      {!data.isEchoHouseAgent && (
+        <div className="absolute group/in" style={{ top: 22, left: -8, zIndex: 10 }}>
+          <Handle
+            type="target"
+            position={Position.Left}
+            id="input"
+            isConnectable
+            className="!w-3 !h-3 !bg-neutral-950 !border-2 !border-rose-500 !rounded-full !shadow-[0_0_8px_rgba(244,63,94,0.5)] hover:!scale-125 !transition-transform"
+          />
+          <span className="pointer-events-none select-none absolute left-5 top-1/2 -translate-y-1/2 text-[7px] font-mono font-bold text-rose-400 bg-rose-950/90 border border-rose-500/30 px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover/in:opacity-100 transition-opacity duration-100">
+            IN
+          </span>
+        </div>
+      )}
 
       {/* ── Right Handle (OUT) ──────────────────────────────── */}
-      <div className="absolute group/out" style={{ top: 22, right: -8, zIndex: 10 }}>
-        <span className="pointer-events-none select-none absolute right-5 top-1/2 -translate-y-1/2 text-[7px] font-mono font-bold text-emerald-400 bg-emerald-950/90 border border-emerald-500/30 px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover/out:opacity-100 transition-opacity duration-100">
-          OUT
-        </span>
-        <Handle
-          type="source"
-          position={Position.Right}
-          id="output"
-          isConnectable
-          className="!w-3 !h-3 !bg-neutral-950 !border-2 !border-emerald-500 !rounded-full !shadow-[0_0_8px_rgba(16,185,129,0.5)] hover:!scale-125 !transition-transform"
-        />
-      </div>
+      {!data.isEchoHouseAgent && (
+        <div className="absolute group/out" style={{ top: 22, right: -8, zIndex: 10 }}>
+          <span className="pointer-events-none select-none absolute right-5 top-1/2 -translate-y-1/2 text-[7px] font-mono font-bold text-emerald-400 bg-emerald-950/90 border border-emerald-500/30 px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover/out:opacity-100 transition-opacity duration-100">
+            OUT
+          </span>
+          <Handle
+            type="source"
+            position={Position.Right}
+            id="output"
+            isConnectable
+            className="!w-3 !h-3 !bg-neutral-950 !border-2 !border-emerald-500 !rounded-full !shadow-[0_0_8px_rgba(16,185,129,0.5)] hover:!scale-125 !transition-transform"
+          />
+        </div>
+      )}
 
       {/* ── Node Body ──────────────────────────────────────── */}
       <div className="p-4 pt-3.5">
@@ -253,7 +257,7 @@ export const CustomNode = ({ id, data, selected }: NodeProps & { data: CanvasNod
 
         {/* Objective */}
         <p className="text-[9.5px] text-neutral-400/90 leading-relaxed mt-2.5 line-clamp-2">
-          {data.objective}
+          {data.isEchoHouseAgent ? data.echohouseProblem : data.objective}
         </p>
 
         {/* Live Progress Bar when ACTIVE */}
@@ -281,7 +285,7 @@ export const CustomNode = ({ id, data, selected }: NodeProps & { data: CanvasNod
         )}
 
         {/* Tools chips (max 3) */}
-        {(data.tools?.length ?? 0) > 0 && (
+        {!data.isEchoHouseAgent && (data.tools?.length ?? 0) > 0 && (
           <div className="mt-3 pt-2.5 border-t border-white/[0.04] flex flex-wrap gap-1 items-center">
             {data.tools.slice(0, 3).map((tool) => (
               <ToolPill key={tool} name={tool} />

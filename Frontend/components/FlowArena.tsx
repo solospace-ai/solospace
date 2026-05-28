@@ -12,7 +12,7 @@ import {
   Node,
   Viewport
 } from '@xyflow/react';
-import { Plus, Minus, Maximize, PlusCircle, LayoutGrid } from 'lucide-react';
+import { Plus, Minus, Maximize, PlusCircle, LayoutGrid, X } from 'lucide-react';
 import { useWorkflowStore, CanvasNodeData } from '@/store/workflowStore';
 import { CustomNode } from './nodes/CustomNode';
 import { GroupNode } from './nodes/GroupNode';
@@ -57,7 +57,7 @@ const getLayoutedElements = (nodes: Node[], edges: Edge[]) => {
   return { nodes: layoutedNodes, edges };
 };
 
-export default function FlowArena() {
+export default function FlowArena({ onProceed }: { onProceed?: () => void }) {
   const { zoomIn, zoomOut, setViewport, getViewport, fitView } = useReactFlow();
   
   const nodes = useWorkflowStore((s) => s.nodes);
@@ -70,6 +70,90 @@ export default function FlowArena() {
   const addNode = useWorkflowStore((s) => s.addNode);
   const setSelectedNodeId = useWorkflowStore((s) => s.setSelectedNodeId);
   const isOrchestrating = useWorkflowStore((s) => s.isOrchestrating);
+  const executionState = useWorkflowStore((s) => s.executionState);
+  
+  const isEchoHouseMode = useWorkflowStore((s) => s.activeSessionId ? s.sessions[s.activeSessionId]?.mode === 'echohouse' : false);
+
+  // EchoHouse creation form state
+  const [isEchoHouseCreateFormOpen, setIsEchoHouseCreateFormOpen] = useState(false);
+  const [formName, setFormName] = useState("");
+  const [formRole, setFormRole] = useState("");
+  const [formProblem, setFormProblem] = useState("");
+
+  const handleEchoHouseProceed = async () => {
+    if (onProceed) onProceed();
+    await useWorkflowStore.getState().triggerEchoHouseSimulation();
+  };
+
+  const handleNormalProceed = async () => {
+    if (onProceed) onProceed();
+    
+    const activeSession = useWorkflowStore.getState().sessions[useWorkflowStore.getState().activeSessionId || ""];
+    const mode = activeSession?.mode || "auto";
+    
+    if (mode === "auto") {
+      const chatMessages = useWorkflowStore.getState().chatMessages;
+      const lastUserMsg = chatMessages.findLast(m => m.sender === "user")?.text || "";
+      useWorkflowStore.getState().triggerSteerOrchestration(lastUserMsg, true, "auto");
+    } else if (mode === "custom") {
+      await useWorkflowStore.getState().triggerCustomExecution();
+    }
+  };
+
+  const handleCreateEchoHousePerson = () => {
+    if (!formName.trim() || !formRole.trim() || !formProblem.trim()) return;
+
+    const randomId = `echo_agent_${Date.now()}`;
+    const view = getViewport();
+    // Center new node inside view coordinates
+    let x = (-view.x + window.innerWidth / 2 - 120) / view.zoom;
+    let y = (-view.y + window.innerHeight / 2 - 100) / view.zoom;
+
+    // Avoid collision
+    const NODE_W = 240;
+    const NODE_H = 220;
+    const existingPositions = nodes.map(n => n.position);
+    for (const pos of existingPositions) {
+      if (Math.abs(x - pos.x) < NODE_W && Math.abs(y - pos.y) < NODE_H) {
+        y = pos.y + NODE_H + 40;
+      }
+    }
+
+    const newNode = {
+      id: randomId,
+      type: 'custom',
+      position: { x: Math.max(50, x), y: Math.max(50, y) },
+      data: {
+        name: formName.trim(),
+        tag: formRole.trim().toUpperCase().replace(/\s+/g, '_'),
+        icon: "science",
+        objective: `Provide perspective as ${formName.trim()} (${formRole.trim()}).`,
+        systemPrompt: `You are ${formName.trim()}, whose role in the user's life is ${formRole.trim()}. From your perspective about their situation: ${formProblem.trim()}`,
+        isEchoHouseAgent: true,
+        echohouseRole: formRole.trim(),
+        echohouseProblem: formProblem.trim(),
+        status: "IDLE" as const,
+        enabled: true,
+        rules: [],
+        dependencies: [],
+        tools: [],
+        toolPermissions: {},
+        temp: 0.8,
+        logic: 70,
+        empathy: 50,
+        priority: 5,
+        toolLogs: [],
+        personality: ""
+      }
+    };
+
+    addNode(newNode);
+    setFormName("");
+    setFormRole("");
+    setFormProblem("");
+    setIsEchoHouseCreateFormOpen(false);
+    setSelectedNodeId(newNode.id);
+  };
 
   const [initialLayoutDone, setInitialLayoutDone] = useState(false);
 
@@ -283,9 +367,9 @@ export default function FlowArena() {
           </button>
 
           <button 
-            onClick={handleAddAgentNode}
+            onClick={isEchoHouseMode ? () => setIsEchoHouseCreateFormOpen(true) : handleAddAgentNode}
             className="p-2 text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 flex items-center gap-1 text-[10px] cursor-pointer"
-            title="Add Custom Agent Node"
+            title={isEchoHouseMode ? "Add Person" : "Add Custom Agent Node"}
           >
             <PlusCircle className="w-3.5 h-3.5 text-white" />
             <span className="font-semibold pr-1">Node</span>
@@ -303,7 +387,7 @@ export default function FlowArena() {
         )}
 
         {/* Connection hint — shown when nodes exist but no edges drawn yet */}
-        {nodes.length > 1 && edges.length === 0 && !isOrchestrating && (
+        {!isEchoHouseMode && nodes.length > 1 && edges.length === 0 && !isOrchestrating && (
           <Panel position="top-right" className="!right-4 !top-16 select-none">
             <div className="bg-[#0d0d0d]/92 border border-[#1f1f1f] rounded-xl p-3 backdrop-blur-md shadow-xl w-52">
               <div className="flex items-center gap-2 mb-2.5">
@@ -328,6 +412,58 @@ export default function FlowArena() {
           </Panel>
         )}
 
+        {/* EchoHouse instructional panel */}
+        {isEchoHouseMode && (
+          <Panel position="top-right" className="!right-4 !top-16 select-none z-20">
+            <div className="bg-[#0d0d0d]/92 border border-[#1f1f1f] rounded-xl p-4 backdrop-blur-md shadow-xl w-72">
+              <p className="text-xs text-neutral-300 leading-relaxed font-sans">
+                Add the people in your life — give each one a name, their role, and what they think about your situation. Then click Proceed to begin the simulation.
+              </p>
+            </div>
+          </Panel>
+        )}
+
+        {/* Top-center Proceed Buttons */}
+        {isEchoHouseMode ? (
+          nodes.filter(n => (n.data as any).isEchoHouseAgent && (n.data as any).echohouseRole !== "self").length > 0 && (
+            <Panel position="top-center" className="!top-4 z-20">
+              <button
+                onClick={handleEchoHouseProceed}
+                disabled={isOrchestrating}
+                className="px-6 py-2.5 bg-white text-black font-bold text-xs rounded-full shadow-2xl hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2 select-none"
+              >
+                {isOrchestrating ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                    <span>Running...</span>
+                  </>
+                ) : (
+                  <span>Proceed</span>
+                )}
+              </button>
+            </Panel>
+          )
+        ) : (
+          nodes.length > 0 && executionState !== "running" && (
+            <Panel position="top-center" className="!top-4 z-20">
+              <button
+                onClick={handleNormalProceed}
+                disabled={isOrchestrating}
+                className="px-6 py-2.5 bg-white text-black font-bold text-xs rounded-full shadow-2xl hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2 select-none"
+              >
+                {isOrchestrating ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                    <span>Running...</span>
+                  </>
+                ) : (
+                  <span>Proceed</span>
+                )}
+              </button>
+            </Panel>
+          )
+        )}
+
         {/* Persistent legend — bottom right */}
         <Panel position="bottom-right" className="!right-4 !bottom-14 select-none">
           <div className="bg-[#0d0d0d]/80 border border-[#1f1f1f] rounded-lg p-2.5 backdrop-blur-md shadow-xl text-[9px] font-mono text-neutral-600 space-y-1.5">
@@ -350,6 +486,55 @@ export default function FlowArena() {
           </div>
         </Panel>
       </ReactFlow>
+
+      {/* EchoHouse Inline Creation Form */}
+      {isEchoHouseCreateFormOpen && isEchoHouseMode && (
+        <div className="absolute bottom-28 left-4 w-72 bg-[#0c0c0c]/95 border border-[#1f1f1f] rounded-xl p-4 shadow-2xl z-30 space-y-3 select-none">
+          <div className="flex justify-between items-center pb-2 border-b border-[#1f1f1f]">
+            <span className="text-xs font-bold text-white uppercase tracking-wider">Add Person</span>
+            <button onClick={() => setIsEchoHouseCreateFormOpen(false)} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+          </div>
+          <div className="space-y-2 text-xs">
+            <div className="space-y-1">
+              <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">Name</label>
+              <input
+                type="text"
+                value={formName}
+                onChange={(e) => setFormName(e.target.value)}
+                placeholder="Sarah, Dad, Crush..."
+                className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-white outline-none focus:border-neutral-500"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">Role in your life</label>
+              <input
+                type="text"
+                value={formRole}
+                onChange={(e) => setFormRole(e.target.value)}
+                placeholder="Girlfriend, Father, Best Friend..."
+                className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-white outline-none focus:border-neutral-500"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">What do they think about your situation?</label>
+              <textarea
+                value={formProblem}
+                onChange={(e) => setFormProblem(e.target.value)}
+                placeholder="Their perspective/context..."
+                rows={3}
+                className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2 text-white outline-none focus:border-neutral-500 resize-none"
+              />
+            </div>
+            <button
+              onClick={handleCreateEchoHousePerson}
+              disabled={!formName.trim() || !formRole.trim() || !formProblem.trim()}
+              className="w-full py-2 bg-white text-black font-bold rounded-lg text-xs hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-30 disabled:scale-100 cursor-pointer text-center"
+            >
+              Add Person
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

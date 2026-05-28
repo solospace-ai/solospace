@@ -1,3 +1,6 @@
+import os
+import json
+import httpx
 from typing import List, Dict, Any, AsyncGenerator
 
 def _build_openai_messages(
@@ -19,42 +22,6 @@ def _build_openai_messages(
             "content": msg.get("content", ""),
         })
     return result
-
-
-def _build_gemini_contents(
-    messages: List[Dict[str, str]],
-    system_prompt: str,
-) -> Dict[str, Any]:
-    """Convert internal message format to Gemini contents format."""
-    contents = []
-    for msg in messages:
-        role = "model" if msg.get("role") in ["model", "assistant"] else "user"
-        contents.append({
-            "role": role,
-            "parts": [{"text": msg.get("content", "")}],
-        })
-    return {
-        "contents": contents,
-        "systemInstruction": {"parts": [{"text": system_prompt}]} if system_prompt else None,
-    }
-
-
-def _build_claude_messages(
-    messages: List[Dict[str, str]],
-    system_prompt: str,
-) -> Dict[str, Any]:
-    """Convert internal message format to Claude format."""
-    claude_msgs = []
-    for msg in messages:
-        role = "assistant" if msg.get("role") in ["model", "assistant"] else "user"
-        claude_msgs.append({
-            "role": role,
-            "content": msg.get("content", ""),
-        })
-    return {
-        "system": system_prompt,
-        "messages": claude_msgs,
-    }
 
 
 # ─── OpenAI-Compatible Adapter ───────────────────────────────────────
@@ -188,15 +155,3 @@ async def _stream_openai_compatible(
                         yield content
                 except (json.JSONDecodeError, IndexError, KeyError):
                     continue
-
-
-# ─── Gemini Adapter ──────────────────────────────────────────────────
-
-GEMINI_SAFETY = [
-    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-]
-
-

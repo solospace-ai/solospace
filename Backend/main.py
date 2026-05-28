@@ -6,6 +6,7 @@ All business logic lives in core/, tools/, storage/, and security/.
 import json
 import time
 import asyncio
+import httpx
 from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any
 
@@ -140,6 +141,26 @@ class SaveSessionRequest(BaseModel):
     execution_state: str
     status_message: str
     follow_up_suggestions: List[str]
+
+
+class EchoHouseInitRequest(BaseModel):
+    problem_text: str
+    provider: str = "gemini"
+    model: Optional[str] = None
+    api_key: Optional[str] = None
+    api_keys: Optional[Dict[str, str]] = None
+    base_url: Optional[str] = None
+
+
+class EchoHouseSimulateRequest(BaseModel):
+    session_id: str
+    problem_text: str
+    cast: List[Dict[str, Any]]
+    provider: str = "gemini"
+    model: Optional[str] = None
+    api_key: Optional[str] = None
+    api_keys: Optional[Dict[str, str]] = None
+    base_url: Optional[str] = None
 
 
 # ─── Health Check ─────────────────────────────────────────────────────
@@ -485,4 +506,128 @@ async def test_agent_route(req: TestAgentRequest):
         return {"status": "success", "response": response}
     except Exception as e:
         return {"status": "error", "detail": str(e)}
+
+
+@app.post("/echohouse/init")
+async def echohouse_init(req: EchoHouseInitRequest):
+    api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
+    from providers import PROVIDERS, call_provider, extract_json_from_text
+    is_local = PROVIDERS.get(req.provider.lower(), {}).get("is_local", False)
+    if not api_key and not is_local:
+        raise HTTPException(status_code=400, detail="API key required for initialization.")
+        
+    model = req.model or PROVIDERS.get(req.provider.lower(), {}).get("default_model")
+    
+    system_prompt = (
+        "You are a professional relationship counselor and social dynamics simulator.\n"
+        "Given the user's life problem, infer 2-4 key people in their life who are likely involved in or affect this situation (e.g., family, friends, colleagues, partners, or their own internal self).\n"
+        "Always include one cast member representing the user themselves. For the user themselves, set is_self to true, and role to \"self\".\n\n"
+        "Output JSON format ONLY. Do NOT enclose in markdown formatting, just raw JSON list.\n"
+        "Each item in the list must have:\n"
+        "- inferred_name (string): Name of the person (e.g. \"You (Self)\", \"Sarah\", \"Dad\")\n"
+        "- role (string): Their relation/role (e.g. \"self\", \"friend\", \"father\")\n"
+        "- inferred_problem (string): What this person likely thinks/feels about the situation (their perspective)\n"
+        "- is_self (boolean): True if it represents the user, False otherwise.\n\n"
+        "Example JSON output:\n"
+        "[\n"
+        "  {\"inferred_name\": \"You (Self)\", \"role\": \"self\", \"inferred_problem\": \"I feel stuck and overwhelmed.\", \"is_self\": true},\n"
+        "  {\"inferred_name\": \"Mom\", \"role\": \"mother\", \"inferred_problem\": \"She thinks I'm not trying hard enough.\", \"is_self\": false}\n"
+        "]"
+    )
+    
+    user_prompt = f"User's life problem: \"{req.problem_text}\""
+    
+    try:
+        response = await call_provider(
+            provider=req.provider,
+            model=model,
+            api_key=api_key,
+            messages=[{"role": "user", "content": user_prompt}],
+            system_prompt=system_prompt,
+            temperature=0.7,
+            timeout=15.0,
+            api_keys=req.api_keys,
+            base_url=req.base_url
+        )
+        cast = extract_json_from_text(response)
+        if isinstance(cast, list) and len(cast) > 0:
+            validated_cast = []
+            for item in cast:
+                if isinstance(item, dict) and "inferred_name" in item and "role" in item:
+                    validated_cast.append({
+                        "inferred_name": str(item["inferred_name"]),
+                        "role": str(item["role"]),
+                        "inferred_problem": str(item.get("inferred_problem", "")),
+                        "is_self": bool(item.get("is_self", False))
+                    })
+            if validated_cast:
+                return validated_cast
+    except Exception as e:
+        print(f"[EchoHouse Init Error] {e}")
+        
+    return [
+        {
+            "inferred_name": "You (Self)",
+            "role": "self",
+            "inferred_problem": req.problem_text,
+            "is_self": True
+        },
+        {
+            "inferred_name": "Friend",
+            "role": "friend",
+            "inferred_problem": "They are concerned about you but might not know how to help.",
+            "is_self": False
+        }
+    ]
+
+
+@app.post("/echohouse/simulate")
+async def echohouse_simulate(req: EchoHouseSimulateRequest):
+    api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
+    from core.echohouse import run_echohouse_simulation
+    from providers import PROVIDERS
+    is_local = PROVIDERS.get(req.provider.lower(), {}).get("is_local", False)
+    if not api_key and not is_local:
+        raise HTTPException(status_code=400, detail="API key required for simulation.")
+        
+    model = req.model or PROVIDERS.get(req.provider.lower(), {}).get("default_model")
+    
+    return StreamingResponse(
+        run_echohouse_simulation(
+            session_id=req.session_id,
+            problem_text=req.problem_text,
+            cast=req.cast,
+            provider=req.provider,
+            model=model,
+            api_key=api_key,
+            api_keys=req.api_keys,
+            base_url=req.base_url
+        ),
+        media_type="text/event-stream"
+    )
+
+
+@app.get("/ollama/models")
+async def get_ollama_models():
+    url = "http://localhost:11434/api/tags"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                data = resp.json()
+                raw_models = data.get("models", [])
+                models = []
+                for m in raw_models:
+                    name = m.get("name")
+                    if name:
+                        models.append({
+                            "id": name,
+                            "name": name,
+                            "tier": "local"
+                        })
+                return {"models": models, "ollama_available": True}
+    except Exception as e:
+        print(f"[Ollama Check Failed] {e}")
+    return {"models": [], "ollama_available": False}
+
 

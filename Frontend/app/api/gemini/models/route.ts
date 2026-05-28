@@ -3,13 +3,17 @@ import { NextResponse } from "next/server";
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+    const { provider, api_key, base_url } = body;
+    
+    const params = new URLSearchParams();
+    if (api_key) params.append("api_key", api_key);
+    if (base_url) params.append("base_url", base_url);
+    
+    const queryString = params.toString();
+    const url = `http://127.0.0.1:8000/${provider}/models` + (queryString ? `?${queryString}` : "");
 
-    const pyResponse = await fetch("http://127.0.0.1:8000/models", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
+    const pyResponse = await fetch(url, {
+      method: "GET",
     });
 
     if (!pyResponse.ok) {

@@ -99,6 +99,36 @@ const FALLBACK_PROVIDERS = {
       { id: "mistral", name: "Mistral", tier: "open" },
       { id: "phi3", name: "Phi 3", tier: "open" }
     ]
+  },
+  alibaba: {
+    name: "Alibaba Cloud (Qwen)",
+    description: "Qwen model family via DashScope OpenAI-compatible endpoint",
+    key_url: "https://www.alibabacloud.com/help/en/model-studio/developer-reference/api-key",
+    key_hint: "sk-...",
+    default_model: "qwen-turbo",
+    models: [
+      { id: "qwen-turbo", name: "Qwen Turbo", tier: "fast" },
+      { id: "qwen-plus", name: "Qwen Plus", tier: "advanced" },
+      { id: "qwen-max", name: "Qwen Max", tier: "advanced" },
+      { id: "qwen-long", name: "Qwen Long", tier: "advanced" },
+      { id: "qwen2.5-72b-instruct", name: "Qwen 2.5 72B Instruct", tier: "advanced" },
+      { id: "qwen2.5-14b-instruct", name: "Qwen 2.5 14B Instruct", tier: "fast" }
+    ]
+  },
+  nvidia: {
+    name: "NVIDIA NIM",
+    description: "NVIDIA NIM inference microservices — optimized open models",
+    key_url: "https://build.nvidia.com",
+    key_hint: "nvapi-...",
+    default_model: "meta/llama-3.1-70b-instruct",
+    models: [
+      { id: "meta/llama-3.1-70b-instruct", name: "Llama 3.1 70B Instruct", tier: "advanced" },
+      { id: "meta/llama-3.1-8b-instruct", name: "Llama 3.1 8B Instruct", tier: "fast" },
+      { id: "mistralai/mixtral-8x7b-instruct-v0.1", name: "Mixtral 8x7B Instruct", tier: "fast" },
+      { id: "microsoft/phi-3-mini-128k-instruct", name: "Phi-3 Mini 128K", tier: "fast" },
+      { id: "google/gemma-2-9b-it", name: "Gemma 2 9B IT", tier: "fast" },
+      { id: "nvidia/llama3-chatqa-1.5-70b", name: "ChatQA 1.5 70B", tier: "advanced" }
+    ]
   }
 };
 
@@ -127,6 +157,9 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
   const [fallbackProv, setFallbackProv] = useState<string>("");
   const [showKey, setShowKey] = useState<boolean>(false);
   
+  // Ollama status check state
+  const [ollamaStatus, setOllamaStatus] = useState<'checking' | 'available' | 'unavailable'>('checking');
+  
   // Connection Testing State
   const [isTesting, setIsTesting] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<{ status: 'idle' | 'success' | 'error'; message: string }>({ status: 'idle', message: '' });
@@ -136,6 +169,25 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
     ? availableProvidersFromStore 
     : FALLBACK_PROVIDERS;
 
+  const checkOllama = async () => {
+    setOllamaStatus('checking');
+    try {
+      const resp = await fetch("/api/gemini/ollama");
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.ollama_available) {
+          setOllamaStatus('available');
+        } else {
+          setOllamaStatus('unavailable');
+        }
+      } else {
+        setOllamaStatus('unavailable');
+      }
+    } catch (e) {
+      setOllamaStatus('unavailable');
+    }
+  };
+
   // Initialize fields when modal opens
   useEffect(() => {
     if (isOpen) {
@@ -144,7 +196,9 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
       setSelectedModel(activeModel || "");
       setFallbackProv(fallbackProvider || "");
       setApiKeyInput(apiKeys[currentProv] || "");
-      setUrlInput(providerBaseUrls[currentProv] || "");
+      
+      const defaultUrl = currentProv === 'ollama' ? "http://localhost:11434/v1" : "";
+      setUrlInput(providerBaseUrls[currentProv] || defaultUrl);
       setShowKey(false);
       setTestResult({ status: 'idle', message: '' });
 
@@ -160,6 +214,9 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
       }
 
       fetchProviderModels(currentProv).catch(() => {});
+      if (currentProv === 'ollama') {
+        checkOllama();
+      }
     }
   }, [isOpen]);
 
@@ -167,7 +224,9 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
   const handleProviderChange = (newProvider: string) => {
     setSelectedProvider(newProvider);
     setApiKeyInput(apiKeys[newProvider] || "");
-    setUrlInput(providerBaseUrls[newProvider] || "");
+    
+    const defaultUrl = newProvider === 'ollama' ? "http://localhost:11434/v1" : "";
+    setUrlInput(providerBaseUrls[newProvider] || defaultUrl);
     setTestResult({ status: 'idle', message: '' });
 
     // Pick default model or first model for this new provider
@@ -175,11 +234,14 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
     const modelsList = providerModels[newProvider] || provConfig.models || [];
     const defaultMod = modelsList.length > 0 ? modelsList[0].id : (provConfig.default_model || "");
     setSelectedModel(defaultMod);
-    setIsCustomModelInput(modelsList.length === 0);
+    setIsCustomModelInput(modelsList.length === 0 && newProvider !== 'ollama');
     setCustomModelText("");
 
     // Fetch latest models list in the background
     fetchProviderModels(newProvider).catch(() => {});
+    if (newProvider === 'ollama') {
+      checkOllama();
+    }
   };
 
   const handleTestConnection = async () => {
@@ -296,7 +358,7 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
           <div className="space-y-1.5">
             <div className="flex justify-between items-center">
               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Model</label>
-              {modelsList.length > 0 && (
+              {(modelsList.length > 0 || selectedProvider === 'ollama') && (
                 <button
                   type="button"
                   onClick={() => {
@@ -315,7 +377,7 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
                 </button>
               )}
             </div>
-            {isCustomModelInput || modelsList.length === 0 ? (
+            {isCustomModelInput || (modelsList.length === 0 && selectedProvider !== 'ollama') ? (
               <input
                 type="text"
                 placeholder="e.g. custom-fine-tune-v1, llama3"
@@ -343,11 +405,17 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
                 }}
                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
               >
-                {modelsList.map((m: any) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name || m.id} ({m.tier || "standard"})
+                {selectedProvider === "ollama" && modelsList.length === 0 ? (
+                  <option value="" disabled>
+                    No local models detected
                   </option>
-                ))}
+                ) : (
+                  modelsList.map((m: any) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name || m.id} ({m.tier || "standard"})
+                    </option>
+                  ))
+                )}
                 <option value="__custom__">Custom Model ID...</option>
               </select>
             )}
@@ -367,44 +435,87 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
             />
           </div>
 
-          {/* 4. API Key Input */}
-          <div className="space-y-1.5">
-            <div className="flex justify-between items-center">
+          {/* 4. API Key Input or Status Box (Ollama) */}
+          {selectedProvider === "ollama" ? (
+            <div className="space-y-1.5">
               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
-                {selectedProvider.toUpperCase()}_API_KEY
+                Ollama Status
               </label>
-              {currentProviderInfo.key_url && (
-                <a
-                  href={currentProviderInfo.key_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-[9px] text-cyan-400 hover:underline flex items-center gap-1 cursor-pointer"
+              <div className="bg-black border border-[#1f1f1f] rounded-xl p-4 flex flex-col gap-2">
+                <div className="flex items-center gap-2 text-xs">
+                  {ollamaStatus === "checking" && (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-neutral-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                      <span className="text-neutral-400 font-mono">Checking local Ollama availability...</span>
+                    </>
+                  )}
+                  {ollamaStatus === "available" && (
+                    <>
+                      <Check className="w-4 h-4 text-emerald-500 shrink-0" />
+                      <span className="text-emerald-400 font-mono font-bold">Ollama running locally</span>
+                    </>
+                  )}
+                  {ollamaStatus === "unavailable" && (
+                    <>
+                      <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                      <span className="text-rose-400 font-mono font-bold">Ollama not detected</span>
+                    </>
+                  )}
+                </div>
+                {ollamaStatus === "unavailable" && (
+                  <p className="text-[10px] text-neutral-400 leading-normal font-sans">
+                    Make sure Ollama is running on your machine. You can download it from{" "}
+                    <a
+                      href="https://ollama.com"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-cyan-400 hover:underline inline-flex items-center gap-0.5"
+                    >
+                      ollama.com <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center">
+                <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
+                  {selectedProvider.toUpperCase()}_API_KEY
+                </label>
+                {currentProviderInfo.key_url && (
+                  <a
+                    href={currentProviderInfo.key_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[9px] text-cyan-400 hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    Get key <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+              </div>
+              <div className="relative">
+                <input
+                  type={showKey ? "text" : "password"}
+                  placeholder={
+                    currentProviderInfo.key_hint
+                      ? `Enter key (starts with ${currentProviderInfo.key_hint})`
+                      : "Enter API key"
+                  }
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  className="w-full bg-black border border-[#1f1f1f] rounded-xl pl-4 pr-12 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKey(!showKey)}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
                 >
-                  Get key <ExternalLink className="w-3 h-3" />
-                </a>
-              )}
+                  {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
-            <div className="relative">
-              <input
-                type={showKey ? "text" : "password"}
-                placeholder={
-                  currentProviderInfo.key_hint
-                    ? `Enter key (starts with ${currentProviderInfo.key_hint})`
-                    : "Enter API key"
-                }
-                value={apiKeyInput}
-                onChange={(e) => setApiKeyInput(e.target.value)}
-                className="w-full bg-black border border-[#1f1f1f] rounded-xl pl-4 pr-12 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-              />
-              <button
-                type="button"
-                onClick={() => setShowKey(!showKey)}
-                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
-              >
-                {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
+          )}
 
           {/* 5. Fallback Provider Selector */}
           <div className="space-y-1.5">
