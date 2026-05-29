@@ -1018,7 +1018,9 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       await parseSSEStream(response, handlers, controller.signal);
 
       if (!assistantResponse) {
-        const fallbackMsg = "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again.";
+        const fallbackMsg = execute
+          ? "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again."
+          : "I have generated a custom agent plan for your request. You can inspect/modify the agents in the **Flow** tab and click **Proceed** when you are ready to execute.";
         set((state) => ({
           chatMessages: state.chatMessages.map(m =>
             m.id === aiMsgId ? { ...m, text: fallbackMsg } : m
