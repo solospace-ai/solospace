@@ -105,6 +105,7 @@ class OrchestrateRequest(BaseModel):
     existing_nodes: Optional[List[Dict[str, Any]]] = None
     existing_edges: Optional[List[Dict[str, Any]]] = None
     mode: Optional[str] = "auto"
+    backup_api_keys: Optional[List[str]] = None
 
 
 class ExecuteCustomRequest(BaseModel):
@@ -119,6 +120,7 @@ class ExecuteCustomRequest(BaseModel):
     fallback_provider: Optional[str] = None
     api_keys: Optional[Dict[str, str]] = None
     base_url: Optional[str] = None
+    backup_api_keys: Optional[List[str]] = None
 
 
 class ApprovalRequest(BaseModel):
@@ -150,6 +152,7 @@ class EchoHouseInitRequest(BaseModel):
     api_key: Optional[str] = None
     api_keys: Optional[Dict[str, str]] = None
     base_url: Optional[str] = None
+    backup_api_keys: Optional[List[str]] = None
 
 
 class EchoHouseSimulateRequest(BaseModel):
@@ -163,6 +166,7 @@ class EchoHouseSimulateRequest(BaseModel):
     base_url: Optional[str] = None
     rounds: int = 3
     tone: str = "realistic"
+    backup_api_keys: Optional[List[str]] = None
 
 
 class EchoHouseTakeawaysRequest(BaseModel):
@@ -173,6 +177,7 @@ class EchoHouseTakeawaysRequest(BaseModel):
     api_key: Optional[str] = None
     api_keys: Optional[Dict[str, str]] = None
     base_url: Optional[str] = None
+    backup_api_keys: Optional[List[str]] = None
 
 
 # ─── Health Check ─────────────────────────────────────────────────────
@@ -233,6 +238,7 @@ async def orchestrate(req: OrchestrateRequest):
         api_key=api_key,
         api_keys=req.api_keys,
         base_url=req.base_url,
+        backup_api_keys=req.backup_api_keys,
     )
 
     # Build orchestration plan
@@ -242,7 +248,7 @@ async def orchestrate(req: OrchestrateRequest):
     # Smart context windowing
     from core.planner import summarize_history
     history_msgs = await summarize_history(
-        history_msgs, req.provider, api_key, req.api_keys, req.base_url
+        history_msgs, req.provider, api_key, req.api_keys, req.base_url, backup_api_keys=req.backup_api_keys
     )
 
     existing_agent_ids = [n["data"]["senderId"] for n in (req.existing_nodes or []) if n.get("data")]
@@ -267,6 +273,7 @@ async def orchestrate(req: OrchestrateRequest):
                     messages=messages_for_plan, system_prompt=RESPONSE_SYSTEM_INSTRUCTION,
                     temperature=0.7, timeout=20.0, fallback_provider=req.fallback_provider,
                     api_keys=req.api_keys, base_url=req.base_url,
+                    backup_api_keys=req.backup_api_keys,
                 ):
                     yield f"event: text\ndata: {json.dumps(token)}\n\n"
             except Exception as e:
@@ -284,6 +291,7 @@ async def orchestrate(req: OrchestrateRequest):
         api_keys=req.api_keys,
         base_url=req.base_url,
         fallback_provider=req.fallback_provider,
+        backup_api_keys=req.backup_api_keys,
     )
 
     # Merge existing nodes/edges from frontend canvas
@@ -372,6 +380,7 @@ async def orchestrate(req: OrchestrateRequest):
             api_keys=req.api_keys,
             base_url=req.base_url,
             resume_from_checkpoint=False,
+            backup_api_keys=req.backup_api_keys,
         ),
         media_type="text/event-stream",
     )
@@ -405,6 +414,7 @@ async def execute_custom(req: ExecuteCustomRequest):
             api_keys=req.api_keys,
             base_url=req.base_url,
             resume_from_checkpoint=False,
+            backup_api_keys=req.backup_api_keys,
         ),
         media_type="text/event-stream",
     )
@@ -490,6 +500,7 @@ class TestAgentRequest(BaseModel):
     api_key: Optional[str] = None
     api_keys: Optional[Dict[str, str]] = None
     base_url: Optional[str] = None
+    backup_api_keys: Optional[List[str]] = None
 
 
 @app.post("/test_agent")
@@ -517,6 +528,7 @@ async def test_agent_route(req: TestAgentRequest):
             timeout=10.0,
             api_keys=req.api_keys,
             base_url=req.base_url,
+            backup_api_keys=req.backup_api_keys,
         )
         return {"status": "success", "response": response}
     except Exception as e:
@@ -563,7 +575,8 @@ async def echohouse_init(req: EchoHouseInitRequest):
             temperature=0.7,
             timeout=15.0,
             api_keys=req.api_keys,
-            base_url=req.base_url
+            base_url=req.base_url,
+            backup_api_keys=req.backup_api_keys,
         )
         cast = extract_json_from_text(response)
         if isinstance(cast, list) and len(cast) > 0:
@@ -620,7 +633,8 @@ async def echohouse_simulate(req: EchoHouseSimulateRequest):
             api_keys=req.api_keys,
             base_url=req.base_url,
             rounds=req.rounds,
-            tone=req.tone
+            tone=req.tone,
+            backup_api_keys=req.backup_api_keys,
         ),
         media_type="text/event-stream"
     )
@@ -662,7 +676,8 @@ async def echohouse_takeaways(req: EchoHouseTakeawaysRequest):
             temperature=0.5,
             timeout=15.0,
             api_keys=req.api_keys,
-            base_url=req.base_url
+            base_url=req.base_url,
+            backup_api_keys=req.backup_api_keys,
         )
         takeaways = extract_json_from_text(response)
         if isinstance(takeaways, list) and len(takeaways) >= 1:

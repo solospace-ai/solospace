@@ -380,6 +380,40 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "key_hint": "nvapi-...",
         "capabilities": ["chat", "streaming", "json_mode"],
     },
+    "glm": {
+        "name": "Zhipu GLM",
+        "description": "Zhipu AI GLM models (via z.ai)",
+        "base_url": "https://api.z.ai/api/paas/v4",
+        "chat_path": "/chat/completions",
+        "default_model": "glm-4-flash",
+        "models": [
+            {"id": "glm-4-flash", "name": "GLM 4 Flash", "tier": "fast"},
+            {"id": "glm-4-plus", "name": "GLM 4 Plus", "tier": "advanced"},
+            {"id": "glm-4-air", "name": "GLM 4 Air", "tier": "fast"},
+            {"id": "glm-4", "name": "GLM 4", "tier": "advanced"},
+        ],
+        "capabilities": ["chat", "streaming", "json_mode"],
+        "key_url": "https://api.z.ai/",
+        "key_hint": "",
+        "adapter": "openai",
+    },
+    "z.ai": {
+        "name": "z.ai",
+        "description": "z.ai GLM models",
+        "base_url": "https://api.z.ai/api/paas/v4",
+        "chat_path": "/chat/completions",
+        "default_model": "glm-4-flash",
+        "models": [
+            {"id": "glm-4-flash", "name": "GLM 4 Flash", "tier": "fast"},
+            {"id": "glm-4-plus", "name": "GLM 4 Plus", "tier": "advanced"},
+            {"id": "glm-4-air", "name": "GLM 4 Air", "tier": "fast"},
+            {"id": "glm-4", "name": "GLM 4", "tier": "advanced"},
+        ],
+        "capabilities": ["chat", "streaming", "json_mode"],
+        "key_url": "https://api.z.ai/",
+        "key_hint": "",
+        "adapter": "openai",
+    },
 }
 
 
@@ -407,12 +441,26 @@ def get_available_providers() -> Dict[str, Any]:
     return result
 
 
-def resolve_api_key(provider: str, user_key: Optional[str] = None, api_keys: Optional[Dict[str, str]] = None) -> str:
+def resolve_api_key(
+    provider: str,
+    user_key: Optional[str] = None,
+    api_keys: Optional[Dict[str, str]] = None,
+    backup_keys: Optional[List[str]] = None,
+) -> str:
     """Resolve key from user input dictionary, single user_key, or fallback to env."""
-    if api_keys and provider in api_keys and api_keys[provider].strip():
-        return api_keys[provider].strip()
+    keys_to_check = []
     if user_key and user_key.strip():
-        return user_key.strip()
+        keys_to_check.append(user_key.strip())
+    if api_keys and provider in api_keys and api_keys[provider].strip():
+        keys_to_check.append(api_keys[provider].strip())
+    if backup_keys:
+        for bk in backup_keys:
+            if bk and bk.strip():
+                keys_to_check.append(bk.strip())
+
+    for k in keys_to_check:
+        if k:
+            return k
 
     env_keys = {
         "gemini": "GEMINI_API_KEY",
@@ -432,6 +480,8 @@ def resolve_api_key(provider: str, user_key: Optional[str] = None, api_keys: Opt
         "bedrock": "AWS_ACCESS_KEY_ID",
         "alibaba": "ALIBABA_API_KEY",
         "nvidia": "NVIDIA_API_KEY",
+        "glm": "GLM_API_KEY",
+        "z.ai": "Z_AI_API_KEY",
     }
     env_var_name = env_keys.get(provider.lower())
     if env_var_name:

@@ -179,7 +179,8 @@ function SolospaceContent() {
           model: useWorkflowStore.getState().model,
           api_key: apiKey,
           api_keys: useWorkflowStore.getState().apiKeys,
-          base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null
+          base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null,
+          backup_api_keys: useWorkflowStore.getState().backupApiKeys[activeProv] || []
         })
       });
       if (resp.ok) {
@@ -327,7 +328,8 @@ function SolospaceContent() {
             model: useWorkflowStore.getState().model,
             api_key: apiKey,
             api_keys: useWorkflowStore.getState().apiKeys,
-            base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null
+            base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null,
+            backup_api_keys: useWorkflowStore.getState().backupApiKeys[activeProv] || []
           })
         });
         if (resp.ok) {
@@ -522,13 +524,7 @@ function SolospaceContent() {
 
       <main onClick={() => { if (isSidebarExpanded && window.innerWidth < 768) setIsSidebarExpanded(false); }} className="flex-1 flex flex-col min-w-0 bg-[#000000] relative transition-all duration-300">
         <header className="flex justify-between items-center w-full px-6 h-16 border-b border-[#141414] shrink-0 z-10 bg-black/85 backdrop-blur-md">
-          <div className="flex items-center gap-2">
-            {isConnected && activeSessionId && (
-              <span className="flex items-center gap-1.5 text-[9px] font-mono text-emerald-400 bg-emerald-950/30 border border-emerald-500/20 px-2 py-0.5 rounded-full">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> LIVE SYNC
-              </span>
-            )}
-          </div>
+          <div className="flex items-center gap-2" />
           <div className="flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-[2px] rounded-full select-none">
             <button onClick={() => { if (workspaceState !== "home") setCurrentTab("chat"); }} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${currentTab === "chat" || workspaceState === "home" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>Chat</button>
             {workspaceState === "active" && (

@@ -52,6 +52,7 @@ async def route_request(
     api_key: str,
     api_keys: Optional[Dict[str, str]] = None,
     base_url: Optional[str] = None,
+    backup_api_keys: Optional[List[str]] = None,
 ) -> str:
     """
     Classify the request as TRIVIAL, TOOL_USE, or COMPLEX.
@@ -71,6 +72,7 @@ async def route_request(
             timeout=3.0,
             api_keys=api_keys,
             base_url=base_url,
+            backup_api_keys=backup_api_keys,
         )
         category = result.get("category", "COMPLEX")
         confidence = result.get("confidence", 0.5)
@@ -223,6 +225,7 @@ async def generate_plan(
     api_keys: Optional[Dict[str, str]] = None,
     base_url: Optional[str] = None,
     fallback_provider: Optional[str] = None,
+    backup_api_keys: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Call the planning LLM to generate an agent plan.
@@ -241,6 +244,7 @@ async def generate_plan(
             fallback_provider=fallback_provider,
             api_keys=api_keys,
             base_url=base_url,
+            backup_api_keys=backup_api_keys,
         )
         return plan
     except Exception as e:
@@ -254,6 +258,7 @@ async def summarize_history(
     api_key: str,
     api_keys: Optional[Dict[str, str]] = None,
     base_url: Optional[str] = None,
+    backup_api_keys: Optional[List[str]] = None,
 ) -> List[Dict[str, str]]:
     """
     If history is long (greater than 6 turns / 12 messages), summarize the oldest messages
@@ -291,6 +296,7 @@ async def summarize_history(
             timeout=8.0,
             api_keys=api_keys,
             base_url=base_url,
+            backup_api_keys=backup_api_keys,
         )
         summary_msg = {
             "role": "user",

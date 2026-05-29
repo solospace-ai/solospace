@@ -1,10 +1,10 @@
 # Full Project Context
 
-> Generated: 2026-05-29T07:39:38.782Z
+> Generated: 2026-05-29T12:39:45.158Z
 > Mode: Full Project
 > Files: 66
-> Total Lines: 10,449
-> Total Size: 408.0 KB
+> Total Lines: 10,811
+> Total Size: 423.9 KB
 > Directories: 33
 
 ---
@@ -128,7 +128,7 @@ SoloSpace/
 
 ### File: `Backend/core/agent_executor.py`
 
-> 340 lines | 16.2 KB
+> 343 lines | 16.3 KB
 
 ```python
   1 | """
@@ -191,291 +191,294 @@ SoloSpace/
  58 |     base_url: Optional[str],
  59 |     resume_from_checkpoint: bool,
  60 |     event_queue: asyncio.Queue,
- 61 | ) -> Dict[str, Any]:
- 62 |     """
- 63 |     Execute one agent's ReAct loop. Pushes SSE events to event_queue.
- 64 |     Returns dict with node_id, final_answer, status, toolLogs.
- 65 |     """
- 66 |     node_id = agent_node["id"]
- 67 |     agent_data = agent_node["data"]
- 68 |     agent_name = agent_data["name"]
- 69 | 
- 70 |     if not agent_data.get("enabled", True):
- 71 |         return {"node_id": node_id, "final_answer": "", "status": "SKIPPED", "toolLogs": []}
- 72 | 
- 73 |     try:
- 74 |         # ── Checkpoint Resume ──────────────────────────────────────────
- 75 |         if resume_from_checkpoint:
- 76 |             checkpoint_state = await load_checkpoint(session_id, node_id)
- 77 |             if checkpoint_state:
- 78 |                 agent_results[node_id] = checkpoint_state.get("final_answer", "Completed.")
- 79 |                 setup_metadata["agent_talk"].append({
- 80 |                     "id": f"agent-log-{node_id}-{_now()}",
- 81 |                     "senderId": node_id,
- 82 |                     "senderName": agent_name,
- 83 |                     "senderIcon": agent_data.get("icon", "bot"),
- 84 |                     "text": checkpoint_state.get("final_answer", "Completed.")[:180],
- 85 |                     "timestamp": _now(),
- 86 |                 })
- 87 |                 await event_queue.put(("metadata", None))
- 88 |                 return {
- 89 |                     "node_id": node_id,
- 90 |                     "final_answer": checkpoint_state.get("final_answer", "Completed."),
- 91 |                     "status": "IDLE",
- 92 |                     "toolLogs": [],
- 93 |                 }
- 94 | 
- 95 |         # ── Mark ACTIVE ────────────────────────────────────────────────
- 96 |         for n in nodes:
- 97 |             if n["id"] == node_id:
- 98 |                 n["data"]["status"] = "ACTIVE"
- 99 |         await event_queue.put(("metadata", None))
-100 |         await event_queue.put(("status", f"[{agent_name}] processing..."))
-101 |         await asyncio.sleep(0.2)
-102 | 
-103 |         # ── Build context ──────────────────────────────────────────────
-104 |         dep_outputs = ""
-105 |         for dep_id in agent_data.get("dependencies", []):
-106 |             if dep_id in agent_results:
-107 |                 dep_outputs += f"### Input from {dep_id.upper()}:\n{agent_results[dep_id]}\n"
-108 | 
-109 |         incoming_msgs = get_messages_for_agent(session_id, node_id)
-110 |         msg_block = ""
-111 |         if incoming_msgs:
-112 |             msg_block = "### Messages from other agents:\n"
-113 |             for msg in incoming_msgs:
-114 |                 msg_block += f"- From {msg['from']}: {msg['content']}\n"
-115 |             clear_messages(session_id, node_id)
-116 | 
-117 |         resolved_tools_str = ", ".join(agent_data.get("tools", []))
-118 |         tools_instruction = (
-119 |             f"Available tools: {resolved_tools_str}. "
-120 |             "To use a tool, specify the tool name in 'action' and input in 'action_input'. "
-121 |             "If you have enough information, set 'action' to 'none' and provide 'final_answer'."
-122 |         )
-123 | 
-124 |         agent_history = [{
-125 |             "role": "user",
-126 |             "parts": [{
-127 |                 "text": (
-128 |                     f"{tools_instruction}\n\n"
-129 |                     f"User Request: {prompt}\n\n"
-130 |                     f"{dep_outputs}\n{msg_block}\n\n"
-131 |                     f"Your specific objective: {agent_data['objective']}\n"
-132 |                     f"Rules: {agent_data['rules']}"
-133 |                 )
-134 |             }],
-135 |         }]
-136 | 
-137 |         agent_final_answer = "Sub-task completed."
-138 |         action_execution_history = []
-139 |         max_turns = 2 if complexity != "simple" else 1
-140 | 
-141 |         for _turn in range(max_turns):
-142 |             turn_data = {}
-143 |             action = "none"
-144 |             try:
-145 |                 standard_history = _convert_history_to_standard(agent_history)
-146 |                 turn_data = await call_provider_json(
-147 |                     provider=provider,
-148 |                     model=model,
-149 |                     api_key=api_key,
-150 |                     messages=standard_history,
-151 |                     system_prompt=agent_data["systemPrompt"],
-152 |                     temperature=0.2,
-153 |                     json_schema=AGENT_TURN_SCHEMA,
-154 |                     timeout=12.0,
-155 |                     fallback_provider=fallback_provider,
-156 |                     api_keys=api_keys,
-157 |                     base_url=base_url,
-158 |                 )
-159 |                 thought = turn_data.get("thought", "")
-160 |                 action = turn_data.get("action", "none")
-161 |                 action_input = turn_data.get("action_input", "")
-162 |                 agent_final_answer = turn_data.get("final_answer", "")
-163 | 
-164 |                 if thought:
-165 |                     await event_queue.put(("thinking", f"[{agent_name}]: {thought}\n"))
-166 |             except Exception as e:
-167 |                 print(f"[AGENT] ReAct turn failed for {agent_name}: {e}")
-168 |                 break
-169 | 
-170 |             if action == "none" or agent_final_answer:
-171 |                 break
-172 | 
-173 |             # ── Circuit Breaker ────────────────────────────────────────
-174 |             action_execution_history.append((action, action_input))
-175 |             if action_execution_history.count((action, action_input)) >= 3:
-176 |                 observation = "Circuit Breaker: Tool executed repeatedly with identical input. Halting."
-177 |                 await event_queue.put(("status", f"[{agent_name}] circuit breaker halted"))
-178 |                 agent_history.append({"role": "model", "parts": [{"text": json.dumps(turn_data)}]})
-179 |                 agent_history.append({"role": "user", "parts": [{"text": f"Observation: {observation}"}]})
-180 |                 continue
-181 | 
-182 |             t_log_id = f"t-log-{int(datetime.datetime.now().timestamp() * 1000)}"
-183 |             t_timestamp = _now()
-184 |             permission = agent_data.get("toolPermissions", {}).get(action, "ALLOWED")
-185 | 
-186 |             # ── Tool Approval ──────────────────────────────────────────
-187 |             if permission == "ASK":
-188 |                 new_log = {
-189 |                     "id": t_log_id, "timestamp": t_timestamp, "tool": action,
-190 |                     "action": "Execution Request", "status": "PENDING",
-191 |                     "detail": f"Waiting for approval: '{action_input[:50]}...'"
-192 |                 }
-193 |                 for n in nodes:
-194 |                     if n["id"] == node_id:
-195 |                         n["data"]["toolLogs"] = [new_log] + n["data"].get("toolLogs", [])
-196 |                 await event_queue.put(("metadata", None))
-197 | 
-198 |                 await create_tool_approval(session_id, node_id, action, action_input, t_log_id)
-199 |                 await event_queue.put(("tool_approval", {
-200 |                     "sessionId": session_id, "nodeId": node_id, "toolName": action,
-201 |                     "action": "Execution Approval Required",
-202 |                     "detail": action_input[:100], "logId": t_log_id,
-203 |                 }))
-204 |                 await event_queue.put(("status", f"[{agent_name}] waiting for approval [{action}]"))
-205 | 
-206 |                 approval_start = datetime.datetime.now().timestamp()
-207 |                 while True:
-208 |                     approval_status = await get_tool_approval(session_id, node_id, action, t_log_id)
-209 |                     if approval_status in ("approved", "denied"):
-210 |                         permission = "ALLOWED" if approval_status == "approved" else "DENIED"
-211 |                         break
-212 |                     if datetime.datetime.now().timestamp() - approval_start > 120:
-213 |                         permission = "DENIED"
-214 |                         await update_tool_approval(session_id, node_id, action, t_log_id, "denied")
-215 |                         await event_queue.put(("status", f"[{agent_name}] approval timed out, auto-denied"))
-216 |                         break
-217 |                     await asyncio.sleep(0.5)
-218 | 
-219 |                 status_str = "SUCCESS" if permission == "ALLOWED" else "BLOCKED"
-220 |                 detail_str = f"Approved: {action_input[:50]}" if permission == "ALLOWED" else "Blocked by user."
-221 |                 for n in nodes:
-222 |                     if n["id"] == node_id:
-223 |                         n["data"]["toolLogs"] = [{**new_log, "status": status_str, "detail": detail_str}] + n["data"].get("toolLogs", [])[1:]
-224 |                 await event_queue.put(("metadata", None))
-225 | 
-226 |             # ── Tool Execution ─────────────────────────────────────────
-227 |             observation = "Execution Blocked: Permission Denied."
-228 |             if permission == "ALLOWED":
-229 |                 await event_queue.put(("status", f"[{agent_name}] executing [{action}]"))
-230 | 
-231 |                 if action == "web_search":
-232 |                     observation = await execute_web_search(action_input)
-233 |                 elif action == "browse_web":
-234 |                     observation = await execute_web_browse(action_input)
-235 |                 elif action == "execute_code":
-236 |                     observation = await execute_python_code(action_input)
-237 |                 elif action == "api_call":
-238 |                     # Format: "METHOD|URL" or just "URL"
-239 |                     parts = action_input.split("|", 2)
-240 |                     if len(parts) == 3:
-241 |                         observation = await execute_api_call(parts[1], parts[0], parts[2])
-242 |                     elif len(parts) == 2:
-243 |                         observation = await execute_api_call(parts[1], parts[0])
-244 |                     else:
-245 |                         observation = await execute_api_call(action_input)
-246 |                 elif action == "query_memory":
-247 |                     mem_res = await query_memory(action_input, api_key, session_id=session_id, provider=provider)
-248 |                     observation = "\n".join(mem_res) if mem_res else "No matches found."
-249 |                 elif action == "store_memory":
-250 |                     asyncio.create_task(store_memory(node_id, action_input, api_key, session_id, provider=provider))
-251 |                     observation = "Saved successfully."
-252 |                 elif action == "send_message":
-253 |                     parts = action_input.split("|", 1)
-254 |                     if len(parts) == 2:
-255 |                         target_agent, content = parts
-256 |                         post_message(session_id, node_id, target_agent, content)
-257 |                         observation = f"Message sent to {target_agent}."
-258 |                     else:
-259 |                         observation = "Invalid send_message format. Use 'target|content'."
-260 |                 else:
-261 |                     observation = f"{action} is not yet available."
-262 | 
-263 |                 # Log success
-264 |                 success_log = {
-265 |                     "id": t_log_id, "timestamp": _now(), "tool": action,
-266 |                     "action": "Call", "status": "SUCCESS",
-267 |                     "detail": f"Input: '{action_input[:50]}' → {observation[:100]}...",
-268 |                 }
-269 |                 for n in nodes:
-270 |                     if n["id"] == node_id:
-271 |                         logs = [l for l in n["data"].get("toolLogs", []) if l["id"] != t_log_id]
-272 |                         n["data"]["toolLogs"] = [success_log] + logs
-273 | 
-274 |             await event_queue.put(("metadata", None))
-275 |             agent_history.append({"role": "model", "parts": [{"text": json.dumps(turn_data)}]})
-276 |             agent_history.append({"role": "user", "parts": [{"text": f"Observation: {observation}"}]})
-277 | 
-278 |         # ── Fallback Synthesis ─────────────────────────────────────────
-279 |         if not agent_final_answer or agent_final_answer.strip() in ("Sub-task completed.", "", " "):
-280 |             try:
-281 |                 from providers import call_provider
-282 |                 synth_text = await call_provider(
-283 |                     provider=provider, model=model, api_key=api_key,
-284 |                     messages=[{"role": "user", "content": f"Objective: {agent_data['objective']}\n\nWrite a concise result summary in 2-3 sentences."}],
-285 |                     system_prompt=agent_data["systemPrompt"],
-286 |                     temperature=0.3, timeout=10.0,
-287 |                     fallback_provider=fallback_provider, api_keys=api_keys, base_url=base_url,
-288 |                 )
-289 |                 if synth_text:
-290 |                     agent_final_answer = synth_text
-291 |             except Exception:
-292 |                 pass
-293 | 
-294 |         agent_results[node_id] = agent_final_answer or "Sub-task completed."
-295 | 
-296 |         # Save checkpoint
-297 |         await save_checkpoint(session_id, node_id, {"final_answer": agent_final_answer})
+ 61 |     backup_api_keys: Optional[List[str]] = None,
+ 62 | ) -> Dict[str, Any]:
+ 63 |     """
+ 64 |     Execute one agent's ReAct loop. Pushes SSE events to event_queue.
+ 65 |     Returns dict with node_id, final_answer, status, toolLogs.
+ 66 |     """
+ 67 |     node_id = agent_node["id"]
+ 68 |     agent_data = agent_node["data"]
+ 69 |     agent_name = agent_data["name"]
+ 70 | 
+ 71 |     if not agent_data.get("enabled", True):
+ 72 |         return {"node_id": node_id, "final_answer": "", "status": "SKIPPED", "toolLogs": []}
+ 73 | 
+ 74 |     try:
+ 75 |         # ── Checkpoint Resume ──────────────────────────────────────────
+ 76 |         if resume_from_checkpoint:
+ 77 |             checkpoint_state = await load_checkpoint(session_id, node_id)
+ 78 |             if checkpoint_state:
+ 79 |                 agent_results[node_id] = checkpoint_state.get("final_answer", "Completed.")
+ 80 |                 setup_metadata["agent_talk"].append({
+ 81 |                     "id": f"agent-log-{node_id}-{_now()}",
+ 82 |                     "senderId": node_id,
+ 83 |                     "senderName": agent_name,
+ 84 |                     "senderIcon": agent_data.get("icon", "bot"),
+ 85 |                     "text": checkpoint_state.get("final_answer", "Completed.")[:180],
+ 86 |                     "timestamp": _now(),
+ 87 |                 })
+ 88 |                 await event_queue.put(("metadata", None))
+ 89 |                 return {
+ 90 |                     "node_id": node_id,
+ 91 |                     "final_answer": checkpoint_state.get("final_answer", "Completed."),
+ 92 |                     "status": "IDLE",
+ 93 |                     "toolLogs": [],
+ 94 |                 }
+ 95 | 
+ 96 |         # ── Mark ACTIVE ────────────────────────────────────────────────
+ 97 |         for n in nodes:
+ 98 |             if n["id"] == node_id:
+ 99 |                 n["data"]["status"] = "ACTIVE"
+100 |         await event_queue.put(("metadata", None))
+101 |         await event_queue.put(("status", f"[{agent_name}] processing..."))
+102 |         await asyncio.sleep(0.2)
+103 | 
+104 |         # ── Build context ──────────────────────────────────────────────
+105 |         dep_outputs = ""
+106 |         for dep_id in agent_data.get("dependencies", []):
+107 |             if dep_id in agent_results:
+108 |                 dep_outputs += f"### Input from {dep_id.upper()}:\n{agent_results[dep_id]}\n"
+109 | 
+110 |         incoming_msgs = get_messages_for_agent(session_id, node_id)
+111 |         msg_block = ""
+112 |         if incoming_msgs:
+113 |             msg_block = "### Messages from other agents:\n"
+114 |             for msg in incoming_msgs:
+115 |                 msg_block += f"- From {msg['from']}: {msg['content']}\n"
+116 |             clear_messages(session_id, node_id)
+117 | 
+118 |         resolved_tools_str = ", ".join(agent_data.get("tools", []))
+119 |         tools_instruction = (
+120 |             f"Available tools: {resolved_tools_str}. "
+121 |             "To use a tool, specify the tool name in 'action' and input in 'action_input'. "
+122 |             "If you have enough information, set 'action' to 'none' and provide 'final_answer'."
+123 |         )
+124 | 
+125 |         agent_history = [{
+126 |             "role": "user",
+127 |             "parts": [{
+128 |                 "text": (
+129 |                     f"{tools_instruction}\n\n"
+130 |                     f"User Request: {prompt}\n\n"
+131 |                     f"{dep_outputs}\n{msg_block}\n\n"
+132 |                     f"Your specific objective: {agent_data['objective']}\n"
+133 |                     f"Rules: {agent_data['rules']}"
+134 |                 )
+135 |             }],
+136 |         }]
+137 | 
+138 |         agent_final_answer = "Sub-task completed."
+139 |         action_execution_history = []
+140 |         max_turns = 2 if complexity != "simple" else 1
+141 | 
+142 |         for _turn in range(max_turns):
+143 |             turn_data = {}
+144 |             action = "none"
+145 |             try:
+146 |                 standard_history = _convert_history_to_standard(agent_history)
+147 |                 turn_data = await call_provider_json(
+148 |                     provider=provider,
+149 |                     model=model,
+150 |                     api_key=api_key,
+151 |                     messages=standard_history,
+152 |                     system_prompt=agent_data["systemPrompt"],
+153 |                     temperature=0.2,
+154 |                     json_schema=AGENT_TURN_SCHEMA,
+155 |                     timeout=12.0,
+156 |                     fallback_provider=fallback_provider,
+157 |                     api_keys=api_keys,
+158 |                     base_url=base_url,
+159 |                     backup_api_keys=backup_api_keys,
+160 |                 )
+161 |                 thought = turn_data.get("thought", "")
+162 |                 action = turn_data.get("action", "none")
+163 |                 action_input = turn_data.get("action_input", "")
+164 |                 agent_final_answer = turn_data.get("final_answer", "")
+165 | 
+166 |                 if thought:
+167 |                     await event_queue.put(("thinking", f"[{agent_name}]: {thought}\n"))
+168 |             except Exception as e:
+169 |                 print(f"[AGENT] ReAct turn failed for {agent_name}: {e}")
+170 |                 break
+171 | 
+172 |             if action == "none" or agent_final_answer:
+173 |                 break
+174 | 
+175 |             # ── Circuit Breaker ────────────────────────────────────────
+176 |             action_execution_history.append((action, action_input))
+177 |             if action_execution_history.count((action, action_input)) >= 3:
+178 |                 observation = "Circuit Breaker: Tool executed repeatedly with identical input. Halting."
+179 |                 await event_queue.put(("status", f"[{agent_name}] circuit breaker halted"))
+180 |                 agent_history.append({"role": "model", "parts": [{"text": json.dumps(turn_data)}]})
+181 |                 agent_history.append({"role": "user", "parts": [{"text": f"Observation: {observation}"}]})
+182 |                 continue
+183 | 
+184 |             t_log_id = f"t-log-{int(datetime.datetime.now().timestamp() * 1000)}"
+185 |             t_timestamp = _now()
+186 |             permission = agent_data.get("toolPermissions", {}).get(action, "ALLOWED")
+187 | 
+188 |             # ── Tool Approval ──────────────────────────────────────────
+189 |             if permission == "ASK":
+190 |                 new_log = {
+191 |                     "id": t_log_id, "timestamp": t_timestamp, "tool": action,
+192 |                     "action": "Execution Request", "status": "PENDING",
+193 |                     "detail": f"Waiting for approval: '{action_input[:50]}...'"
+194 |                 }
+195 |                 for n in nodes:
+196 |                     if n["id"] == node_id:
+197 |                         n["data"]["toolLogs"] = [new_log] + n["data"].get("toolLogs", [])
+198 |                 await event_queue.put(("metadata", None))
+199 | 
+200 |                 await create_tool_approval(session_id, node_id, action, action_input, t_log_id)
+201 |                 await event_queue.put(("tool_approval", {
+202 |                     "sessionId": session_id, "nodeId": node_id, "toolName": action,
+203 |                     "action": "Execution Approval Required",
+204 |                     "detail": action_input[:100], "logId": t_log_id,
+205 |                 }))
+206 |                 await event_queue.put(("status", f"[{agent_name}] waiting for approval [{action}]"))
+207 | 
+208 |                 approval_start = datetime.datetime.now().timestamp()
+209 |                 while True:
+210 |                     approval_status = await get_tool_approval(session_id, node_id, action, t_log_id)
+211 |                     if approval_status in ("approved", "denied"):
+212 |                         permission = "ALLOWED" if approval_status == "approved" else "DENIED"
+213 |                         break
+214 |                     if datetime.datetime.now().timestamp() - approval_start > 120:
+215 |                         permission = "DENIED"
+216 |                         await update_tool_approval(session_id, node_id, action, t_log_id, "denied")
+217 |                         await event_queue.put(("status", f"[{agent_name}] approval timed out, auto-denied"))
+218 |                         break
+219 |                     await asyncio.sleep(0.5)
+220 | 
+221 |                 status_str = "SUCCESS" if permission == "ALLOWED" else "BLOCKED"
+222 |                 detail_str = f"Approved: {action_input[:50]}" if permission == "ALLOWED" else "Blocked by user."
+223 |                 for n in nodes:
+224 |                     if n["id"] == node_id:
+225 |                         n["data"]["toolLogs"] = [{**new_log, "status": status_str, "detail": detail_str}] + n["data"].get("toolLogs", [])[1:]
+226 |                 await event_queue.put(("metadata", None))
+227 | 
+228 |             # ── Tool Execution ─────────────────────────────────────────
+229 |             observation = "Execution Blocked: Permission Denied."
+230 |             if permission == "ALLOWED":
+231 |                 await event_queue.put(("status", f"[{agent_name}] executing [{action}]"))
+232 | 
+233 |                 if action == "web_search":
+234 |                     observation = await execute_web_search(action_input)
+235 |                 elif action == "browse_web":
+236 |                     observation = await execute_web_browse(action_input)
+237 |                 elif action == "execute_code":
+238 |                     observation = await execute_python_code(action_input)
+239 |                 elif action == "api_call":
+240 |                     # Format: "METHOD|URL" or just "URL"
+241 |                     parts = action_input.split("|", 2)
+242 |                     if len(parts) == 3:
+243 |                         observation = await execute_api_call(parts[1], parts[0], parts[2])
+244 |                     elif len(parts) == 2:
+245 |                         observation = await execute_api_call(parts[1], parts[0])
+246 |                     else:
+247 |                         observation = await execute_api_call(action_input)
+248 |                 elif action == "query_memory":
+249 |                     mem_res = await query_memory(action_input, api_key, session_id=session_id, provider=provider)
+250 |                     observation = "\n".join(mem_res) if mem_res else "No matches found."
+251 |                 elif action == "store_memory":
+252 |                     asyncio.create_task(store_memory(node_id, action_input, api_key, session_id, provider=provider))
+253 |                     observation = "Saved successfully."
+254 |                 elif action == "send_message":
+255 |                     parts = action_input.split("|", 1)
+256 |                     if len(parts) == 2:
+257 |                         target_agent, content = parts
+258 |                         post_message(session_id, node_id, target_agent, content)
+259 |                         observation = f"Message sent to {target_agent}."
+260 |                     else:
+261 |                         observation = "Invalid send_message format. Use 'target|content'."
+262 |                 else:
+263 |                     observation = f"{action} is not yet available."
+264 | 
+265 |                 # Log success
+266 |                 success_log = {
+267 |                     "id": t_log_id, "timestamp": _now(), "tool": action,
+268 |                     "action": "Call", "status": "SUCCESS",
+269 |                     "detail": f"Input: '{action_input[:50]}' → {observation[:100]}...",
+270 |                 }
+271 |                 for n in nodes:
+272 |                     if n["id"] == node_id:
+273 |                         logs = [l for l in n["data"].get("toolLogs", []) if l["id"] != t_log_id]
+274 |                         n["data"]["toolLogs"] = [success_log] + logs
+275 | 
+276 |             await event_queue.put(("metadata", None))
+277 |             agent_history.append({"role": "model", "parts": [{"text": json.dumps(turn_data)}]})
+278 |             agent_history.append({"role": "user", "parts": [{"text": f"Observation: {observation}"}]})
+279 | 
+280 |         # ── Fallback Synthesis ─────────────────────────────────────────
+281 |         if not agent_final_answer or agent_final_answer.strip() in ("Sub-task completed.", "", " "):
+282 |             try:
+283 |                 from providers import call_provider
+284 |                 synth_text = await call_provider(
+285 |                     provider=provider, model=model, api_key=api_key,
+286 |                     messages=[{"role": "user", "content": f"Objective: {agent_data['objective']}\n\nWrite a concise result summary in 2-3 sentences."}],
+287 |                     system_prompt=agent_data["systemPrompt"],
+288 |                     temperature=0.3, timeout=10.0,
+289 |                     fallback_provider=fallback_provider, api_keys=api_keys, base_url=base_url,
+290 |                     backup_api_keys=backup_api_keys,
+291 |                 )
+292 |                 if synth_text:
+293 |                     agent_final_answer = synth_text
+294 |             except Exception:
+295 |                 pass
+296 | 
+297 |         agent_results[node_id] = agent_final_answer or "Sub-task completed."
 298 | 
-299 |         # Mark IDLE
-300 |         for n in nodes:
-301 |             if n["id"] == node_id:
-302 |                 n["data"]["status"] = "IDLE"
-303 | 
-304 |         setup_metadata["agent_talk"].append({
-305 |             "id": f"agent-log-{node_id}-{_now()}",
-306 |             "senderId": node_id,
-307 |             "senderName": agent_name,
-308 |             "senderIcon": agent_data.get("icon", "bot"),
-309 |             "text": (agent_final_answer[:180] + "..." if len(agent_final_answer) > 180 else agent_final_answer),
-310 |             "timestamp": _now(),
-311 |         })
-312 |         await event_queue.put(("metadata", None))
-313 | 
-314 |         # Lazy memory store
-315 |         if agent_final_answer and len(agent_final_answer) > 40 and agent_final_answer != "Sub-task completed.":
-316 |             memory_text = f"Objective: {agent_data['objective']}\nOutcome: {agent_final_answer[:500]}"
-317 |             asyncio.create_task(store_memory(node_id, memory_text, api_key, session_id, provider=provider))
-318 | 
-319 |         return {"node_id": node_id, "final_answer": agent_results[node_id], "status": "IDLE", "toolLogs": []}
-320 | 
-321 |     except Exception as e:
-322 |         print(f"[AGENT ERROR] {agent_name} failed: {e}")
-323 |         error_str = str(e)
-324 |         if any(t in error_str.lower() for t in ["not found", "does not exist", "model_not_found"]):
-325 |             error_str = f"Model '{model}' not found. Check your model ID in Settings."
-326 |         agent_results[node_id] = f"Agent encountered an error: {error_str[:200]}"
-327 |         for n in nodes:
-328 |             if n["id"] == node_id:
-329 |                 n["data"]["status"] = "ERROR"
-330 |         setup_metadata["agent_talk"].append({
-331 |             "id": f"agent-log-{node_id}-error-{_now()}",
-332 |             "senderId": node_id,
-333 |             "senderName": agent_name,
-334 |             "senderIcon": agent_data.get("icon", "bot"),
-335 |             "text": f"⚠ Failed: {error_str[:150]}",
-336 |             "timestamp": _now(),
-337 |         })
-338 |         await event_queue.put(("metadata", None))
-339 |         return {"node_id": node_id, "final_answer": agent_results[node_id], "status": "ERROR", "toolLogs": []}
-340 |
+299 |         # Save checkpoint
+300 |         await save_checkpoint(session_id, node_id, {"final_answer": agent_final_answer})
+301 | 
+302 |         # Mark IDLE
+303 |         for n in nodes:
+304 |             if n["id"] == node_id:
+305 |                 n["data"]["status"] = "IDLE"
+306 | 
+307 |         setup_metadata["agent_talk"].append({
+308 |             "id": f"agent-log-{node_id}-{_now()}",
+309 |             "senderId": node_id,
+310 |             "senderName": agent_name,
+311 |             "senderIcon": agent_data.get("icon", "bot"),
+312 |             "text": (agent_final_answer[:180] + "..." if len(agent_final_answer) > 180 else agent_final_answer),
+313 |             "timestamp": _now(),
+314 |         })
+315 |         await event_queue.put(("metadata", None))
+316 | 
+317 |         # Lazy memory store
+318 |         if agent_final_answer and len(agent_final_answer) > 40 and agent_final_answer != "Sub-task completed.":
+319 |             memory_text = f"Objective: {agent_data['objective']}\nOutcome: {agent_final_answer[:500]}"
+320 |             asyncio.create_task(store_memory(node_id, memory_text, api_key, session_id, provider=provider))
+321 | 
+322 |         return {"node_id": node_id, "final_answer": agent_results[node_id], "status": "IDLE", "toolLogs": []}
+323 | 
+324 |     except Exception as e:
+325 |         print(f"[AGENT ERROR] {agent_name} failed: {e}")
+326 |         error_str = str(e)
+327 |         if any(t in error_str.lower() for t in ["not found", "does not exist", "model_not_found"]):
+328 |             error_str = f"Model '{model}' not found. Check your model ID in Settings."
+329 |         agent_results[node_id] = f"Agent encountered an error: {error_str[:200]}"
+330 |         for n in nodes:
+331 |             if n["id"] == node_id:
+332 |                 n["data"]["status"] = "ERROR"
+333 |         setup_metadata["agent_talk"].append({
+334 |             "id": f"agent-log-{node_id}-error-{_now()}",
+335 |             "senderId": node_id,
+336 |             "senderName": agent_name,
+337 |             "senderIcon": agent_data.get("icon", "bot"),
+338 |             "text": f"⚠ Failed: {error_str[:150]}",
+339 |             "timestamp": _now(),
+340 |         })
+341 |         await event_queue.put(("metadata", None))
+342 |         return {"node_id": node_id, "final_answer": agent_results[node_id], "status": "ERROR", "toolLogs": []}
+343 |
 ```
 
 ### File: `Backend/core/echohouse.py`
 
-> 146 lines | 6.1 KB
+> 149 lines | 6.3 KB
 
 ```python
   1 | import json
@@ -493,137 +496,140 @@ SoloSpace/
  13 |     api_keys: Optional[Dict[str, str]] = None,
  14 |     base_url: Optional[str] = None,
  15 |     rounds: int = 3,
- 16 |     tone: str = "realistic"
- 17 | ) -> AsyncGenerator[str, None]:
- 18 |     """
- 19 |     Orchestrates a multi-turn social simulation where agents act as real-life people.
- 20 |     Produces 3 rounds of conversation and a final Insight synthesis turn.
- 21 |     """
- 22 |     history: List[Dict[str, str]] = []
- 23 |     
- 24 |     rounds = max(1, min(5, rounds))
- 25 |     tone_label = tone.lower().strip() if tone else "realistic"
- 26 |     for r in range(rounds):
- 27 |         yield f"event: status\ndata: {json.dumps(f'Orchestrating Round {r + 1} of social simulation...')}\n\n"
- 28 |         
- 29 |         for agent in cast:
- 30 |             name = agent.get("inferred_name", "Unknown")
- 31 |             role = agent.get("role", "Unknown")
- 32 |             problem = agent.get("inferred_problem", "")
- 33 |             is_self = agent.get("is_self", False)
- 34 |             
- 35 |             # Embody specific character via system prompt
- 36 |             emotional_core = agent.get("emotional_core", "")
- 37 |             emotional_core_line = f"\nYour deepest emotional driver in this situation is: \"{emotional_core}\"." if emotional_core else ""
- 38 |             system_prompt = f"""You are {name}, whose role in the user's life is: {role}.
- 39 | The user has described their core problem: "{problem_text}".
- 40 | From your perspective, the situation is: "{problem}".
- 41 | {emotional_core_line}
- 42 | 
- 43 | You are participating in a social dynamics simulation. Respond authentically as this person would.
- 44 | STRICT GUIDELINES:
- 45 | - Embody this person completely. Do NOT speak as an AI, and do NOT be polite, helpful, or constructive unless it is authentic to this character's emotions, defense mechanisms, desires, or flaws.
- 46 | - Express defensiveness, anger, sadness, love, or blind spots if they fit the situation.
- 47 | - Read and react directly to what the other characters have said in the conversation history.
- 48 | - Reference the user (Self) and other people by name.
- 49 | - Keep your turn relatively short and punchy (around 2-4 sentences), as in a real conversation.
- 50 | - Output ONLY the raw conversational speech of {name}. Do NOT prefix with your name or role in the response (e.g., do NOT write "{name}: ..."). Just output the speech itself.
- 51 | - Respond in a {tone_label} manner, authentic to who this person is.
- 52 | """
- 53 | 
- 54 |             messages = []
- 55 |             for item in history:
- 56 |                 messages.append({
- 57 |                     "role": "user",
- 58 |                     "content": item["content"]
- 59 |                 })
- 60 |             
- 61 |             if is_self:
- 62 |                 messages.append({
- 63 |                     "role": "user",
- 64 |                     "content": f"[SYSTEM: You are {name} (Self). It is your turn to speak. React to the conversation so far.]"
- 65 |                 })
- 66 |             else:
- 67 |                 messages.append({
- 68 |                     "role": "user",
- 69 |                     "content": f"[SYSTEM: You are {name} ({role}). It is your turn to speak. React to the conversation so far.]"
- 70 |                 })
- 71 | 
- 72 |             # Send metadata for active speaker
- 73 |             yield f"event: metadata\ndata: {json.dumps({'active_speaker': name})}\n\n"
- 74 |             await asyncio.sleep(0.1)
- 75 |             
- 76 |             agent_speech = ""
- 77 |             try:
- 78 |                 async for token in stream_provider(
- 79 |                     provider=provider,
- 80 |                     model=model,
- 81 |                     api_key=api_key or "",
- 82 |                     messages=messages,
- 83 |                     system_prompt=system_prompt,
- 84 |                     temperature=0.8,
- 85 |                     api_keys=api_keys,
- 86 |                     base_url=base_url
- 87 |                 ):
- 88 |                     agent_speech += token
- 89 |                     yield f"event: text\ndata: {json.dumps(token)}\n\n"
- 90 |             except Exception as e:
- 91 |                 err_msg = f"[Simulation Error for {name}: {str(e)}]"
- 92 |                 agent_speech += err_msg
- 93 |                 yield f"event: text\ndata: {json.dumps(err_msg)}\n\n"
- 94 |             
- 95 |             history.append({
- 96 |                 "role": "user",
- 97 |                 "content": f"{name} ({role}): {agent_speech}"
- 98 |             })
- 99 |             await asyncio.sleep(0.5)
-100 | 
-101 |     # ── Final Insight synthesis ─────────────────────────────────────────
-102 |     yield f"event: status\ndata: {json.dumps('Generating simulation insight synthesis...')}\n\n"
-103 |     
-104 |     insight_system_prompt = """You are an expert system therapist and social analyst.
-105 | Analyze the preceding simulated conversation and synthesize a deep insight.
-106 | Your response must speak from a neutral, objective third-person perspective.
-107 | Identify:
-108 | 1. The underlying emotional needs and core fears of each participant.
-109 | 2. Repetitive toxic or unproductive patterns observed in the simulation.
-110 | 3. Actionable, compassionate suggestions for how the user can approach this situation in real life to break the pattern.
-111 | 
-112 | Keep it structured, clear, and highly insightful.
-113 | """
-114 | 
-115 |     messages = []
-116 |     for item in history:
-117 |         messages.append({
-118 |             "role": "user",
-119 |             "content": item["content"]
-120 |         })
-121 |     messages.append({
-122 |         "role": "user",
-123 |         "content": "[SYSTEM: Provide the final therapeutic insight and analysis of this simulated family/social dynamic.]"
-124 |     })
-125 |     
-126 |     yield f"event: metadata\ndata: {json.dumps({'active_speaker': 'insight'})}\n\n"
-127 |     await asyncio.sleep(0.1)
-128 | 
-129 |     try:
-130 |         async for token in stream_provider(
-131 |             provider=provider,
-132 |             model=model,
-133 |             api_key=api_key or "",
-134 |             messages=messages,
-135 |             system_prompt=insight_system_prompt,
-136 |             temperature=0.5,
-137 |             api_keys=api_keys,
-138 |             base_url=base_url
-139 |         ):
-140 |             yield f"event: text\ndata: {json.dumps(token)}\n\n"
-141 |     except Exception as e:
-142 |         err_msg = f"[Insight generation failed: {str(e)}]"
-143 |         yield f"event: text\ndata: {json.dumps(err_msg)}\n\n"
-144 | 
-145 |     yield "event: done\ndata: {}\n\n"
-146 |
+ 16 |     tone: str = "realistic",
+ 17 |     backup_api_keys: Optional[List[str]] = None,
+ 18 | ) -> AsyncGenerator[str, None]:
+ 19 |     """
+ 20 |     Orchestrates a multi-turn social simulation where agents act as real-life people.
+ 21 |     Produces 3 rounds of conversation and a final Insight synthesis turn.
+ 22 |     """
+ 23 |     history: List[Dict[str, str]] = []
+ 24 |     
+ 25 |     rounds = max(1, min(5, rounds))
+ 26 |     tone_label = tone.lower().strip() if tone else "realistic"
+ 27 |     for r in range(rounds):
+ 28 |         yield f"event: status\ndata: {json.dumps(f'Orchestrating Round {r + 1} of social simulation...')}\n\n"
+ 29 |         
+ 30 |         for agent in cast:
+ 31 |             name = agent.get("inferred_name", "Unknown")
+ 32 |             role = agent.get("role", "Unknown")
+ 33 |             problem = agent.get("inferred_problem", "")
+ 34 |             is_self = agent.get("is_self", False)
+ 35 |             
+ 36 |             # Embody specific character via system prompt
+ 37 |             emotional_core = agent.get("emotional_core", "")
+ 38 |             emotional_core_line = f"\nYour deepest emotional driver in this situation is: \"{emotional_core}\"." if emotional_core else ""
+ 39 |             system_prompt = f"""You are {name}, whose role in the user's life is: {role}.
+ 40 | The user has described their core problem: "{problem_text}".
+ 41 | From your perspective, the situation is: "{problem}".
+ 42 | {emotional_core_line}
+ 43 | 
+ 44 | You are participating in a social dynamics simulation. Respond authentically as this person would.
+ 45 | STRICT GUIDELINES:
+ 46 | - Embody this person completely. Do NOT speak as an AI, and do NOT be polite, helpful, or constructive unless it is authentic to this character's emotions, defense mechanisms, desires, or flaws.
+ 47 | - Express defensiveness, anger, sadness, love, or blind spots if they fit the situation.
+ 48 | - Read and react directly to what the other characters have said in the conversation history.
+ 49 | - Reference the user (Self) and other people by name.
+ 50 | - Keep your turn relatively short and punchy (around 2-4 sentences), as in a real conversation.
+ 51 | - Output ONLY the raw conversational speech of {name}. Do NOT prefix with your name or role in the response (e.g., do NOT write "{name}: ..."). Just output the speech itself.
+ 52 | - Respond in a {tone_label} manner, authentic to who this person is.
+ 53 | """
+ 54 | 
+ 55 |             messages = []
+ 56 |             for item in history:
+ 57 |                 messages.append({
+ 58 |                     "role": "user",
+ 59 |                     "content": item["content"]
+ 60 |                 })
+ 61 |             
+ 62 |             if is_self:
+ 63 |                 messages.append({
+ 64 |                     "role": "user",
+ 65 |                     "content": f"[SYSTEM: You are {name} (Self). It is your turn to speak. React to the conversation so far.]"
+ 66 |                 })
+ 67 |             else:
+ 68 |                 messages.append({
+ 69 |                     "role": "user",
+ 70 |                     "content": f"[SYSTEM: You are {name} ({role}). It is your turn to speak. React to the conversation so far.]"
+ 71 |                 })
+ 72 | 
+ 73 |             # Send metadata for active speaker
+ 74 |             yield f"event: metadata\ndata: {json.dumps({'active_speaker': name})}\n\n"
+ 75 |             await asyncio.sleep(0.1)
+ 76 |             
+ 77 |             agent_speech = ""
+ 78 |             try:
+ 79 |                 async for token in stream_provider(
+ 80 |                     provider=provider,
+ 81 |                     model=model,
+ 82 |                     api_key=api_key or "",
+ 83 |                     messages=messages,
+ 84 |                     system_prompt=system_prompt,
+ 85 |                     temperature=0.8,
+ 86 |                     api_keys=api_keys,
+ 87 |                     base_url=base_url,
+ 88 |                     backup_api_keys=backup_api_keys,
+ 89 |                 ):
+ 90 |                     agent_speech += token
+ 91 |                     yield f"event: text\ndata: {json.dumps(token)}\n\n"
+ 92 |             except Exception as e:
+ 93 |                 err_msg = f"[Simulation Error for {name}: {str(e)}]"
+ 94 |                 agent_speech += err_msg
+ 95 |                 yield f"event: text\ndata: {json.dumps(err_msg)}\n\n"
+ 96 |             
+ 97 |             history.append({
+ 98 |                 "role": "user",
+ 99 |                 "content": f"{name} ({role}): {agent_speech}"
+100 |             })
+101 |             await asyncio.sleep(0.5)
+102 | 
+103 |     # ── Final Insight synthesis ─────────────────────────────────────────
+104 |     yield f"event: status\ndata: {json.dumps('Generating simulation insight synthesis...')}\n\n"
+105 |     
+106 |     insight_system_prompt = """You are an expert system therapist and social analyst.
+107 | Analyze the preceding simulated conversation and synthesize a deep insight.
+108 | Your response must speak from a neutral, objective third-person perspective.
+109 | Identify:
+110 | 1. The underlying emotional needs and core fears of each participant.
+111 | 2. Repetitive toxic or unproductive patterns observed in the simulation.
+112 | 3. Actionable, compassionate suggestions for how the user can approach this situation in real life to break the pattern.
+113 | 
+114 | Keep it structured, clear, and highly insightful.
+115 | """
+116 | 
+117 |     messages = []
+118 |     for item in history:
+119 |         messages.append({
+120 |             "role": "user",
+121 |             "content": item["content"]
+122 |         })
+123 |     messages.append({
+124 |         "role": "user",
+125 |         "content": "[SYSTEM: Provide the final therapeutic insight and analysis of this simulated family/social dynamic.]"
+126 |     })
+127 |     
+128 |     yield f"event: metadata\ndata: {json.dumps({'active_speaker': 'insight'})}\n\n"
+129 |     await asyncio.sleep(0.1)
+130 | 
+131 |     try:
+132 |         async for token in stream_provider(
+133 |             provider=provider,
+134 |             model=model,
+135 |             api_key=api_key or "",
+136 |             messages=messages,
+137 |             system_prompt=insight_system_prompt,
+138 |             temperature=0.5,
+139 |             api_keys=api_keys,
+140 |             base_url=base_url,
+141 |             backup_api_keys=backup_api_keys,
+142 |         ):
+143 |             yield f"event: text\ndata: {json.dumps(token)}\n\n"
+144 |     except Exception as e:
+145 |         err_msg = f"[Insight generation failed: {str(e)}]"
+146 |         yield f"event: text\ndata: {json.dumps(err_msg)}\n\n"
+147 | 
+148 |     yield "event: done\ndata: {}\n\n"
+149 |
 ```
 
 ### File: `Backend/core/orchestrator.py`
@@ -769,7 +775,7 @@ SoloSpace/
 
 ### File: `Backend/core/planner.py`
 
-> 304 lines | 11.8 KB
+> 310 lines | 12.1 KB
 
 ```python
   1 | """
@@ -826,261 +832,267 @@ SoloSpace/
  52 |     api_key: str,
  53 |     api_keys: Optional[Dict[str, str]] = None,
  54 |     base_url: Optional[str] = None,
- 55 | ) -> str:
- 56 |     """
- 57 |     Classify the request as TRIVIAL, TOOL_USE, or COMPLEX.
- 58 |     Uses the fastest available model for the configured provider (<300ms target).
- 59 |     Falls back to COMPLEX on any failure so we never under-serve.
- 60 |     """
- 61 |     fast_model = _FAST_ROUTER_MODELS.get(provider)
- 62 |     try:
- 63 |         result = await call_provider_json(
- 64 |             provider=provider,
- 65 |             model=fast_model,           # Fast router model for this provider
- 66 |             api_key=api_key,
- 67 |             messages=[{"role": "user", "content": prompt}],
- 68 |             system_prompt=ROUTER_PROMPT,
- 69 |             temperature=0.1,
- 70 |             json_schema=ROUTER_SCHEMA,
- 71 |             timeout=3.0,
- 72 |             api_keys=api_keys,
- 73 |             base_url=base_url,
- 74 |         )
- 75 |         category = result.get("category", "COMPLEX")
- 76 |         confidence = result.get("confidence", 0.5)
- 77 |         # Escalate if unsure
- 78 |         if confidence < 0.6 and category == "TRIVIAL":
- 79 |             return "TOOL_USE"
- 80 |         return category
- 81 |     except Exception as e:
- 82 |         print(f"[ROUTER] Classification failed ({e}), defaulting to COMPLEX")
- 83 |         return "COMPLEX"
- 84 | 
- 85 | 
- 86 | # ─── Orchestration Schemas ────────────────────────────────────────────
+ 55 |     backup_api_keys: Optional[List[str]] = None,
+ 56 | ) -> str:
+ 57 |     """
+ 58 |     Classify the request as TRIVIAL, TOOL_USE, or COMPLEX.
+ 59 |     Uses the fastest available model for the configured provider (<300ms target).
+ 60 |     Falls back to COMPLEX on any failure so we never under-serve.
+ 61 |     """
+ 62 |     fast_model = _FAST_ROUTER_MODELS.get(provider)
+ 63 |     try:
+ 64 |         result = await call_provider_json(
+ 65 |             provider=provider,
+ 66 |             model=fast_model,           # Fast router model for this provider
+ 67 |             api_key=api_key,
+ 68 |             messages=[{"role": "user", "content": prompt}],
+ 69 |             system_prompt=ROUTER_PROMPT,
+ 70 |             temperature=0.1,
+ 71 |             json_schema=ROUTER_SCHEMA,
+ 72 |             timeout=3.0,
+ 73 |             api_keys=api_keys,
+ 74 |             base_url=base_url,
+ 75 |             backup_api_keys=backup_api_keys,
+ 76 |         )
+ 77 |         category = result.get("category", "COMPLEX")
+ 78 |         confidence = result.get("confidence", 0.5)
+ 79 |         # Escalate if unsure
+ 80 |         if confidence < 0.6 and category == "TRIVIAL":
+ 81 |             return "TOOL_USE"
+ 82 |         return category
+ 83 |     except Exception as e:
+ 84 |         print(f"[ROUTER] Classification failed ({e}), defaulting to COMPLEX")
+ 85 |         return "COMPLEX"
+ 86 | 
  87 | 
- 88 | ORCHESTRATOR_SYSTEM_INSTRUCTION = """
- 89 | You are Solospace, an elite workflow orchestrator. Your ONLY job is to analyze the user's request and output a JSON list of specialized agents.
- 90 | 
- 91 | CRITICAL RULES:
- 92 | - For ANY request that involves building, designing, integrating, or researching a non-trivial system, you MUST output at least 2 agents.
- 93 | - For requests that mention multiple domains (e.g., frontend + backend + database), use 3-6 agents.
- 94 | - Only output a SINGLE agent ("general") for extremely simple questions like "Hello", "What is AI?", or one-line explanations.
- 95 | - Classify the complexity field as "complex" if the user asks to build, design, integrate, or analyze a system with 2+ distinct components. If in doubt, prefer "complex" over "simple".
- 96 | 
- 97 | AGENT CREATION:
- 98 | You can use any senderId, not only the built-in list. Define custom agents freely.
- 99 | Every agent MUST have:
-100 | - senderId: a unique short identifier (e.g., "frontend_ui", "payment_gateway", "data_analyst").
-101 | - senderName: a human readable name.
-102 | - senderIcon: "code", "science", or "trending_up".
-103 | - text: what this agent will contribute.
-104 | - objective: specific goal for this agent.
-105 | - systemPrompt: detailed instructions for the agent.
-106 | - rules: 2-3 specific constraints.
-107 | - dependencies: list of other agent ids this agent needs.
-108 | - tools: choose from ["Web Search", "Memory", "Code Executor", "Browser", "API Connector"].
-109 | 
-110 | DEDUPLICATION:
-111 | If existing agents are provided in context, do NOT recreate agents with the same senderId or role.
-112 | Only create complementary agents that add genuinely NEW capabilities.
-113 | """
-114 | 
-115 | ORCHESTRATION_SCHEMA = {
-116 |     "type": "OBJECT",
-117 |     "properties": {
-118 |         "complexity": {
-119 |             "type": "STRING",
-120 |             "enum": ["simple", "medium", "complex"]
-121 |         },
-122 |         "capabilities": {"type": "ARRAY", "items": {"type": "STRING"}},
-123 |         "thinking_summary": {"type": "STRING"},
-124 |         "follow_up_suggestions": {"type": "ARRAY", "items": {"type": "STRING"}},
-125 |         "agent_talk": {
-126 |             "type": "ARRAY",
-127 |             "items": {
-128 |                 "type": "OBJECT",
-129 |                 "properties": {
-130 |                     "senderId": {"type": "STRING"},
-131 |                     "senderName": {"type": "STRING"},
-132 |                     "senderIcon": {"type": "STRING"},
-133 |                     "text": {"type": "STRING"},
-134 |                     "objective": {"type": "STRING"},
-135 |                     "systemPrompt": {"type": "STRING"},
-136 |                     "rules": {"type": "ARRAY", "items": {"type": "STRING"}},
-137 |                     "dependencies": {"type": "ARRAY", "items": {"type": "STRING"}},
-138 |                     "tools": {"type": "ARRAY", "items": {"type": "STRING"}},
-139 |                     "custom_template": {
-140 |                         "type": "OBJECT",
-141 |                         "properties": {
-142 |                             "name": {"type": "STRING"},
-143 |                             "icon": {"type": "STRING"},
-144 |                             "tag": {"type": "STRING"},
-145 |                             "temp": {"type": "NUMBER"},
-146 |                             "logic": {"type": "INTEGER"},
-147 |                             "col": {"type": "INTEGER"},
-148 |                         },
-149 |                         "required": ["name", "icon", "tag", "temp", "logic", "col"],
-150 |                     },
-151 |                 },
-152 |                 "required": [
-153 |                     "senderId", "senderName", "senderIcon", "text",
-154 |                     "objective", "systemPrompt", "rules", "dependencies", "tools"
-155 |                 ],
-156 |             },
-157 |         },
-158 |     },
-159 |     "required": ["complexity", "capabilities", "thinking_summary", "agent_talk", "follow_up_suggestions"],
-160 | }
-161 | 
-162 | AGENT_TURN_SCHEMA = {
-163 |     "type": "OBJECT",
-164 |     "properties": {
-165 |         "thought": {"type": "STRING"},
-166 |         "action": {
-167 |             "type": "STRING",
-168 |             "enum": [
-169 |                 "none", "web_search", "execute_code", "api_call",
-170 |                 "query_memory", "store_memory", "send_message",
-171 |                 "browse_web", "analyze_image", "read_file"
-172 |             ],
-173 |         },
-174 |         "action_input": {"type": "STRING"},
-175 |         "final_answer": {"type": "STRING"},
-176 |     },
-177 |     "required": ["thought", "action"],
-178 | }
-179 | 
-180 | RESPONSE_SYSTEM_INSTRUCTION = """
-181 | You are Solospace, an elite assistant.
-182 | Your job is to produce a clean, direct response to the user's prompt using the provided context.
-183 | 
-184 | STRICT RULES — NEVER VIOLATE:
-185 | - Do NOT include any preamble, header, or status line such as "[Agent processing...]", "Synthesizing...", "From the agent team:", or similar.
-186 | - Do NOT mention agents, sub-tasks, specialists, orchestration, or internal workflow mechanics.
-187 | - Begin your response immediately and directly with the answer.
-188 | - Use clean, well-structured markdown only when it genuinely helps the user.
-189 | - For conversational messages (e.g. greetings), reply naturally and concisely without any structure.
-190 | """
-191 | 
-192 | # ─── Default Fallback Plan ────────────────────────────────────────────
+ 88 | # ─── Orchestration Schemas ────────────────────────────────────────────
+ 89 | 
+ 90 | ORCHESTRATOR_SYSTEM_INSTRUCTION = """
+ 91 | You are Solospace, an elite workflow orchestrator. Your ONLY job is to analyze the user's request and output a JSON list of specialized agents.
+ 92 | 
+ 93 | CRITICAL RULES:
+ 94 | - For ANY request that involves building, designing, integrating, or researching a non-trivial system, you MUST output at least 2 agents.
+ 95 | - For requests that mention multiple domains (e.g., frontend + backend + database), use 3-6 agents.
+ 96 | - Only output a SINGLE agent ("general") for extremely simple questions like "Hello", "What is AI?", or one-line explanations.
+ 97 | - Classify the complexity field as "complex" if the user asks to build, design, integrate, or analyze a system with 2+ distinct components. If in doubt, prefer "complex" over "simple".
+ 98 | 
+ 99 | AGENT CREATION:
+100 | You can use any senderId, not only the built-in list. Define custom agents freely.
+101 | Every agent MUST have:
+102 | - senderId: a unique short identifier (e.g., "frontend_ui", "payment_gateway", "data_analyst").
+103 | - senderName: a human readable name.
+104 | - senderIcon: "code", "science", or "trending_up".
+105 | - text: what this agent will contribute.
+106 | - objective: specific goal for this agent.
+107 | - systemPrompt: detailed instructions for the agent.
+108 | - rules: 2-3 specific constraints.
+109 | - dependencies: list of other agent ids this agent needs.
+110 | - tools: choose from ["Web Search", "Memory", "Code Executor", "Browser", "API Connector"].
+111 | 
+112 | DEDUPLICATION:
+113 | If existing agents are provided in context, do NOT recreate agents with the same senderId or role.
+114 | Only create complementary agents that add genuinely NEW capabilities.
+115 | """
+116 | 
+117 | ORCHESTRATION_SCHEMA = {
+118 |     "type": "OBJECT",
+119 |     "properties": {
+120 |         "complexity": {
+121 |             "type": "STRING",
+122 |             "enum": ["simple", "medium", "complex"]
+123 |         },
+124 |         "capabilities": {"type": "ARRAY", "items": {"type": "STRING"}},
+125 |         "thinking_summary": {"type": "STRING"},
+126 |         "follow_up_suggestions": {"type": "ARRAY", "items": {"type": "STRING"}},
+127 |         "agent_talk": {
+128 |             "type": "ARRAY",
+129 |             "items": {
+130 |                 "type": "OBJECT",
+131 |                 "properties": {
+132 |                     "senderId": {"type": "STRING"},
+133 |                     "senderName": {"type": "STRING"},
+134 |                     "senderIcon": {"type": "STRING"},
+135 |                     "text": {"type": "STRING"},
+136 |                     "objective": {"type": "STRING"},
+137 |                     "systemPrompt": {"type": "STRING"},
+138 |                     "rules": {"type": "ARRAY", "items": {"type": "STRING"}},
+139 |                     "dependencies": {"type": "ARRAY", "items": {"type": "STRING"}},
+140 |                     "tools": {"type": "ARRAY", "items": {"type": "STRING"}},
+141 |                     "custom_template": {
+142 |                         "type": "OBJECT",
+143 |                         "properties": {
+144 |                             "name": {"type": "STRING"},
+145 |                             "icon": {"type": "STRING"},
+146 |                             "tag": {"type": "STRING"},
+147 |                             "temp": {"type": "NUMBER"},
+148 |                             "logic": {"type": "INTEGER"},
+149 |                             "col": {"type": "INTEGER"},
+150 |                         },
+151 |                         "required": ["name", "icon", "tag", "temp", "logic", "col"],
+152 |                     },
+153 |                 },
+154 |                 "required": [
+155 |                     "senderId", "senderName", "senderIcon", "text",
+156 |                     "objective", "systemPrompt", "rules", "dependencies", "tools"
+157 |                 ],
+158 |             },
+159 |         },
+160 |     },
+161 |     "required": ["complexity", "capabilities", "thinking_summary", "agent_talk", "follow_up_suggestions"],
+162 | }
+163 | 
+164 | AGENT_TURN_SCHEMA = {
+165 |     "type": "OBJECT",
+166 |     "properties": {
+167 |         "thought": {"type": "STRING"},
+168 |         "action": {
+169 |             "type": "STRING",
+170 |             "enum": [
+171 |                 "none", "web_search", "execute_code", "api_call",
+172 |                 "query_memory", "store_memory", "send_message",
+173 |                 "browse_web", "analyze_image", "read_file"
+174 |             ],
+175 |         },
+176 |         "action_input": {"type": "STRING"},
+177 |         "final_answer": {"type": "STRING"},
+178 |     },
+179 |     "required": ["thought", "action"],
+180 | }
+181 | 
+182 | RESPONSE_SYSTEM_INSTRUCTION = """
+183 | You are Solospace, an elite assistant.
+184 | Your job is to produce a clean, direct response to the user's prompt using the provided context.
+185 | 
+186 | STRICT RULES — NEVER VIOLATE:
+187 | - Do NOT include any preamble, header, or status line such as "[Agent processing...]", "Synthesizing...", "From the agent team:", or similar.
+188 | - Do NOT mention agents, sub-tasks, specialists, orchestration, or internal workflow mechanics.
+189 | - Begin your response immediately and directly with the answer.
+190 | - Use clean, well-structured markdown only when it genuinely helps the user.
+191 | - For conversational messages (e.g. greetings), reply naturally and concisely without any structure.
+192 | """
 193 | 
-194 | DEFAULT_PLAN = {
-195 |     "complexity": "simple",
-196 |     "capabilities": [],
-197 |     "thinking_summary": "System defaulted to general mode.",
-198 |     "agent_talk": [
-199 |         {
-200 |             "senderId": "general",
-201 |             "senderName": "General Assistant",
-202 |             "senderIcon": "bot",
-203 |             "text": "Standing by to process your request.",
-204 |             "objective": "Process user requests with precise analysis.",
-205 |             "systemPrompt": "You are Solospace core.",
-206 |             "rules": ["Be descriptive"],
-207 |             "dependencies": [],
-208 |             "tools": ["Web Search", "Memory"],
-209 |         }
-210 |     ],
-211 |     "follow_up_suggestions": [
-212 |         "Can you elaborate?",
-213 |         "Show me a detailed implementation example.",
-214 |     ],
-215 | }
-216 | 
-217 | 
-218 | async def generate_plan(
-219 |     messages: List[Dict[str, str]],
-220 |     provider: str,
-221 |     model: Optional[str],
-222 |     api_key: str,
-223 |     api_keys: Optional[Dict[str, str]] = None,
-224 |     base_url: Optional[str] = None,
-225 |     fallback_provider: Optional[str] = None,
-226 | ) -> Dict[str, Any]:
-227 |     """
-228 |     Call the planning LLM to generate an agent plan.
-229 |     Returns DEFAULT_PLAN on failure.
+194 | # ─── Default Fallback Plan ────────────────────────────────────────────
+195 | 
+196 | DEFAULT_PLAN = {
+197 |     "complexity": "simple",
+198 |     "capabilities": [],
+199 |     "thinking_summary": "System defaulted to general mode.",
+200 |     "agent_talk": [
+201 |         {
+202 |             "senderId": "general",
+203 |             "senderName": "General Assistant",
+204 |             "senderIcon": "bot",
+205 |             "text": "Standing by to process your request.",
+206 |             "objective": "Process user requests with precise analysis.",
+207 |             "systemPrompt": "You are Solospace core.",
+208 |             "rules": ["Be descriptive"],
+209 |             "dependencies": [],
+210 |             "tools": ["Web Search", "Memory"],
+211 |         }
+212 |     ],
+213 |     "follow_up_suggestions": [
+214 |         "Can you elaborate?",
+215 |         "Show me a detailed implementation example.",
+216 |     ],
+217 | }
+218 | 
+219 | 
+220 | async def generate_plan(
+221 |     messages: List[Dict[str, str]],
+222 |     provider: str,
+223 |     model: Optional[str],
+224 |     api_key: str,
+225 |     api_keys: Optional[Dict[str, str]] = None,
+226 |     base_url: Optional[str] = None,
+227 |     fallback_provider: Optional[str] = None,
+228 |     backup_api_keys: Optional[List[str]] = None,
+229 | ) -> Dict[str, Any]:
 230 |     """
-231 |     try:
-232 |         plan = await call_provider_json(
-233 |             provider=provider,
-234 |             model=model,
-235 |             api_key=api_key,
-236 |             messages=messages,
-237 |             system_prompt=ORCHESTRATOR_SYSTEM_INSTRUCTION,
-238 |             temperature=0.2,
-239 |             json_schema=ORCHESTRATION_SCHEMA,
-240 |             timeout=20.0,
-241 |             fallback_provider=fallback_provider,
-242 |             api_keys=api_keys,
-243 |             base_url=base_url,
-244 |         )
-245 |         return plan
-246 |     except Exception as e:
-247 |         print(f"[PLANNER] Planning failed: {e}")
-248 |         return DEFAULT_PLAN.copy()
-249 | 
-250 | 
-251 | async def summarize_history(
-252 |     history: List[Dict[str, str]],
-253 |     provider: str,
-254 |     api_key: str,
-255 |     api_keys: Optional[Dict[str, str]] = None,
-256 |     base_url: Optional[str] = None,
-257 | ) -> List[Dict[str, str]]:
-258 |     """
-259 |     If history is long (greater than 6 turns / 12 messages), summarize the oldest messages
-260 |     and replace them with a single system summary context message to save tokens.
-261 |     """
-262 |     if len(history) <= 12:
-263 |         return history
-264 | 
-265 |     # Divide history into parts to summarize and parts to keep
-266 |     to_summarize = history[:-6]
-267 |     to_keep = history[-6:]
-268 | 
-269 |     # Prepare summary prompt
-270 |     convo_text = ""
-271 |     for msg in to_summarize:
-272 |         role = msg.get("role", "user")
-273 |         content = msg.get("content", "")
-274 |         convo_text += f"{role.upper()}: {content}\n"
-275 | 
-276 |     summary_prompt = f"Summarize the following chat history conversation concisely in one paragraph, capturing key decisions, user goals, and state of execution:\n\n{convo_text}"
-277 |     
-278 |     from core.planner import _FAST_ROUTER_MODELS
-279 |     from providers import call_provider
-280 |     
-281 |     fast_model = _FAST_ROUTER_MODELS.get(provider)
+231 |     Call the planning LLM to generate an agent plan.
+232 |     Returns DEFAULT_PLAN on failure.
+233 |     """
+234 |     try:
+235 |         plan = await call_provider_json(
+236 |             provider=provider,
+237 |             model=model,
+238 |             api_key=api_key,
+239 |             messages=messages,
+240 |             system_prompt=ORCHESTRATOR_SYSTEM_INSTRUCTION,
+241 |             temperature=0.2,
+242 |             json_schema=ORCHESTRATION_SCHEMA,
+243 |             timeout=20.0,
+244 |             fallback_provider=fallback_provider,
+245 |             api_keys=api_keys,
+246 |             base_url=base_url,
+247 |             backup_api_keys=backup_api_keys,
+248 |         )
+249 |         return plan
+250 |     except Exception as e:
+251 |         print(f"[PLANNER] Planning failed: {e}")
+252 |         return DEFAULT_PLAN.copy()
+253 | 
+254 | 
+255 | async def summarize_history(
+256 |     history: List[Dict[str, str]],
+257 |     provider: str,
+258 |     api_key: str,
+259 |     api_keys: Optional[Dict[str, str]] = None,
+260 |     base_url: Optional[str] = None,
+261 |     backup_api_keys: Optional[List[str]] = None,
+262 | ) -> List[Dict[str, str]]:
+263 |     """
+264 |     If history is long (greater than 6 turns / 12 messages), summarize the oldest messages
+265 |     and replace them with a single system summary context message to save tokens.
+266 |     """
+267 |     if len(history) <= 12:
+268 |         return history
+269 | 
+270 |     # Divide history into parts to summarize and parts to keep
+271 |     to_summarize = history[:-6]
+272 |     to_keep = history[-6:]
+273 | 
+274 |     # Prepare summary prompt
+275 |     convo_text = ""
+276 |     for msg in to_summarize:
+277 |         role = msg.get("role", "user")
+278 |         content = msg.get("content", "")
+279 |         convo_text += f"{role.upper()}: {content}\n"
+280 | 
+281 |     summary_prompt = f"Summarize the following chat history conversation concisely in one paragraph, capturing key decisions, user goals, and state of execution:\n\n{convo_text}"
 282 |     
-283 |     try:
-284 |         summary_text = await call_provider(
-285 |             provider=provider,
-286 |             model=fast_model,
-287 |             api_key=api_key,
-288 |             messages=[{"role": "user", "content": summary_prompt}],
-289 |             system_prompt="You are a precise summarization assistant.",
-290 |             temperature=0.3,
-291 |             timeout=8.0,
-292 |             api_keys=api_keys,
-293 |             base_url=base_url,
-294 |         )
-295 |         summary_msg = {
-296 |             "role": "user",
-297 |             "content": f"[SYSTEM: Summary of previous conversation history: {summary_text}]"
-298 |         }
-299 |         return [summary_msg] + to_keep
-300 |     except Exception as e:
-301 |         print(f"[CONTEXT WINDOWING] Summarization failed: {e}. Returning original history.")
-302 |         return history
-303 | 
-304 |
+283 |     from core.planner import _FAST_ROUTER_MODELS
+284 |     from providers import call_provider
+285 |     
+286 |     fast_model = _FAST_ROUTER_MODELS.get(provider)
+287 |     
+288 |     try:
+289 |         summary_text = await call_provider(
+290 |             provider=provider,
+291 |             model=fast_model,
+292 |             api_key=api_key,
+293 |             messages=[{"role": "user", "content": summary_prompt}],
+294 |             system_prompt="You are a precise summarization assistant.",
+295 |             temperature=0.3,
+296 |             timeout=8.0,
+297 |             api_keys=api_keys,
+298 |             base_url=base_url,
+299 |             backup_api_keys=backup_api_keys,
+300 |         )
+301 |         summary_msg = {
+302 |             "role": "user",
+303 |             "content": f"[SYSTEM: Summary of previous conversation history: {summary_text}]"
+304 |         }
+305 |         return [summary_msg] + to_keep
+306 |     except Exception as e:
+307 |         print(f"[CONTEXT WINDOWING] Summarization failed: {e}. Returning original history.")
+308 |         return history
+309 | 
+310 |
 ```
 
 ### File: `Backend/core/synthesizer.py`
 
-> 261 lines | 10.6 KB
+> 264 lines | 10.8 KB
 
 ```python
   1 | """
@@ -1122,228 +1134,231 @@ SoloSpace/
  37 |     api_keys: Optional[Dict[str, str]] = None,
  38 |     base_url: Optional[str] = None,
  39 |     resume_from_checkpoint: bool = False,
- 40 | ) -> AsyncGenerator[str, None]:
- 41 |     """
- 42 |     Full multi-agent execution loop with parallel level execution and streaming.
- 43 |     Yields SSE events.
- 44 |     """
- 45 |     agent_results: Dict[str, str] = {}
- 46 |     setup_metadata = {
- 47 |         "complexity": complexity,
- 48 |         "capabilities": capabilities,
- 49 |         "thinking_summary": thinking_summary,
- 50 |         "nodes": nodes,
- 51 |         "edges": edges,
- 52 |         "agent_talk": [],
- 53 |         "follow_up_suggestions": follow_up_suggestions,
- 54 |     }
- 55 | 
- 56 |     # ── Validation ─────────────────────────────────────────────────────
- 57 |     dep_errors = validate_dependencies(nodes)
- 58 |     for err in dep_errors:
- 59 |         yield f"event: text\ndata: {json.dumps('**Validation Error**: ' + err)}\n\n"
- 60 |         yield "event: done\ndata: {}\n\n"
- 61 |         return
- 62 | 
- 63 |     if detect_cycle(nodes, edges):
- 64 |         yield f"event: text\ndata: {json.dumps('**Validation Error**: Circular dependency detected in agent workflow.')}\n\n"
- 65 |         yield "event: done\ndata: {}\n\n"
- 66 |         return
- 67 | 
- 68 |     # ── Save initial session ───────────────────────────────────────────
- 69 |     await save_session(
- 70 |         session_id=session_id,
- 71 |         title=prompt[:40] + "..." if len(prompt) > 40 else prompt,
- 72 |         prompt=prompt,
- 73 |         mode=complexity,
- 74 |         nodes=nodes,
- 75 |         edges=edges,
- 76 |         chat_messages=[],
- 77 |         agent_talk_logs=[],
- 78 |         execution_state="running",
- 79 |         status_message="Running orchestration loop",
- 80 |         follow_up_suggestions=follow_up_suggestions,
- 81 |     )
- 82 | 
- 83 |     yield f"event: metadata\ndata: {json.dumps(setup_metadata)}\n\n"
- 84 | 
- 85 |     # ── Parallel Level Execution ───────────────────────────────────────
- 86 |     levels = get_execution_levels(nodes, edges)
- 87 |     event_queue: asyncio.Queue = asyncio.Queue()
- 88 | 
- 89 |     for level_ids in levels:
- 90 |         level_nodes = [
- 91 |             n for n in nodes
- 92 |             if n["id"] in level_ids and n.get("data", {}).get("enabled", True)
- 93 |         ]
- 94 |         if not level_nodes:
- 95 |             continue
- 96 | 
- 97 |         tasks = [
- 98 |             asyncio.create_task(
- 99 |                 execute_single_agent(
-100 |                     agent_node=agent_node,
-101 |                     session_id=session_id,
-102 |                     prompt=prompt,
-103 |                     api_key=api_key,
-104 |                     agent_results=agent_results,
-105 |                     nodes=nodes,
-106 |                     setup_metadata=setup_metadata,
-107 |                     complexity=complexity,
-108 |                     provider=provider,
-109 |                     model=model,
-110 |                     fallback_provider=fallback_provider,
-111 |                     api_keys=api_keys,
-112 |                     base_url=base_url,
-113 |                     resume_from_checkpoint=resume_from_checkpoint,
-114 |                     event_queue=event_queue,
-115 |                 )
-116 |             )
-117 |             for agent_node in level_nodes
-118 |         ]
-119 | 
-120 |         while not all(t.done() for t in tasks) or not event_queue.empty():
-121 |             try:
-122 |                 event = await asyncio.wait_for(event_queue.get(), timeout=0.05)
-123 |                 event_type, event_data = event
-124 |                 if event_type == "metadata":
-125 |                     yield f"event: metadata\ndata: {json.dumps(setup_metadata)}\n\n"
-126 |                 elif event_type == "status":
-127 |                     yield f"event: status\ndata: {json.dumps(event_data)}\n\n"
-128 |                 elif event_type == "thinking":
-129 |                     yield f"event: thinking\ndata: {json.dumps(event_data)}\n\n"
-130 |                 elif event_type == "tool_approval":
-131 |                     yield f"event: tool_approval\ndata: {json.dumps(event_data)}\n\n"
-132 |                 elif event_type == "text":
-133 |                     yield f"event: text\ndata: {json.dumps(event_data)}\n\n"
-134 |                 event_queue.task_done()
-135 |             except asyncio.TimeoutError:
-136 |                 continue
-137 | 
-138 |     if complexity == "simple" and not agent_results:
-139 |         agent_results["general"] = "Processed the request, but no specific output was generated."
-140 | 
-141 |     yield f"event: status\ndata: {json.dumps('Synthesizing final response...')}\n\n"
+ 40 |     backup_api_keys: Optional[List[str]] = None,
+ 41 | ) -> AsyncGenerator[str, None]:
+ 42 |     """
+ 43 |     Full multi-agent execution loop with parallel level execution and streaming.
+ 44 |     Yields SSE events.
+ 45 |     """
+ 46 |     agent_results: Dict[str, str] = {}
+ 47 |     setup_metadata = {
+ 48 |         "complexity": complexity,
+ 49 |         "capabilities": capabilities,
+ 50 |         "thinking_summary": thinking_summary,
+ 51 |         "nodes": nodes,
+ 52 |         "edges": edges,
+ 53 |         "agent_talk": [],
+ 54 |         "follow_up_suggestions": follow_up_suggestions,
+ 55 |     }
+ 56 | 
+ 57 |     # ── Validation ─────────────────────────────────────────────────────
+ 58 |     dep_errors = validate_dependencies(nodes)
+ 59 |     for err in dep_errors:
+ 60 |         yield f"event: text\ndata: {json.dumps('**Validation Error**: ' + err)}\n\n"
+ 61 |         yield "event: done\ndata: {}\n\n"
+ 62 |         return
+ 63 | 
+ 64 |     if detect_cycle(nodes, edges):
+ 65 |         yield f"event: text\ndata: {json.dumps('**Validation Error**: Circular dependency detected in agent workflow.')}\n\n"
+ 66 |         yield "event: done\ndata: {}\n\n"
+ 67 |         return
+ 68 | 
+ 69 |     # ── Save initial session ───────────────────────────────────────────
+ 70 |     await save_session(
+ 71 |         session_id=session_id,
+ 72 |         title=prompt[:40] + "..." if len(prompt) > 40 else prompt,
+ 73 |         prompt=prompt,
+ 74 |         mode=complexity,
+ 75 |         nodes=nodes,
+ 76 |         edges=edges,
+ 77 |         chat_messages=[],
+ 78 |         agent_talk_logs=[],
+ 79 |         execution_state="running",
+ 80 |         status_message="Running orchestration loop",
+ 81 |         follow_up_suggestions=follow_up_suggestions,
+ 82 |     )
+ 83 | 
+ 84 |     yield f"event: metadata\ndata: {json.dumps(setup_metadata)}\n\n"
+ 85 | 
+ 86 |     # ── Parallel Level Execution ───────────────────────────────────────
+ 87 |     levels = get_execution_levels(nodes, edges)
+ 88 |     event_queue: asyncio.Queue = asyncio.Queue()
+ 89 | 
+ 90 |     for level_ids in levels:
+ 91 |         level_nodes = [
+ 92 |             n for n in nodes
+ 93 |             if n["id"] in level_ids and n.get("data", {}).get("enabled", True)
+ 94 |         ]
+ 95 |         if not level_nodes:
+ 96 |             continue
+ 97 | 
+ 98 |         tasks = [
+ 99 |             asyncio.create_task(
+100 |                 execute_single_agent(
+101 |                     agent_node=agent_node,
+102 |                     session_id=session_id,
+103 |                     prompt=prompt,
+104 |                     api_key=api_key,
+105 |                     agent_results=agent_results,
+106 |                     nodes=nodes,
+107 |                     setup_metadata=setup_metadata,
+108 |                     complexity=complexity,
+109 |                     provider=provider,
+110 |                     model=model,
+111 |                     fallback_provider=fallback_provider,
+112 |                     api_keys=api_keys,
+113 |                     base_url=base_url,
+114 |                     resume_from_checkpoint=resume_from_checkpoint,
+115 |                     event_queue=event_queue,
+116 |                     backup_api_keys=backup_api_keys,
+117 |                 )
+118 |             )
+119 |             for agent_node in level_nodes
+120 |         ]
+121 | 
+122 |         while not all(t.done() for t in tasks) or not event_queue.empty():
+123 |             try:
+124 |                 event = await asyncio.wait_for(event_queue.get(), timeout=0.05)
+125 |                 event_type, event_data = event
+126 |                 if event_type == "metadata":
+127 |                     yield f"event: metadata\ndata: {json.dumps(setup_metadata)}\n\n"
+128 |                 elif event_type == "status":
+129 |                     yield f"event: status\ndata: {json.dumps(event_data)}\n\n"
+130 |                 elif event_type == "thinking":
+131 |                     yield f"event: thinking\ndata: {json.dumps(event_data)}\n\n"
+132 |                 elif event_type == "tool_approval":
+133 |                     yield f"event: tool_approval\ndata: {json.dumps(event_data)}\n\n"
+134 |                 elif event_type == "text":
+135 |                     yield f"event: text\ndata: {json.dumps(event_data)}\n\n"
+136 |                 event_queue.task_done()
+137 |             except asyncio.TimeoutError:
+138 |                 continue
+139 | 
+140 |     if complexity == "simple" and not agent_results:
+141 |         agent_results["general"] = "Processed the request, but no specific output was generated."
 142 | 
-143 |     # ── Build aggregator prompt ────────────────────────────────────────
-144 |     aggregator_prompt = ""
-145 |     try:
-146 |         memory_hits = await query_memory(
-147 |             prompt, api_key, top_k=3, agent_id=None,
-148 |             session_id=session_id, provider=provider
-149 |         )
-150 |         if memory_hits:
-151 |             aggregator_prompt += "### Relevant context from past conversation:\n"
-152 |             aggregator_prompt += "\n".join(f"- {m}" for m in memory_hits) + "\n\n"
-153 |     except Exception:
-154 |         pass
-155 | 
-156 |     if agent_results:
-157 |         aggregator_prompt += "### Analysis context:\n"
-158 |         for result in agent_results.values():
-159 |             aggregator_prompt += f"{result}\n\n"
-160 | 
-161 |     aggregator_prompt += f"\nUser's current message: {prompt}"
+143 |     yield f"event: status\ndata: {json.dumps('Synthesizing final response...')}\n\n"
+144 | 
+145 |     # ── Build aggregator prompt ────────────────────────────────────────
+146 |     aggregator_prompt = ""
+147 |     try:
+148 |         memory_hits = await query_memory(
+149 |             prompt, api_key, top_k=3, agent_id=None,
+150 |             session_id=session_id, provider=provider
+151 |         )
+152 |         if memory_hits:
+153 |             aggregator_prompt += "### Relevant context from past conversation:\n"
+154 |             aggregator_prompt += "\n".join(f"- {m}" for m in memory_hits) + "\n\n"
+155 |     except Exception:
+156 |         pass
+157 | 
+158 |     if agent_results:
+159 |         aggregator_prompt += "### Analysis context:\n"
+160 |         for result in agent_results.values():
+161 |             aggregator_prompt += f"{result}\n\n"
 162 | 
-163 |     if not aggregator_prompt.strip():
-164 |         aggregator_prompt = f"Answer the following user request concisely and helpfully:\n\n{prompt}"
-165 | 
-166 |     # Build conversation history for aggregator
-167 |     aggregator_history = []
-168 |     for msg in (history or []):
-169 |         sender = msg.sender if hasattr(msg, "sender") else msg.get("sender", "user")
-170 |         text = msg.text if hasattr(msg, "text") else msg.get("text", "")
-171 |         role = "user" if sender == "user" else "assistant"
-172 |         aggregator_history.append({"role": role, "content": text})
-173 | 
-174 |     from core.planner import summarize_history
-175 |     aggregator_history = await summarize_history(
-176 |         aggregator_history, provider, api_key, api_keys, base_url
-177 |     )
-178 | 
-179 |     aggregator_contents = []
-180 |     for msg in aggregator_history:
-181 |         role = "user" if msg["role"] == "user" else "model"
-182 |         aggregator_contents.append({"role": role, "content": msg["content"]})
-183 |     aggregator_contents.append({"role": "user", "content": aggregator_prompt})
-184 | 
-185 |     # ── Stream final synthesis ─────────────────────────────────────────
-186 |     final_synthesis_text = ""
-187 |     try:
-188 |         async for token in stream_provider(
-189 |             provider=provider,
-190 |             model=model,
-191 |             api_key=api_key,
-192 |             messages=aggregator_contents,
-193 |             system_prompt=RESPONSE_SYSTEM_INSTRUCTION,
-194 |             temperature=0.7,
-195 |             timeout=30.0,   # Reduced from 90s
-196 |             fallback_provider=fallback_provider,
-197 |             api_keys=api_keys,
-198 |             base_url=base_url,
-199 |         ):
-200 |             final_synthesis_text += token
-201 |             yield f"event: text\ndata: {json.dumps(token)}\n\n"
-202 |     except Exception as exc:
-203 |         exc_str = str(exc)
-204 |         if any(t in exc_str.lower() for t in ["not found", "does not exist", "model_not_found"]):
-205 |             err_msg = f"\n\n*Synthesis Error: Model '{model}' not found. Check Settings.*\n\n"
-206 |         else:
-207 |             err_msg = f"\n\n*Stream Synthesis Error: {exc_str}*\n\n"
-208 |         yield f"event: text\ndata: {json.dumps(err_msg)}\n\n"
-209 |         final_synthesis_text = err_msg
-210 | 
-211 |     # ── Persist session ────────────────────────────────────────────────
-212 |     final_chat_messages = []
-213 |     for msg in (history or []):
-214 |         sender = msg.sender if hasattr(msg, "sender") else msg.get("sender", "user")
-215 |         text = msg.text if hasattr(msg, "text") else msg.get("text", "")
-216 |         final_chat_messages.append({"id": f"msg-{id(msg)}", "sender": sender, "text": text, "timestamp": ""})
-217 |     final_chat_messages.append({"id": "user-prompt", "sender": "user", "text": prompt, "timestamp": _now()})
-218 |     final_chat_messages.append({"id": "ai-response", "sender": "ai", "text": final_synthesis_text, "timestamp": _now()})
-219 | 
-220 |     await save_session(
-221 |         session_id=session_id,
-222 |         title=prompt[:40] + "..." if len(prompt) > 40 else prompt,
-223 |         prompt=prompt,
-224 |         mode=complexity,
-225 |         nodes=nodes,
-226 |         edges=edges,
-227 |         chat_messages=final_chat_messages,
-228 |         agent_talk_logs=setup_metadata["agent_talk"],
-229 |         execution_state="setup",
-230 |         status_message="Execution completed",
-231 |         follow_up_suggestions=follow_up_suggestions,
-232 |     )
-233 | 
-234 |     # Cache result (exact hash, no embedding)
-235 |     try:
-236 |         prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
-237 |         cached_val = {
-238 |             "metadata": {
-239 |                 "complexity": complexity,
-240 |                 "capabilities": capabilities,
-241 |                 "thinking_summary": thinking_summary,
-242 |                 "nodes": nodes,
-243 |                 "edges": edges,
-244 |                 "agent_talk": setup_metadata["agent_talk"],
-245 |                 "follow_up_suggestions": follow_up_suggestions,
-246 |             },
-247 |             "text": final_synthesis_text,
-248 |         }
-249 |         await save_cached_response(prompt_hash, prompt, [], cached_val)
-250 |     except Exception:
-251 |         pass
-252 | 
-253 |     # Lazy memory store for cross-turn recall
-254 |     if final_synthesis_text:
-255 |         convo_memory = f"User: {prompt}\nAssistant: {final_synthesis_text[:800]}"
-256 |         asyncio.create_task(
-257 |             store_memory(f"session_{session_id}", convo_memory, api_key, session_id, provider=provider)
-258 |         )
-259 | 
-260 |     yield "event: done\ndata: {}\n\n"
-261 |
+163 |     aggregator_prompt += f"\nUser's current message: {prompt}"
+164 | 
+165 |     if not aggregator_prompt.strip():
+166 |         aggregator_prompt = f"Answer the following user request concisely and helpfully:\n\n{prompt}"
+167 | 
+168 |     # Build conversation history for aggregator
+169 |     aggregator_history = []
+170 |     for msg in (history or []):
+171 |         sender = msg.sender if hasattr(msg, "sender") else msg.get("sender", "user")
+172 |         text = msg.text if hasattr(msg, "text") else msg.get("text", "")
+173 |         role = "user" if sender == "user" else "assistant"
+174 |         aggregator_history.append({"role": role, "content": text})
+175 | 
+176 |     from core.planner import summarize_history
+177 |     aggregator_history = await summarize_history(
+178 |         aggregator_history, provider, api_key, api_keys, base_url, backup_api_keys=backup_api_keys
+179 |     )
+180 | 
+181 |     aggregator_contents = []
+182 |     for msg in aggregator_history:
+183 |         role = "user" if msg["role"] == "user" else "model"
+184 |         aggregator_contents.append({"role": role, "content": msg["content"]})
+185 |     aggregator_contents.append({"role": "user", "content": aggregator_prompt})
+186 | 
+187 |     # ── Stream final synthesis ─────────────────────────────────────────
+188 |     final_synthesis_text = ""
+189 |     try:
+190 |         async for token in stream_provider(
+191 |             provider=provider,
+192 |             model=model,
+193 |             api_key=api_key,
+194 |             messages=aggregator_contents,
+195 |             system_prompt=RESPONSE_SYSTEM_INSTRUCTION,
+196 |             temperature=0.7,
+197 |             timeout=30.0,   # Reduced from 90s
+198 |             fallback_provider=fallback_provider,
+199 |             api_keys=api_keys,
+200 |             base_url=base_url,
+201 |             backup_api_keys=backup_api_keys,
+202 |         ):
+203 |             final_synthesis_text += token
+204 |             yield f"event: text\ndata: {json.dumps(token)}\n\n"
+205 |     except Exception as exc:
+206 |         exc_str = str(exc)
+207 |         if any(t in exc_str.lower() for t in ["not found", "does not exist", "model_not_found"]):
+208 |             err_msg = f"\n\n*Synthesis Error: Model '{model}' not found. Check Settings.*\n\n"
+209 |         else:
+210 |             err_msg = f"\n\n*Stream Synthesis Error: {exc_str}*\n\n"
+211 |         yield f"event: text\ndata: {json.dumps(err_msg)}\n\n"
+212 |         final_synthesis_text = err_msg
+213 | 
+214 |     # ── Persist session ────────────────────────────────────────────────
+215 |     final_chat_messages = []
+216 |     for msg in (history or []):
+217 |         sender = msg.sender if hasattr(msg, "sender") else msg.get("sender", "user")
+218 |         text = msg.text if hasattr(msg, "text") else msg.get("text", "")
+219 |         final_chat_messages.append({"id": f"msg-{id(msg)}", "sender": sender, "text": text, "timestamp": ""})
+220 |     final_chat_messages.append({"id": "user-prompt", "sender": "user", "text": prompt, "timestamp": _now()})
+221 |     final_chat_messages.append({"id": "ai-response", "sender": "ai", "text": final_synthesis_text, "timestamp": _now()})
+222 | 
+223 |     await save_session(
+224 |         session_id=session_id,
+225 |         title=prompt[:40] + "..." if len(prompt) > 40 else prompt,
+226 |         prompt=prompt,
+227 |         mode=complexity,
+228 |         nodes=nodes,
+229 |         edges=edges,
+230 |         chat_messages=final_chat_messages,
+231 |         agent_talk_logs=setup_metadata["agent_talk"],
+232 |         execution_state="setup",
+233 |         status_message="Execution completed",
+234 |         follow_up_suggestions=follow_up_suggestions,
+235 |     )
+236 | 
+237 |     # Cache result (exact hash, no embedding)
+238 |     try:
+239 |         prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+240 |         cached_val = {
+241 |             "metadata": {
+242 |                 "complexity": complexity,
+243 |                 "capabilities": capabilities,
+244 |                 "thinking_summary": thinking_summary,
+245 |                 "nodes": nodes,
+246 |                 "edges": edges,
+247 |                 "agent_talk": setup_metadata["agent_talk"],
+248 |                 "follow_up_suggestions": follow_up_suggestions,
+249 |             },
+250 |             "text": final_synthesis_text,
+251 |         }
+252 |         await save_cached_response(prompt_hash, prompt, [], cached_val)
+253 |     except Exception:
+254 |         pass
+255 | 
+256 |     # Lazy memory store for cross-turn recall
+257 |     if final_synthesis_text:
+258 |         convo_memory = f"User: {prompt}\nAssistant: {final_synthesis_text[:800]}"
+259 |         asyncio.create_task(
+260 |             store_memory(f"session_{session_id}", convo_memory, api_key, session_id, provider=provider)
+261 |         )
+262 | 
+263 |     yield "event: done\ndata: {}\n\n"
+264 |
 ```
 
 ### File: `Backend/providers/__init__.py`
@@ -1414,7 +1429,7 @@ SoloSpace/
 
 ### File: `Backend/providers/base.py`
 
-> 475 lines | 21.1 KB
+> 525 lines | 22.8 KB
 
 ```python
   1 | """
@@ -1799,99 +1814,149 @@ SoloSpace/
 380 |         "key_hint": "nvapi-...",
 381 |         "capabilities": ["chat", "streaming", "json_mode"],
 382 |     },
-383 | }
-384 | 
-385 | 
-386 | def get_provider_config(provider_id: str) -> Dict[str, Any]:
-387 |     """Get config for a provider. Returns empty dict if not found."""
-388 |     return PROVIDERS.get(provider_id.lower(), {})
-389 | 
-390 | 
-391 | def get_available_providers() -> Dict[str, Any]:
-392 |     """Return provider registry for the frontend."""
-393 |     result = {}
-394 |     for pid, cfg in PROVIDERS.items():
-395 |         result[pid] = {
-396 |             "name": cfg["name"],
-397 |             "description": cfg["description"],
-398 |             "models": cfg["models"],
-399 |             "default_model": cfg["default_model"],
-400 |             "capabilities": cfg["capabilities"],
-401 |             "key_url": cfg["key_url"],
-402 |             "key_hint": cfg["key_hint"],
-403 |             "is_custom": cfg.get("is_custom", False),
-404 |             "is_local": cfg.get("is_local", False),
-405 |             "requires_base_url": cfg.get("requires_base_url", False),
-406 |         }
-407 |     return result
-408 | 
-409 | 
-410 | def resolve_api_key(provider: str, user_key: Optional[str] = None, api_keys: Optional[Dict[str, str]] = None) -> str:
-411 |     """Resolve key from user input dictionary, single user_key, or fallback to env."""
-412 |     if api_keys and provider in api_keys and api_keys[provider].strip():
-413 |         return api_keys[provider].strip()
-414 |     if user_key and user_key.strip():
-415 |         return user_key.strip()
-416 | 
-417 |     env_keys = {
-418 |         "gemini": "GEMINI_API_KEY",
-419 |         "openai": "OPENAI_API_KEY",
-420 |         "claude": "ANTHROPIC_API_KEY",
-421 |         "openrouter": "OPENROUTER_API_KEY",
-422 |         "groq": "GROQ_API_KEY",
-423 |         "deepseek": "DEEPSEEK_API_KEY",
-424 |         "together": "TOGETHER_API_KEY",
-425 |         "mistral": "MISTRAL_API_KEY",
-426 |         "fireworks": "FIREWORKS_API_KEY",
-427 |         "perplexity": "PERPLEXITY_API_KEY",
-428 |         "cohere": "COHERE_API_KEY",
-429 |         "azure_openai": "AZURE_OPENAI_API_KEY",
-430 |         "xai": "XAI_API_KEY",
-431 |         "cerebras": "CEREBRAS_API_KEY",
-432 |         "bedrock": "AWS_ACCESS_KEY_ID",
-433 |         "alibaba": "ALIBABA_API_KEY",
-434 |         "nvidia": "NVIDIA_API_KEY",
-435 |     }
-436 |     env_var_name = env_keys.get(provider.lower())
-437 |     if env_var_name:
-438 |         val = os.environ.get(env_var_name)
-439 |         if val:
-440 |             return val
-441 |     return ""
+383 |     "glm": {
+384 |         "name": "Zhipu GLM",
+385 |         "description": "Zhipu AI GLM models (via z.ai)",
+386 |         "base_url": "https://api.z.ai/api/paas/v4",
+387 |         "chat_path": "/chat/completions",
+388 |         "default_model": "glm-4-flash",
+389 |         "models": [
+390 |             {"id": "glm-4-flash", "name": "GLM 4 Flash", "tier": "fast"},
+391 |             {"id": "glm-4-plus", "name": "GLM 4 Plus", "tier": "advanced"},
+392 |             {"id": "glm-4-air", "name": "GLM 4 Air", "tier": "fast"},
+393 |             {"id": "glm-4", "name": "GLM 4", "tier": "advanced"},
+394 |         ],
+395 |         "capabilities": ["chat", "streaming", "json_mode"],
+396 |         "key_url": "https://api.z.ai/",
+397 |         "key_hint": "",
+398 |         "adapter": "openai",
+399 |     },
+400 |     "z.ai": {
+401 |         "name": "z.ai",
+402 |         "description": "z.ai GLM models",
+403 |         "base_url": "https://api.z.ai/api/paas/v4",
+404 |         "chat_path": "/chat/completions",
+405 |         "default_model": "glm-4-flash",
+406 |         "models": [
+407 |             {"id": "glm-4-flash", "name": "GLM 4 Flash", "tier": "fast"},
+408 |             {"id": "glm-4-plus", "name": "GLM 4 Plus", "tier": "advanced"},
+409 |             {"id": "glm-4-air", "name": "GLM 4 Air", "tier": "fast"},
+410 |             {"id": "glm-4", "name": "GLM 4", "tier": "advanced"},
+411 |         ],
+412 |         "capabilities": ["chat", "streaming", "json_mode"],
+413 |         "key_url": "https://api.z.ai/",
+414 |         "key_hint": "",
+415 |         "adapter": "openai",
+416 |     },
+417 | }
+418 | 
+419 | 
+420 | def get_provider_config(provider_id: str) -> Dict[str, Any]:
+421 |     """Get config for a provider. Returns empty dict if not found."""
+422 |     return PROVIDERS.get(provider_id.lower(), {})
+423 | 
+424 | 
+425 | def get_available_providers() -> Dict[str, Any]:
+426 |     """Return provider registry for the frontend."""
+427 |     result = {}
+428 |     for pid, cfg in PROVIDERS.items():
+429 |         result[pid] = {
+430 |             "name": cfg["name"],
+431 |             "description": cfg["description"],
+432 |             "models": cfg["models"],
+433 |             "default_model": cfg["default_model"],
+434 |             "capabilities": cfg["capabilities"],
+435 |             "key_url": cfg["key_url"],
+436 |             "key_hint": cfg["key_hint"],
+437 |             "is_custom": cfg.get("is_custom", False),
+438 |             "is_local": cfg.get("is_local", False),
+439 |             "requires_base_url": cfg.get("requires_base_url", False),
+440 |         }
+441 |     return result
 442 | 
 443 | 
-444 | def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
-445 |     """Extract and parse a JSON object from text that may contain markdown or extra content."""
-446 |     try:
-447 |         return json.loads(text.strip())
-448 |     except (json.JSONDecodeError, ValueError):
-449 |         pass
-450 | 
-451 |     match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
-452 |     if match:
-453 |         try:
-454 |             return json.loads(match.group(1).strip())
-455 |         except (json.JSONDecodeError, ValueError):
-456 |             pass
-457 | 
-458 |     depth = 0
-459 |     start = -1
-460 |     for i, ch in enumerate(text):
-461 |         if ch == "{":
-462 |             if depth == 0:
-463 |                 start = i
-464 |             depth += 1
-465 |         elif ch == "}":
-466 |             depth -= 1
-467 |             if depth == 0 and start >= 0:
-468 |                 try:
-469 |                     return json.loads(text[start:i + 1])
-470 |                 except (json.JSONDecodeError, ValueError):
-471 |                     break
-472 |     return None
-473 | 
-474 | 
-475 |
+444 | def resolve_api_key(
+445 |     provider: str,
+446 |     user_key: Optional[str] = None,
+447 |     api_keys: Optional[Dict[str, str]] = None,
+448 |     backup_keys: Optional[List[str]] = None,
+449 | ) -> str:
+450 |     """Resolve key from user input dictionary, single user_key, or fallback to env."""
+451 |     keys_to_check = []
+452 |     if user_key and user_key.strip():
+453 |         keys_to_check.append(user_key.strip())
+454 |     if api_keys and provider in api_keys and api_keys[provider].strip():
+455 |         keys_to_check.append(api_keys[provider].strip())
+456 |     if backup_keys:
+457 |         for bk in backup_keys:
+458 |             if bk and bk.strip():
+459 |                 keys_to_check.append(bk.strip())
+460 | 
+461 |     for k in keys_to_check:
+462 |         if k:
+463 |             return k
+464 | 
+465 |     env_keys = {
+466 |         "gemini": "GEMINI_API_KEY",
+467 |         "openai": "OPENAI_API_KEY",
+468 |         "claude": "ANTHROPIC_API_KEY",
+469 |         "openrouter": "OPENROUTER_API_KEY",
+470 |         "groq": "GROQ_API_KEY",
+471 |         "deepseek": "DEEPSEEK_API_KEY",
+472 |         "together": "TOGETHER_API_KEY",
+473 |         "mistral": "MISTRAL_API_KEY",
+474 |         "fireworks": "FIREWORKS_API_KEY",
+475 |         "perplexity": "PERPLEXITY_API_KEY",
+476 |         "cohere": "COHERE_API_KEY",
+477 |         "azure_openai": "AZURE_OPENAI_API_KEY",
+478 |         "xai": "XAI_API_KEY",
+479 |         "cerebras": "CEREBRAS_API_KEY",
+480 |         "bedrock": "AWS_ACCESS_KEY_ID",
+481 |         "alibaba": "ALIBABA_API_KEY",
+482 |         "nvidia": "NVIDIA_API_KEY",
+483 |         "glm": "GLM_API_KEY",
+484 |         "z.ai": "Z_AI_API_KEY",
+485 |     }
+486 |     env_var_name = env_keys.get(provider.lower())
+487 |     if env_var_name:
+488 |         val = os.environ.get(env_var_name)
+489 |         if val:
+490 |             return val
+491 |     return ""
+492 | 
+493 | 
+494 | def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
+495 |     """Extract and parse a JSON object from text that may contain markdown or extra content."""
+496 |     try:
+497 |         return json.loads(text.strip())
+498 |     except (json.JSONDecodeError, ValueError):
+499 |         pass
+500 | 
+501 |     match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+502 |     if match:
+503 |         try:
+504 |             return json.loads(match.group(1).strip())
+505 |         except (json.JSONDecodeError, ValueError):
+506 |             pass
+507 | 
+508 |     depth = 0
+509 |     start = -1
+510 |     for i, ch in enumerate(text):
+511 |         if ch == "{":
+512 |             if depth == 0:
+513 |                 start = i
+514 |             depth += 1
+515 |         elif ch == "}":
+516 |             depth -= 1
+517 |             if depth == 0 and start >= 0:
+518 |                 try:
+519 |                     return json.loads(text[start:i + 1])
+520 |                 except (json.JSONDecodeError, ValueError):
+521 |                     break
+522 |     return None
+523 | 
+524 | 
+525 |
 ```
 
 ### File: `Backend/providers/claude.py`
@@ -2309,7 +2374,7 @@ SoloSpace/
 
 ### File: `Backend/providers/registry.py`
 
-> 568 lines | 21.6 KB
+> 601 lines | 22.8 KB
 
 ```python
   1 | import json
@@ -2533,353 +2598,386 @@ SoloSpace/
 219 |     fallback_provider: Optional[str] = None,
 220 |     api_keys: Optional[Dict[str, str]] = None,
 221 |     base_url: Optional[str] = None,
-222 | ) -> str:
-223 |     """Unified non-streaming call to any provider with retry and fallback routing."""
-224 |     config = get_provider_config(provider)
-225 |     if not config:
-226 |         raise Exception(f"Unknown provider: {provider}")
-227 | 
-228 |     resolved_model = model or config.get("default_model", "")
-229 |     resolved_base_url = base_url or config.get("base_url", "")
-230 |     
-231 |     cloned_config = dict(config)
-232 |     if resolved_base_url:
-233 |         cloned_config["base_url"] = resolved_base_url
-234 | 
-235 |     resolved_key = resolve_api_key(provider, api_key, api_keys)
-236 |     if not resolved_key and not cloned_config.get("is_local", False):
-237 |         raise Exception(f"API key missing for provider {provider}")
-238 | 
-239 |     adapter = cloned_config.get("adapter", "openai")
-240 |     wants_json = json_schema is not None or json_schema_hint is not None
-241 | 
-242 |     if cloned_config.get("is_local", False):
-243 |         timeout = max(timeout, 120.0)
-244 | 
-245 |     async def _call():
-246 |         if adapter == "gemini":
-247 |             return await _call_gemini(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-248 |                                        temperature=temperature, json_schema=json_schema, timeout=timeout)
-249 |         elif adapter == "claude":
-250 |             return await _call_claude(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-251 |                                        temperature=temperature, json_mode=wants_json,
-252 |                                        json_schema_hint=json_schema_hint, timeout=timeout)
-253 |         elif adapter == "cohere":
-254 |             return await _call_cohere(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-255 |                                        temperature=temperature, json_mode=wants_json,
-256 |                                        json_schema_hint=json_schema_hint, timeout=timeout)
-257 |         elif adapter == "bedrock":
-258 |             return await _call_bedrock(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-259 |                                        temperature=temperature, json_mode=wants_json,
-260 |                                        json_schema_hint=json_schema_hint, timeout=timeout)
-261 |         else:  # openai-compatible
-262 |             return await _call_openai_compatible(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-263 |                                                  temperature=temperature, json_mode=wants_json,
-264 |                                                  json_schema_hint=json_schema_hint, timeout=timeout)
-265 | 
-266 |     try:
-267 |         return await call_with_retry(_call)
-268 |     except Exception as e:
-269 |         if fallback_provider and fallback_provider.lower() != provider.lower():
-270 |             print(f"[FALLBACK] Primary provider {provider} failed: {e}. Routing to fallback {fallback_provider}...")
-271 |             fallback_config = get_provider_config(fallback_provider)
-272 |             fallback_model = fallback_config.get("default_model", "")
-273 |             fallback_key = resolve_api_key(fallback_provider, None, api_keys)
-274 |             
-275 |             fallback_base_url = None
-276 |             
-277 |             return await call_provider(
-278 |                 provider=fallback_provider,
-279 |                 model=fallback_model,
-280 |                 api_key=fallback_key,
-281 |                 messages=messages,
-282 |                 system_prompt=system_prompt,
-283 |                 temperature=temperature,
-284 |                 json_schema=json_schema,
-285 |                 json_schema_hint=json_schema_hint,
-286 |                 timeout=timeout,
-287 |                 fallback_provider=None,
-288 |                 api_keys=api_keys,
-289 |                 base_url=fallback_base_url
-290 |             )
-291 |         else:
-292 |             raise
-293 | 
-294 | 
-295 | async def stream_provider(
-296 |     provider: str,
-297 |     model: Optional[str],
-298 |     api_key: str,
-299 |     messages: List[Dict[str, str]],
-300 |     system_prompt: str = "",
-301 |     temperature: float = 0.7,
-302 |     timeout: float = 90.0,
-303 |     fallback_provider: Optional[str] = None,
-304 |     api_keys: Optional[Dict[str, str]] = None,
-305 |     base_url: Optional[str] = None,
-306 | ) -> AsyncGenerator[str, None]:
-307 |     """Unified streaming call to any provider with retry and fallback routing."""
-308 |     config = get_provider_config(provider)
-309 |     if not config:
-310 |         raise Exception(f"Unknown provider: {provider}")
-311 | 
-312 |     resolved_model = model or config.get("default_model", "")
-313 |     resolved_base_url = base_url or config.get("base_url", "")
-314 |     
-315 |     cloned_config = dict(config)
-316 |     if resolved_base_url:
-317 |         cloned_config["base_url"] = resolved_base_url
-318 | 
-319 |     resolved_key = resolve_api_key(provider, api_key, api_keys)
-320 |     if not resolved_key and not cloned_config.get("is_local", False):
-321 |         raise Exception(f"API key missing for provider {provider}")
-322 | 
-323 |     adapter = cloned_config.get("adapter", "openai")
+222 |     backup_api_keys: Optional[List[str]] = None,
+223 | ) -> str:
+224 |     """Unified non-streaming call to any provider with retry and fallback routing."""
+225 |     config = get_provider_config(provider)
+226 |     if not config:
+227 |         raise Exception(f"Unknown provider: {provider}")
+228 | 
+229 |     resolved_model = model or config.get("default_model", "")
+230 |     resolved_base_url = base_url or config.get("base_url", "")
+231 |     
+232 |     cloned_config = dict(config)
+233 |     if resolved_base_url:
+234 |         cloned_config["base_url"] = resolved_base_url
+235 | 
+236 |     resolved_key = resolve_api_key(provider, api_key, api_keys, backup_keys=backup_api_keys)
+237 |     
+238 |     other_keys = [k for k in (backup_api_keys or []) if k.strip() and k.strip() != resolved_key]
+239 |     keys_to_try = [resolved_key] + other_keys
+240 |     keys_to_try = [k for k in keys_to_try if k]
+241 |     if not keys_to_try and not cloned_config.get("is_local", False):
+242 |         raise Exception(f"API key missing for provider {provider}")
+243 | 
+244 |     adapter = cloned_config.get("adapter", "openai")
+245 |     wants_json = json_schema is not None or json_schema_hint is not None
+246 | 
+247 |     if cloned_config.get("is_local", False):
+248 |         timeout = max(timeout, 120.0)
+249 | 
+250 |     last_error = None
+251 |     for current_key in (keys_to_try or [None]):
+252 |         async def _call():
+253 |             if adapter == "gemini":
+254 |                 return await _call_gemini(cloned_config, resolved_model, current_key, messages, system_prompt,
+255 |                                            temperature=temperature, json_schema=json_schema, timeout=timeout)
+256 |             elif adapter == "claude":
+257 |                 return await _call_claude(cloned_config, resolved_model, current_key, messages, system_prompt,
+258 |                                            temperature=temperature, json_mode=wants_json,
+259 |                                            json_schema_hint=json_schema_hint, timeout=timeout)
+260 |             elif adapter == "cohere":
+261 |                 return await _call_cohere(cloned_config, resolved_model, current_key, messages, system_prompt,
+262 |                                            temperature=temperature, json_mode=wants_json,
+263 |                                            json_schema_hint=json_schema_hint, timeout=timeout)
+264 |             elif adapter == "bedrock":
+265 |                 return await _call_bedrock(cloned_config, resolved_model, current_key, messages, system_prompt,
+266 |                                            temperature=temperature, json_mode=wants_json,
+267 |                                            json_schema_hint=json_schema_hint, timeout=timeout)
+268 |             else:  # openai-compatible
+269 |                 return await _call_openai_compatible(cloned_config, resolved_model, current_key, messages, system_prompt,
+270 |                                                      temperature=temperature, json_mode=wants_json,
+271 |                                                      json_schema_hint=json_schema_hint, timeout=timeout)
+272 | 
+273 |         try:
+274 |             return await call_with_retry(_call)
+275 |         except Exception as e:
+276 |             last_error = e
+277 |             print(f"[KEY ROTATION] Key failed for {provider}, trying next... ({e})")
+278 |             continue
+279 | 
+280 |     if fallback_provider and fallback_provider.lower() != provider.lower():
+281 |         print(f"[FALLBACK] Primary provider {provider} failed all keys: {last_error}. Routing to fallback {fallback_provider}...")
+282 |         fallback_config = get_provider_config(fallback_provider)
+283 |         fallback_model = fallback_config.get("default_model", "")
+284 |         fallback_key = resolve_api_key(fallback_provider, None, api_keys)
+285 |         
+286 |         fallback_base_url = None
+287 |         
+288 |         return await call_provider(
+289 |             provider=fallback_provider,
+290 |             model=fallback_model,
+291 |             api_key=fallback_key,
+292 |             messages=messages,
+293 |             system_prompt=system_prompt,
+294 |             temperature=temperature,
+295 |             json_schema=json_schema,
+296 |             json_schema_hint=json_schema_hint,
+297 |             timeout=timeout,
+298 |             fallback_provider=None,
+299 |             api_keys=api_keys,
+300 |             base_url=fallback_base_url,
+301 |             backup_api_keys=None
+302 |         )
+303 |     else:
+304 |         raise last_error
+305 | 
+306 | 
+307 | async def stream_provider(
+308 |     provider: str,
+309 |     model: Optional[str],
+310 |     api_key: str,
+311 |     messages: List[Dict[str, str]],
+312 |     system_prompt: str = "",
+313 |     temperature: float = 0.7,
+314 |     timeout: float = 90.0,
+315 |     fallback_provider: Optional[str] = None,
+316 |     api_keys: Optional[Dict[str, str]] = None,
+317 |     base_url: Optional[str] = None,
+318 |     backup_api_keys: Optional[List[str]] = None,
+319 | ) -> AsyncGenerator[str, None]:
+320 |     """Unified streaming call to any provider with retry and fallback routing."""
+321 |     config = get_provider_config(provider)
+322 |     if not config:
+323 |         raise Exception(f"Unknown provider: {provider}")
 324 | 
-325 |     if cloned_config.get("is_local", False):
-326 |         timeout = max(timeout, 120.0)
-327 | 
-328 |     async def _stream():
-329 |         if adapter == "gemini":
-330 |             async for chunk in _stream_gemini(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-331 |                                                temperature=temperature, timeout=timeout):
-332 |                 yield chunk
-333 |         elif adapter == "claude":
-334 |             async for chunk in _stream_claude(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-335 |                                                temperature=temperature, timeout=timeout):
-336 |                 yield chunk
-337 |         elif adapter == "cohere":
-338 |             async for chunk in _stream_cohere(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-339 |                                                temperature=temperature, timeout=timeout):
-340 |                 yield chunk
-341 |         elif adapter == "bedrock":
-342 |             async for chunk in _stream_bedrock(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-343 |                                                temperature=temperature, timeout=timeout):
-344 |                 yield chunk
-345 |         else:  # openai-compatible
-346 |             async for chunk in _stream_openai_compatible(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-347 |                                                          temperature=temperature, timeout=timeout):
-348 |                 yield chunk
-349 | 
-350 |     retries = 0
-351 |     while retries <= MAX_RETRIES:
-352 |         try:
-353 |             async for chunk in _stream():
-354 |                 yield chunk
-355 |             return
-356 |         except Exception as e:
-357 |             retries += 1
-358 |             if retries > MAX_RETRIES:
-359 |                 if fallback_provider and fallback_provider.lower() != provider.lower():
-360 |                     print(f"[FALLBACK STREAM] Primary {provider} failed: {e}. Switching to fallback {fallback_provider}...")
-361 |                     fallback_config = get_provider_config(fallback_provider)
-362 |                     fallback_model = fallback_config.get("default_model", "")
-363 |                     fallback_key = resolve_api_key(fallback_provider, None, api_keys)
-364 |                     
-365 |                     async for chunk in stream_provider(
-366 |                         provider=fallback_provider,
-367 |                         model=fallback_model,
-368 |                         api_key=fallback_key,
-369 |                         messages=messages,
-370 |                         system_prompt=system_prompt,
-371 |                         temperature=temperature,
-372 |                         timeout=timeout,
-373 |                         fallback_provider=None,
-374 |                         api_keys=api_keys,
-375 |                         base_url=None
-376 |                     ):
-377 |                         yield chunk
+325 |     resolved_model = model or config.get("default_model", "")
+326 |     resolved_base_url = base_url or config.get("base_url", "")
+327 |     
+328 |     cloned_config = dict(config)
+329 |     if resolved_base_url:
+330 |         cloned_config["base_url"] = resolved_base_url
+331 | 
+332 |     resolved_key = resolve_api_key(provider, api_key, api_keys, backup_keys=backup_api_keys)
+333 |     
+334 |     other_keys = [k for k in (backup_api_keys or []) if k.strip() and k.strip() != resolved_key]
+335 |     keys_to_try = [resolved_key] + other_keys
+336 |     keys_to_try = [k for k in keys_to_try if k]
+337 |     if not keys_to_try and not cloned_config.get("is_local", False):
+338 |         raise Exception(f"API key missing for provider {provider}")
+339 | 
+340 |     adapter = cloned_config.get("adapter", "openai")
+341 | 
+342 |     if cloned_config.get("is_local", False):
+343 |         timeout = max(timeout, 120.0)
+344 | 
+345 |     last_error = None
+346 |     success = False
+347 |     
+348 |     for current_key in (keys_to_try or [None]):
+349 |         async def _stream():
+350 |             if adapter == "gemini":
+351 |                 async for chunk in _stream_gemini(cloned_config, resolved_model, current_key, messages, system_prompt,
+352 |                                                    temperature=temperature, timeout=timeout):
+353 |                     yield chunk
+354 |             elif adapter == "claude":
+355 |                 async for chunk in _stream_claude(cloned_config, resolved_model, current_key, messages, system_prompt,
+356 |                                                    temperature=temperature, timeout=timeout):
+357 |                     yield chunk
+358 |             elif adapter == "cohere":
+359 |                 async for chunk in _stream_cohere(cloned_config, resolved_model, current_key, messages, system_prompt,
+360 |                                                    temperature=temperature, timeout=timeout):
+361 |                     yield chunk
+362 |             elif adapter == "bedrock":
+363 |                 async for chunk in _stream_bedrock(cloned_config, resolved_model, current_key, messages, system_prompt,
+364 |                                                    temperature=temperature, timeout=timeout):
+365 |                     yield chunk
+366 |             else:  # openai-compatible
+367 |                 async for chunk in _stream_openai_compatible(cloned_config, resolved_model, current_key, messages, system_prompt,
+368 |                                                              temperature=temperature, timeout=timeout):
+369 |                     yield chunk
+370 | 
+371 |         retries = 0
+372 |         try:
+373 |             while retries <= MAX_RETRIES:
+374 |                 try:
+375 |                     async for chunk in _stream():
+376 |                         yield chunk
+377 |                     success = True
 378 |                     return
-379 |                 else:
-380 |                     raise
-381 |             delay = min(MAX_DELAY, BASE_DELAY * (2 ** retries))
-382 |             delay += random.uniform(-JITTER_FACTOR * delay, JITTER_FACTOR * delay)
-383 |             await asyncio.sleep(delay)
-384 | 
-385 | 
-386 | async def call_provider_json(
-387 |     provider: str,
-388 |     model: Optional[str],
-389 |     api_key: str,
-390 |     messages: List[Dict[str, str]],
-391 |     system_prompt: str = "",
-392 |     temperature: float = 0.2,
-393 |     json_schema: Dict[str, Any] = None,
-394 |     timeout: float = 30.0,
-395 |     fallback_provider: Optional[str] = None,
-396 |     api_keys: Optional[Dict[str, str]] = None,
-397 |     base_url: Optional[str] = None,
-398 | ) -> Dict[str, Any]:
-399 |     """Unified JSON completions call with fallback validation."""
-400 |     schema_hint = None
-401 |     if json_schema:
-402 |         schema_hint = json.dumps(json_schema, indent=2)
-403 | 
-404 |     response_text = await call_provider(
-405 |         provider=provider,
-406 |         model=model,
-407 |         api_key=api_key,
-408 |         messages=messages,
-409 |         system_prompt=system_prompt,
-410 |         temperature=temperature,
-411 |         json_schema=json_schema,
-412 |         json_schema_hint=schema_hint,
-413 |         timeout=timeout,
-414 |         fallback_provider=fallback_provider,
-415 |         api_keys=api_keys,
-416 |         base_url=base_url
-417 |     )
-418 |     
-419 |     parsed = extract_json_from_text(response_text)
-420 |     if parsed is None:
-421 |         raise ValueError(f"Failed to extract JSON from response: {response_text[:1000]}")
-422 |     return parsed
-423 | 
-424 | 
-425 | # ─── Embedding Abstraction ───────────────────────────────────────────
-426 | 
-427 | async def get_embedding(provider: str, api_key: str, text: str, api_keys: Optional[Dict[str, str]] = None) -> List[float]:
-428 |     """Unified embedding generator."""
-429 |     resolved_key = resolve_api_key(provider, api_key, api_keys)
-430 |     if not resolved_key:
-431 |         return []
-432 | 
-433 |     if provider.lower() == "gemini":
-434 |         url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={resolved_key}"
-435 |         payload = {
-436 |             "model": "models/text-embedding-004",
-437 |             "content": {"parts": [{"text": text}]}
-438 |         }
-439 |         async with httpx.AsyncClient() as client:
-440 |             try:
-441 |                 r = await client.post(url, json=payload, timeout=15.0)
-442 |                 if r.status_code == 200:
-443 |                     return r.json().get("embedding", {}).get("values", [])
-444 |             except Exception as e:
-445 |                 print(f"[EMBEDDING ERROR] Gemini embedding failed: {e}")
-446 |     elif provider.lower() == "openai":
-447 |         url = "https://api.openai.com/v1/embeddings"
-448 |         headers = {
-449 |             "Content-Type": "application/json",
-450 |             "Authorization": f"Bearer {resolved_key}"
-451 |         }
-452 |         payload = {
-453 |             "model": "text-embedding-3-small",
-454 |             "input": text
-455 |         }
-456 |         async with httpx.AsyncClient() as client:
-457 |             try:
-458 |                 r = await client.post(url, json=payload, headers=headers, timeout=15.0)
-459 |                 if r.status_code == 200:
-460 |                     return r.json().get("data", [{}])[0].get("embedding", [])
-461 |             except Exception as e:
-462 |                 print(f"[EMBEDDING ERROR] OpenAI embedding failed: {e}")
-463 |     return []
-464 | 
+379 |                 except Exception as e:
+380 |                     retries += 1
+381 |                     if retries > MAX_RETRIES:
+382 |                         raise e
+383 |                     delay = min(MAX_DELAY, BASE_DELAY * (2 ** retries))
+384 |                     delay += random.uniform(-JITTER_FACTOR * delay, JITTER_FACTOR * delay)
+385 |                     await asyncio.sleep(delay)
+386 |         except Exception as e:
+387 |             last_error = e
+388 |             print(f"[KEY ROTATION STREAM] Key failed for {provider}, trying next... ({e})")
+389 |             continue
+390 | 
+391 |     if not success:
+392 |         if fallback_provider and fallback_provider.lower() != provider.lower():
+393 |             print(f"[FALLBACK STREAM] Primary {provider} failed all keys: {last_error}. Switching to fallback {fallback_provider}...")
+394 |             fallback_config = get_provider_config(fallback_provider)
+395 |             fallback_model = fallback_config.get("default_model", "")
+396 |             fallback_key = resolve_api_key(fallback_provider, None, api_keys)
+397 |             
+398 |             async for chunk in stream_provider(
+399 |                 provider=fallback_provider,
+400 |                 model=fallback_model,
+401 |                 api_key=fallback_key,
+402 |                 messages=messages,
+403 |                 system_prompt=system_prompt,
+404 |                 temperature=temperature,
+405 |                 timeout=timeout,
+406 |                 fallback_provider=None,
+407 |                 api_keys=api_keys,
+408 |                 base_url=None,
+409 |                 backup_api_keys=None
+410 |             ):
+411 |                 yield chunk
+412 |             return
+413 |         else:
+414 |             raise last_error
+415 | 
+416 | 
+417 | async def call_provider_json(
+418 |     provider: str,
+419 |     model: Optional[str],
+420 |     api_key: str,
+421 |     messages: List[Dict[str, str]],
+422 |     system_prompt: str = "",
+423 |     temperature: float = 0.2,
+424 |     json_schema: Dict[str, Any] = None,
+425 |     timeout: float = 30.0,
+426 |     fallback_provider: Optional[str] = None,
+427 |     api_keys: Optional[Dict[str, str]] = None,
+428 |     base_url: Optional[str] = None,
+429 |     backup_api_keys: Optional[List[str]] = None,
+430 | ) -> Dict[str, Any]:
+431 |     """Unified JSON completions call with fallback validation."""
+432 |     schema_hint = None
+433 |     if json_schema:
+434 |         schema_hint = json.dumps(json_schema, indent=2)
+435 | 
+436 |     response_text = await call_provider(
+437 |         provider=provider,
+438 |         model=model,
+439 |         api_key=api_key,
+440 |         messages=messages,
+441 |         system_prompt=system_prompt,
+442 |         temperature=temperature,
+443 |         json_schema=json_schema,
+444 |         json_schema_hint=schema_hint,
+445 |         timeout=timeout,
+446 |         fallback_provider=fallback_provider,
+447 |         api_keys=api_keys,
+448 |         base_url=base_url,
+449 |         backup_api_keys=backup_api_keys
+450 |     )
+451 |     
+452 |     parsed = extract_json_from_text(response_text)
+453 |     if parsed is None:
+454 |         raise ValueError(f"Failed to extract JSON from response: {response_text[:1000]}")
+455 |     return parsed
+456 | 
+457 | 
+458 | # ─── Embedding Abstraction ───────────────────────────────────────────
+459 | 
+460 | async def get_embedding(provider: str, api_key: str, text: str, api_keys: Optional[Dict[str, str]] = None) -> List[float]:
+461 |     """Unified embedding generator."""
+462 |     resolved_key = resolve_api_key(provider, api_key, api_keys)
+463 |     if not resolved_key:
+464 |         return []
 465 | 
-466 | # ─── Dynamic Model Fetching ─────────────────────────────────────────
-467 | 
-468 | async def fetch_models_from_provider(
-469 |     provider: str,
-470 |     api_key: str,
-471 |     api_keys: Optional[Dict[str, str]] = None,
-472 |     base_url: Optional[str] = None,
-473 | ) -> List[Dict[str, Any]]:
-474 |     """Fetch available models from the provider's API dynamically."""
-475 |     config = get_provider_config(provider)
-476 |     if not config:
-477 |         return []
-478 |     
-479 |     resolved_key = resolve_api_key(provider, api_key, api_keys)
-480 |     if not resolved_key and not config.get("is_local", False):
-481 |         return []
-482 | 
-483 |     resolved_base_url = base_url or config.get("base_url", "")
-484 |     adapter = config.get("adapter", "openai")
-485 |     base_url_str = resolved_base_url.rstrip("/")
-486 |     
-487 |     if adapter == "gemini":
-488 |         url = f"https://generativelanguage.googleapis.com/v1beta/models?key={resolved_key}"
-489 |         try:
-490 |             async with httpx.AsyncClient(timeout=10.0) as client:
-491 |                 resp = await client.get(url)
-492 |                 if resp.status_code == 200:
-493 |                     data = resp.json()
-494 |                     models = []
-495 |                     for item in data.get("models", []):
-496 |                         supported = item.get("supportedGenerationMethods", [])
-497 |                         if "generateContent" in supported:
-498 |                             model_id = item.get("name", "").replace("models/", "")
-499 |                             if model_id:
-500 |                                 models.append({
-501 |                                     "id": model_id,
-502 |                                     "name": item.get("displayName", model_id),
-503 |                                     "tier": "fast" if "flash" in model_id else "advanced"
-504 |                                 })
-505 |                     if models:
-506 |                         return models
-507 |         except Exception as e:
-508 |             print(f"[FETCH MODELS ERROR] Gemini: {e}")
-509 | 
-510 |     elif adapter == "claude":
-511 |         url = "https://api.anthropic.com/v1/models"
-512 |         headers = {
-513 |             "x-api-key": resolved_key,
-514 |             "anthropic-version": "2024-10-22",
-515 |         }
-516 |         try:
-517 |             async with httpx.AsyncClient(timeout=10.0) as client:
-518 |                 resp = await client.get(url, headers=headers)
-519 |                 if resp.status_code == 200:
-520 |                     data = resp.json()
-521 |                     models = []
-522 |                     for item in data.get("data", []):
-523 |                         model_id = item.get("id", "")
-524 |                         if model_id:
-525 |                             tier = "reasoning" if "opus" in model_id else \
-526 |                                    "fast" if "haiku" in model_id else "advanced"
-527 |                             models.append({
-528 |                                     "id": model_id,
-529 |                                     "name": item.get("display_name", model_id),
-530 |                                     "tier": tier
-531 |                             })
-532 |                     if models:
-533 |                         return models
-534 |         except Exception as e:
-535 |             print(f"[FETCH MODELS ERROR] Claude: {e}")
-536 | 
-537 |     elif adapter in ("openai", "openai-compatible"):
-538 |         if not base_url_str:
-539 |             return config.get("models", [])
-540 |         url = f"{base_url_str}/models"
-541 |         headers = {}
-542 |         if resolved_key:
-543 |             if config.get("requires_deployment"):
-544 |                 headers["api-key"] = resolved_key
-545 |             else:
-546 |                 headers["Authorization"] = f"Bearer {resolved_key}"
-547 | 
-548 |         try:
-549 |             async with httpx.AsyncClient(timeout=10.0) as client:
-550 |                 resp = await client.get(url, headers=headers)
-551 |                 if resp.status_code == 200:
-552 |                     data = resp.json()
-553 |                     models = []
-554 |                     for item in data.get("data", []):
-555 |                         model_id = item.get("id")
-556 |                         if model_id:
-557 |                             models.append({
-558 |                                 "id": model_id,
-559 |                                 "name": model_id,
-560 |                                 "tier": "custom"
-561 |                             })
-562 |                     if models:
-563 |                         return models
-564 |         except Exception as e:
-565 |             print(f"[FETCH MODELS ERROR] Failed to fetch models for {provider}: {e}")
-566 |             
-567 |     return config.get("models", [])
-568 |
+466 |     if provider.lower() == "gemini":
+467 |         url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={resolved_key}"
+468 |         payload = {
+469 |             "model": "models/text-embedding-004",
+470 |             "content": {"parts": [{"text": text}]}
+471 |         }
+472 |         async with httpx.AsyncClient() as client:
+473 |             try:
+474 |                 r = await client.post(url, json=payload, timeout=15.0)
+475 |                 if r.status_code == 200:
+476 |                     return r.json().get("embedding", {}).get("values", [])
+477 |             except Exception as e:
+478 |                 print(f"[EMBEDDING ERROR] Gemini embedding failed: {e}")
+479 |     elif provider.lower() == "openai":
+480 |         url = "https://api.openai.com/v1/embeddings"
+481 |         headers = {
+482 |             "Content-Type": "application/json",
+483 |             "Authorization": f"Bearer {resolved_key}"
+484 |         }
+485 |         payload = {
+486 |             "model": "text-embedding-3-small",
+487 |             "input": text
+488 |         }
+489 |         async with httpx.AsyncClient() as client:
+490 |             try:
+491 |                 r = await client.post(url, json=payload, headers=headers, timeout=15.0)
+492 |                 if r.status_code == 200:
+493 |                     return r.json().get("data", [{}])[0].get("embedding", [])
+494 |             except Exception as e:
+495 |                 print(f"[EMBEDDING ERROR] OpenAI embedding failed: {e}")
+496 |     return []
+497 | 
+498 | 
+499 | # ─── Dynamic Model Fetching ─────────────────────────────────────────
+500 | 
+501 | async def fetch_models_from_provider(
+502 |     provider: str,
+503 |     api_key: str,
+504 |     api_keys: Optional[Dict[str, str]] = None,
+505 |     base_url: Optional[str] = None,
+506 | ) -> List[Dict[str, Any]]:
+507 |     """Fetch available models from the provider's API dynamically."""
+508 |     config = get_provider_config(provider)
+509 |     if not config:
+510 |         return []
+511 |     
+512 |     resolved_key = resolve_api_key(provider, api_key, api_keys)
+513 |     if not resolved_key and not config.get("is_local", False):
+514 |         return []
+515 | 
+516 |     resolved_base_url = base_url or config.get("base_url", "")
+517 |     adapter = config.get("adapter", "openai")
+518 |     base_url_str = resolved_base_url.rstrip("/")
+519 |     
+520 |     if adapter == "gemini":
+521 |         url = f"https://generativelanguage.googleapis.com/v1beta/models?key={resolved_key}"
+522 |         try:
+523 |             async with httpx.AsyncClient(timeout=10.0) as client:
+524 |                 resp = await client.get(url)
+525 |                 if resp.status_code == 200:
+526 |                     data = resp.json()
+527 |                     models = []
+528 |                     for item in data.get("models", []):
+529 |                         supported = item.get("supportedGenerationMethods", [])
+530 |                         if "generateContent" in supported:
+531 |                             model_id = item.get("name", "").replace("models/", "")
+532 |                             if model_id:
+533 |                                 models.append({
+534 |                                     "id": model_id,
+535 |                                     "name": item.get("displayName", model_id),
+536 |                                     "tier": "fast" if "flash" in model_id else "advanced"
+537 |                                 })
+538 |                     if models:
+539 |                         return models
+540 |         except Exception as e:
+541 |             print(f"[FETCH MODELS ERROR] Gemini: {e}")
+542 | 
+543 |     elif adapter == "claude":
+544 |         url = "https://api.anthropic.com/v1/models"
+545 |         headers = {
+546 |             "x-api-key": resolved_key,
+547 |             "anthropic-version": "2024-10-22",
+548 |         }
+549 |         try:
+550 |             async with httpx.AsyncClient(timeout=10.0) as client:
+551 |                 resp = await client.get(url, headers=headers)
+552 |                 if resp.status_code == 200:
+553 |                     data = resp.json()
+554 |                     models = []
+555 |                     for item in data.get("data", []):
+556 |                         model_id = item.get("id", "")
+557 |                         if model_id:
+558 |                             tier = "reasoning" if "opus" in model_id else \
+559 |                                    "fast" if "haiku" in model_id else "advanced"
+560 |                             models.append({
+561 |                                     "id": model_id,
+562 |                                     "name": item.get("display_name", model_id),
+563 |                                     "tier": tier
+564 |                             })
+565 |                     if models:
+566 |                         return models
+567 |         except Exception as e:
+568 |             print(f"[FETCH MODELS ERROR] Claude: {e}")
+569 | 
+570 |     elif adapter in ("openai", "openai-compatible"):
+571 |         if not base_url_str:
+572 |             return config.get("models", [])
+573 |         url = f"{base_url_str}/models"
+574 |         headers = {}
+575 |         if resolved_key:
+576 |             if config.get("requires_deployment"):
+577 |                 headers["api-key"] = resolved_key
+578 |             else:
+579 |                 headers["Authorization"] = f"Bearer {resolved_key}"
+580 | 
+581 |         try:
+582 |             async with httpx.AsyncClient(timeout=10.0) as client:
+583 |                 resp = await client.get(url, headers=headers)
+584 |                 if resp.status_code == 200:
+585 |                     data = resp.json()
+586 |                     models = []
+587 |                     for item in data.get("data", []):
+588 |                         model_id = item.get("id")
+589 |                         if model_id:
+590 |                             models.append({
+591 |                                 "id": model_id,
+592 |                                 "name": model_id,
+593 |                                 "tier": "custom"
+594 |                             })
+595 |                     if models:
+596 |                         return models
+597 |         except Exception as e:
+598 |             print(f"[FETCH MODELS ERROR] Failed to fetch models for {provider}: {e}")
+599 |             
+600 |     return config.get("models", [])
+601 |
 ```
 
 ### File: `Backend/security/__init__.py`
@@ -3951,7 +4049,7 @@ SoloSpace/
 
 ### File: `Backend/main.py`
 
-> 707 lines | 27.5 KB
+> 722 lines | 28.3 KB
 
 ```python
   1 | """
@@ -4061,606 +4159,621 @@ SoloSpace/
 105 |     existing_nodes: Optional[List[Dict[str, Any]]] = None
 106 |     existing_edges: Optional[List[Dict[str, Any]]] = None
 107 |     mode: Optional[str] = "auto"
-108 | 
+108 |     backup_api_keys: Optional[List[str]] = None
 109 | 
-110 | class ExecuteCustomRequest(BaseModel):
-111 |     session_id: str
-112 |     api_key: str
-113 |     nodes: List[Dict[str, Any]]
-114 |     edges: List[Dict[str, Any]]
-115 |     prompt: str
-116 |     history: Optional[List[Message]] = []
-117 |     provider: str = "gemini"
-118 |     model: Optional[str] = None
-119 |     fallback_provider: Optional[str] = None
-120 |     api_keys: Optional[Dict[str, str]] = None
-121 |     base_url: Optional[str] = None
-122 | 
-123 | 
-124 | class ApprovalRequest(BaseModel):
-125 |     sessionId: str
-126 |     nodeId: str
-127 |     toolName: str
-128 |     action: str  # "approve" or "deny"
-129 |     logId: Optional[str] = None
-130 | 
-131 | 
-132 | class SaveSessionRequest(BaseModel):
-133 |     session_id: str
-134 |     title: str
-135 |     prompt: str
-136 |     mode: str
-137 |     nodes: List[Dict[str, Any]]
-138 |     edges: List[Dict[str, Any]]
-139 |     chat_messages: List[Dict[str, Any]]
-140 |     agent_talk_logs: List[Dict[str, Any]]
-141 |     execution_state: str
-142 |     status_message: str
-143 |     follow_up_suggestions: List[str]
-144 | 
-145 | 
-146 | class EchoHouseInitRequest(BaseModel):
-147 |     problem_text: str
-148 |     provider: str = "gemini"
-149 |     model: Optional[str] = None
-150 |     api_key: Optional[str] = None
-151 |     api_keys: Optional[Dict[str, str]] = None
-152 |     base_url: Optional[str] = None
-153 | 
-154 | 
-155 | class EchoHouseSimulateRequest(BaseModel):
-156 |     session_id: str
-157 |     problem_text: str
-158 |     cast: List[Dict[str, Any]]
-159 |     provider: str = "gemini"
-160 |     model: Optional[str] = None
-161 |     api_key: Optional[str] = None
-162 |     api_keys: Optional[Dict[str, str]] = None
-163 |     base_url: Optional[str] = None
-164 |     rounds: int = 3
-165 |     tone: str = "realistic"
-166 | 
-167 | 
-168 | class EchoHouseTakeawaysRequest(BaseModel):
-169 |     simulation_text: str
-170 |     problem_text: str
-171 |     provider: str = "gemini"
-172 |     model: Optional[str] = None
-173 |     api_key: Optional[str] = None
-174 |     api_keys: Optional[Dict[str, str]] = None
-175 |     base_url: Optional[str] = None
-176 | 
-177 | 
-178 | # ─── Health Check ─────────────────────────────────────────────────────
-179 | 
-180 | @app.get("/health")
-181 | async def health():
-182 |     return {"status": "ok", "version": "2.0.0-ai-os"}
-183 | 
+110 | 
+111 | class ExecuteCustomRequest(BaseModel):
+112 |     session_id: str
+113 |     api_key: str
+114 |     nodes: List[Dict[str, Any]]
+115 |     edges: List[Dict[str, Any]]
+116 |     prompt: str
+117 |     history: Optional[List[Message]] = []
+118 |     provider: str = "gemini"
+119 |     model: Optional[str] = None
+120 |     fallback_provider: Optional[str] = None
+121 |     api_keys: Optional[Dict[str, str]] = None
+122 |     base_url: Optional[str] = None
+123 |     backup_api_keys: Optional[List[str]] = None
+124 | 
+125 | 
+126 | class ApprovalRequest(BaseModel):
+127 |     sessionId: str
+128 |     nodeId: str
+129 |     toolName: str
+130 |     action: str  # "approve" or "deny"
+131 |     logId: Optional[str] = None
+132 | 
+133 | 
+134 | class SaveSessionRequest(BaseModel):
+135 |     session_id: str
+136 |     title: str
+137 |     prompt: str
+138 |     mode: str
+139 |     nodes: List[Dict[str, Any]]
+140 |     edges: List[Dict[str, Any]]
+141 |     chat_messages: List[Dict[str, Any]]
+142 |     agent_talk_logs: List[Dict[str, Any]]
+143 |     execution_state: str
+144 |     status_message: str
+145 |     follow_up_suggestions: List[str]
+146 | 
+147 | 
+148 | class EchoHouseInitRequest(BaseModel):
+149 |     problem_text: str
+150 |     provider: str = "gemini"
+151 |     model: Optional[str] = None
+152 |     api_key: Optional[str] = None
+153 |     api_keys: Optional[Dict[str, str]] = None
+154 |     base_url: Optional[str] = None
+155 |     backup_api_keys: Optional[List[str]] = None
+156 | 
+157 | 
+158 | class EchoHouseSimulateRequest(BaseModel):
+159 |     session_id: str
+160 |     problem_text: str
+161 |     cast: List[Dict[str, Any]]
+162 |     provider: str = "gemini"
+163 |     model: Optional[str] = None
+164 |     api_key: Optional[str] = None
+165 |     api_keys: Optional[Dict[str, str]] = None
+166 |     base_url: Optional[str] = None
+167 |     rounds: int = 3
+168 |     tone: str = "realistic"
+169 |     backup_api_keys: Optional[List[str]] = None
+170 | 
+171 | 
+172 | class EchoHouseTakeawaysRequest(BaseModel):
+173 |     simulation_text: str
+174 |     problem_text: str
+175 |     provider: str = "gemini"
+176 |     model: Optional[str] = None
+177 |     api_key: Optional[str] = None
+178 |     api_keys: Optional[Dict[str, str]] = None
+179 |     base_url: Optional[str] = None
+180 |     backup_api_keys: Optional[List[str]] = None
+181 | 
+182 | 
+183 | # ─── Health Check ─────────────────────────────────────────────────────
 184 | 
-185 | # ─── Providers ────────────────────────────────────────────────────────
-186 | 
-187 | @app.get("/providers")
-188 | async def get_providers():
-189 |     return get_available_providers()
-190 | 
+185 | @app.get("/health")
+186 | async def health():
+187 |     return {"status": "ok", "version": "2.0.0-ai-os"}
+188 | 
+189 | 
+190 | # ─── Providers ────────────────────────────────────────────────────────
 191 | 
-192 | @app.get("/{provider}/models")
-193 | async def get_models(
-194 |     provider: str,
-195 |     api_key: Optional[str] = None,
-196 |     base_url: Optional[str] = None,
-197 | ):
-198 |     try:
-199 |         models = await fetch_models_from_provider(provider, api_key or "", base_url or "")
-200 |         return {"models": models}
-201 |     except Exception as e:
-202 |         raise HTTPException(status_code=500, detail=str(e))
-203 | 
-204 | 
-205 | # ─── Main Orchestration (Smart Auto Mode) ─────────────────────────────
-206 | 
-207 | @app.post("/orchestrate")
-208 | async def orchestrate(req: OrchestrateRequest):
-209 |     """
-210 |     Smart orchestration with pre-router:
-211 |     - TRIVIAL → direct streaming response (skip planning entirely)
-212 |     - TOOL_USE → single agent with tools
-213 |     - COMPLEX → full multi-agent DAG planning
+192 | @app.get("/providers")
+193 | async def get_providers():
+194 |     return get_available_providers()
+195 | 
+196 | 
+197 | @app.get("/{provider}/models")
+198 | async def get_models(
+199 |     provider: str,
+200 |     api_key: Optional[str] = None,
+201 |     base_url: Optional[str] = None,
+202 | ):
+203 |     try:
+204 |         models = await fetch_models_from_provider(provider, api_key or "", base_url or "")
+205 |         return {"models": models}
+206 |     except Exception as e:
+207 |         raise HTTPException(status_code=500, detail=str(e))
+208 | 
+209 | 
+210 | # ─── Main Orchestration (Smart Auto Mode) ─────────────────────────────
+211 | 
+212 | @app.post("/orchestrate")
+213 | async def orchestrate(req: OrchestrateRequest):
 214 |     """
-215 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
-216 |     from providers import get_provider_config as _get_cfg
-217 |     _is_local = _get_cfg(req.provider).get("is_local", False)
-218 |     if not api_key and not _is_local:
-219 |         raise HTTPException(status_code=400, detail="API key required.")
-220 | 
-221 |     # Jailbreak check
-222 |     jailbreak_alert = check_jailbreak(req.prompt)
-223 |     if jailbreak_alert:
-224 |         async def safety_stream():
-225 |             yield f"event: text\ndata: {json.dumps('⚠ ' + jailbreak_alert)}\n\n"
-226 |             yield "event: done\ndata: {}\n\n"
-227 |         return StreamingResponse(safety_stream(), media_type="text/event-stream")
-228 | 
-229 |     # ── Semantic Pre-Router ────────────────────────────────────────────
-230 |     route = await route_request(
-231 |         prompt=req.prompt,
-232 |         provider=req.provider,
-233 |         api_key=api_key,
-234 |         api_keys=req.api_keys,
-235 |         base_url=req.base_url,
-236 |     )
-237 | 
-238 |     # Build orchestration plan
-239 |     history_msgs = [{"role": "user" if m.sender == "user" else "assistant", "content": m.text}
-240 |                     for m in (req.history or [])]
-241 | 
-242 |     # Smart context windowing
-243 |     from core.planner import summarize_history
-244 |     history_msgs = await summarize_history(
-245 |         history_msgs, req.provider, api_key, req.api_keys, req.base_url
-246 |     )
+215 |     Smart orchestration with pre-router:
+216 |     - TRIVIAL → direct streaming response (skip planning entirely)
+217 |     - TOOL_USE → single agent with tools
+218 |     - COMPLEX → full multi-agent DAG planning
+219 |     """
+220 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
+221 |     from providers import get_provider_config as _get_cfg
+222 |     _is_local = _get_cfg(req.provider).get("is_local", False)
+223 |     if not api_key and not _is_local:
+224 |         raise HTTPException(status_code=400, detail="API key required.")
+225 | 
+226 |     # Jailbreak check
+227 |     jailbreak_alert = check_jailbreak(req.prompt)
+228 |     if jailbreak_alert:
+229 |         async def safety_stream():
+230 |             yield f"event: text\ndata: {json.dumps('⚠ ' + jailbreak_alert)}\n\n"
+231 |             yield "event: done\ndata: {}\n\n"
+232 |         return StreamingResponse(safety_stream(), media_type="text/event-stream")
+233 | 
+234 |     # ── Semantic Pre-Router ────────────────────────────────────────────
+235 |     route = await route_request(
+236 |         prompt=req.prompt,
+237 |         provider=req.provider,
+238 |         api_key=api_key,
+239 |         api_keys=req.api_keys,
+240 |         base_url=req.base_url,
+241 |         backup_api_keys=req.backup_api_keys,
+242 |     )
+243 | 
+244 |     # Build orchestration plan
+245 |     history_msgs = [{"role": "user" if m.sender == "user" else "assistant", "content": m.text}
+246 |                     for m in (req.history or [])]
 247 | 
-248 |     existing_agent_ids = [n["data"]["senderId"] for n in (req.existing_nodes or []) if n.get("data")]
-249 | 
-250 |     messages_for_plan = history_msgs.copy()
-251 |     existing_ctx = f"\n\nExisting agents (do NOT recreate): {existing_agent_ids}" if existing_agent_ids else ""
-252 |     messages_for_plan.append({"role": "user", "content": req.prompt + existing_ctx})
+248 |     # Smart context windowing
+249 |     from core.planner import summarize_history
+250 |     history_msgs = await summarize_history(
+251 |         history_msgs, req.provider, api_key, req.api_keys, req.base_url, backup_api_keys=req.backup_api_keys
+252 |     )
 253 | 
-254 |     if route == "TRIVIAL":
-255 |         # ── Fast path: no planning, no agents, stream directly ─────────
-256 |         from providers import stream_provider
-257 |         from core.planner import RESPONSE_SYSTEM_INSTRUCTION
-258 | 
-259 |         async def trivial_stream():
-260 |             empty_meta = {"complexity": "simple", "capabilities": [], "thinking_summary": "", "nodes": [], "edges": [], "agent_talk": [], "follow_up_suggestions": []}
-261 |             yield f"event: metadata\ndata: {json.dumps(empty_meta)}\n\n"
-262 |             try:
-263 |                 from core.planner import _FAST_ROUTER_MODELS
-264 |                 fast_model = _FAST_ROUTER_MODELS.get(req.provider, req.model)
-265 |                 async for token in stream_provider(
-266 |                     provider=req.provider, model=fast_model, api_key=api_key,
-267 |                     messages=messages_for_plan, system_prompt=RESPONSE_SYSTEM_INSTRUCTION,
-268 |                     temperature=0.7, timeout=20.0, fallback_provider=req.fallback_provider,
-269 |                     api_keys=req.api_keys, base_url=req.base_url,
-270 |                 ):
-271 |                     yield f"event: text\ndata: {json.dumps(token)}\n\n"
-272 |             except Exception as e:
-273 |                 yield f"event: text\ndata: {json.dumps(f'Error: {str(e)}')}\n\n"
-274 |             yield "event: done\ndata: {}\n\n"
-275 | 
-276 |         return StreamingResponse(trivial_stream(), media_type="text/event-stream")
-277 | 
-278 |     # ── Full planning ─────────────────────────────────────────────────
-279 |     plan = await generate_plan(
-280 |         messages=messages_for_plan,
-281 |         provider=req.provider,
-282 |         model=req.model,
-283 |         api_key=api_key,
-284 |         api_keys=req.api_keys,
-285 |         base_url=req.base_url,
-286 |         fallback_provider=req.fallback_provider,
-287 |     )
-288 | 
-289 |     # Merge existing nodes/edges from frontend canvas
-290 |     import uuid
-291 |     nodes = list(req.existing_nodes or [])
-292 |     edges = list(req.existing_edges or [])
-293 |     existing_ids = {n["id"] for n in nodes}
-294 | 
-295 |     for agent in plan.get("agent_talk", []):
-296 |         agent_id = agent["senderId"]
-297 |         if agent_id in existing_ids:
-298 |             continue  # deduplicate
-299 |         custom = agent.get("custom_template", {})
-300 |         col_idx = custom.get("col", len(nodes) % 3)
-301 |         new_node = {
-302 |             "id": agent_id,
-303 |             "type": "custom",
-304 |             "position": {"x": 180 + col_idx * 260, "y": 100 + (len(nodes) // 3) * 200},
-305 |             "data": {
-306 |                 "name": custom.get("name", agent.get("senderName", agent_id)),
-307 |                 "icon": custom.get("icon", "science"),
-308 |                 "tag": custom.get("tag", agent.get("senderIcon", "AGENT").upper()),
-309 |                 "objective": agent.get("objective", ""),
-310 |                 "systemPrompt": agent.get("systemPrompt", ""),
-311 |                 "rules": agent.get("rules", []),
-312 |                 "dependencies": agent.get("dependencies", []),
-313 |                 "tools": agent.get("tools", []),
-314 |                 "toolPermissions": {},
-315 |                 "temp": custom.get("temp", 0.7),
-316 |                 "logic": custom.get("logic", 70),
-317 |                 "empathy": 50,
-318 |                 "priority": 5,
-319 |                 "status": "IDLE",
-320 |                 "enabled": True,
-321 |                 "toolLogs": [],
-322 |                 "personality": "",
-323 |                 "senderId": agent_id,
-324 |             },
-325 |         }
-326 |         nodes.append(new_node)
-327 |         existing_ids.add(agent_id)
-328 | 
-329 |     # Build edges from dependencies
-330 |     for node in nodes:
-331 |         for dep in node["data"].get("dependencies", []):
-332 |             edge_id = f"e-{dep}-{node['id']}"
-333 |             if dep in existing_ids and not any(e["id"] == edge_id for e in edges):
-334 |                 edges.append({"id": edge_id, "source": dep, "target": node["id"], "type": "custom", "animated": True})
-335 | 
-336 |     if not nodes:
-337 |         nodes = [{"id": "general", "type": "custom", "position": {"x": 300, "y": 200}, "data": {**DEFAULT_PLAN["agent_talk"][0], "status": "IDLE", "enabled": True, "toolLogs": [], "empathy": 50, "priority": 5, "personality": ""}}]
-338 | 
-339 |     session_id = req.session_id or str(uuid.uuid4())
-340 | 
-341 |     if not req.execute_agents:
-342 |         # Custom mode: return plan without executing
-343 |         plan_meta = {
-344 |             "complexity": plan.get("complexity", "simple"),
-345 |             "capabilities": plan.get("capabilities", []),
-346 |             "thinking_summary": plan.get("thinking_summary", ""),
-347 |             "nodes": nodes,
-348 |             "edges": edges,
-349 |             "agent_talk": [{"id": f"plan-{a['senderId']}", "senderId": a["senderId"], "senderName": a["senderName"], "senderIcon": a["senderIcon"], "text": a["text"], "timestamp": ""} for a in plan.get("agent_talk", [])],
-350 |             "follow_up_suggestions": plan.get("follow_up_suggestions", []),
-351 |         }
-352 |         async def plan_stream():
-353 |             yield f"event: metadata\ndata: {json.dumps(plan_meta)}\n\n"
-354 |             yield "event: done\ndata: {}\n\n"
-355 |         return StreamingResponse(plan_stream(), media_type="text/event-stream")
-356 | 
-357 |     return StreamingResponse(
-358 |         run_agent_execution_loop(
-359 |             session_id=session_id,
-360 |             prompt=req.prompt,
-361 |             history=req.history,
-362 |             api_key=api_key,
-363 |             nodes=nodes,
-364 |             edges=edges,
-365 |             complexity=plan.get("complexity", "simple"),
-366 |             capabilities=plan.get("capabilities", []),
-367 |             thinking_summary=plan.get("thinking_summary", ""),
-368 |             follow_up_suggestions=plan.get("follow_up_suggestions", []),
-369 |             provider=req.provider,
-370 |             model=req.model,
-371 |             fallback_provider=req.fallback_provider,
-372 |             api_keys=req.api_keys,
-373 |             base_url=req.base_url,
-374 |             resume_from_checkpoint=False,
-375 |         ),
-376 |         media_type="text/event-stream",
-377 |     )
-378 | 
-379 | 
-380 | # ─── Custom Execute (Manual Flow Mode) ───────────────────────────────
-381 | 
-382 | @app.post("/execute_custom")
-383 | async def execute_custom(req: ExecuteCustomRequest):
-384 |     """Execute a user-customized node canvas directly."""
-385 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
-386 |     from providers import get_provider_config as _get_cfg
-387 |     if not api_key and not _get_cfg(req.provider).get("is_local", False):
-388 |         raise HTTPException(status_code=400, detail="API key required.")
-389 | 
-390 |     return StreamingResponse(
-391 |         run_agent_execution_loop(
-392 |             session_id=req.session_id,
-393 |             prompt=req.prompt,
-394 |             history=req.history,
-395 |             api_key=api_key,
-396 |             nodes=req.nodes,
-397 |             edges=req.edges,
-398 |             complexity="complex",
-399 |             capabilities=[],
-400 |             thinking_summary="",
-401 |             follow_up_suggestions=[],
-402 |             provider=req.provider,
-403 |             model=req.model,
-404 |             fallback_provider=req.fallback_provider,
-405 |             api_keys=req.api_keys,
-406 |             base_url=req.base_url,
-407 |             resume_from_checkpoint=False,
-408 |         ),
-409 |         media_type="text/event-stream",
-410 |     )
-411 | 
-412 | 
-413 | # ─── Tool Approval ────────────────────────────────────────────────────
-414 | 
-415 | @app.post("/approve_tool")
-416 | async def approve_tool(req: ApprovalRequest):
-417 |     status = "approved" if req.action == "approve" else "denied"
-418 |     if req.logId:
-419 |         await update_tool_approval(req.sessionId, req.nodeId, req.toolName, req.logId, status)
-420 |     else:
-421 |         await update_tool_approval_wildcard(req.sessionId, req.nodeId, req.toolName, status)
-422 |     return {"status": "ok", "approval": status}
-423 | 
+254 |     existing_agent_ids = [n["data"]["senderId"] for n in (req.existing_nodes or []) if n.get("data")]
+255 | 
+256 |     messages_for_plan = history_msgs.copy()
+257 |     existing_ctx = f"\n\nExisting agents (do NOT recreate): {existing_agent_ids}" if existing_agent_ids else ""
+258 |     messages_for_plan.append({"role": "user", "content": req.prompt + existing_ctx})
+259 | 
+260 |     if route == "TRIVIAL":
+261 |         # ── Fast path: no planning, no agents, stream directly ─────────
+262 |         from providers import stream_provider
+263 |         from core.planner import RESPONSE_SYSTEM_INSTRUCTION
+264 | 
+265 |         async def trivial_stream():
+266 |             empty_meta = {"complexity": "simple", "capabilities": [], "thinking_summary": "", "nodes": [], "edges": [], "agent_talk": [], "follow_up_suggestions": []}
+267 |             yield f"event: metadata\ndata: {json.dumps(empty_meta)}\n\n"
+268 |             try:
+269 |                 from core.planner import _FAST_ROUTER_MODELS
+270 |                 fast_model = _FAST_ROUTER_MODELS.get(req.provider, req.model)
+271 |                 async for token in stream_provider(
+272 |                     provider=req.provider, model=fast_model, api_key=api_key,
+273 |                     messages=messages_for_plan, system_prompt=RESPONSE_SYSTEM_INSTRUCTION,
+274 |                     temperature=0.7, timeout=20.0, fallback_provider=req.fallback_provider,
+275 |                     api_keys=req.api_keys, base_url=req.base_url,
+276 |                     backup_api_keys=req.backup_api_keys,
+277 |                 ):
+278 |                     yield f"event: text\ndata: {json.dumps(token)}\n\n"
+279 |             except Exception as e:
+280 |                 yield f"event: text\ndata: {json.dumps(f'Error: {str(e)}')}\n\n"
+281 |             yield "event: done\ndata: {}\n\n"
+282 | 
+283 |         return StreamingResponse(trivial_stream(), media_type="text/event-stream")
+284 | 
+285 |     # ── Full planning ─────────────────────────────────────────────────
+286 |     plan = await generate_plan(
+287 |         messages=messages_for_plan,
+288 |         provider=req.provider,
+289 |         model=req.model,
+290 |         api_key=api_key,
+291 |         api_keys=req.api_keys,
+292 |         base_url=req.base_url,
+293 |         fallback_provider=req.fallback_provider,
+294 |         backup_api_keys=req.backup_api_keys,
+295 |     )
+296 | 
+297 |     # Merge existing nodes/edges from frontend canvas
+298 |     import uuid
+299 |     nodes = list(req.existing_nodes or [])
+300 |     edges = list(req.existing_edges or [])
+301 |     existing_ids = {n["id"] for n in nodes}
+302 | 
+303 |     for agent in plan.get("agent_talk", []):
+304 |         agent_id = agent["senderId"]
+305 |         if agent_id in existing_ids:
+306 |             continue  # deduplicate
+307 |         custom = agent.get("custom_template", {})
+308 |         col_idx = custom.get("col", len(nodes) % 3)
+309 |         new_node = {
+310 |             "id": agent_id,
+311 |             "type": "custom",
+312 |             "position": {"x": 180 + col_idx * 260, "y": 100 + (len(nodes) // 3) * 200},
+313 |             "data": {
+314 |                 "name": custom.get("name", agent.get("senderName", agent_id)),
+315 |                 "icon": custom.get("icon", "science"),
+316 |                 "tag": custom.get("tag", agent.get("senderIcon", "AGENT").upper()),
+317 |                 "objective": agent.get("objective", ""),
+318 |                 "systemPrompt": agent.get("systemPrompt", ""),
+319 |                 "rules": agent.get("rules", []),
+320 |                 "dependencies": agent.get("dependencies", []),
+321 |                 "tools": agent.get("tools", []),
+322 |                 "toolPermissions": {},
+323 |                 "temp": custom.get("temp", 0.7),
+324 |                 "logic": custom.get("logic", 70),
+325 |                 "empathy": 50,
+326 |                 "priority": 5,
+327 |                 "status": "IDLE",
+328 |                 "enabled": True,
+329 |                 "toolLogs": [],
+330 |                 "personality": "",
+331 |                 "senderId": agent_id,
+332 |             },
+333 |         }
+334 |         nodes.append(new_node)
+335 |         existing_ids.add(agent_id)
+336 | 
+337 |     # Build edges from dependencies
+338 |     for node in nodes:
+339 |         for dep in node["data"].get("dependencies", []):
+340 |             edge_id = f"e-{dep}-{node['id']}"
+341 |             if dep in existing_ids and not any(e["id"] == edge_id for e in edges):
+342 |                 edges.append({"id": edge_id, "source": dep, "target": node["id"], "type": "custom", "animated": True})
+343 | 
+344 |     if not nodes:
+345 |         nodes = [{"id": "general", "type": "custom", "position": {"x": 300, "y": 200}, "data": {**DEFAULT_PLAN["agent_talk"][0], "status": "IDLE", "enabled": True, "toolLogs": [], "empathy": 50, "priority": 5, "personality": ""}}]
+346 | 
+347 |     session_id = req.session_id or str(uuid.uuid4())
+348 | 
+349 |     if not req.execute_agents:
+350 |         # Custom mode: return plan without executing
+351 |         plan_meta = {
+352 |             "complexity": plan.get("complexity", "simple"),
+353 |             "capabilities": plan.get("capabilities", []),
+354 |             "thinking_summary": plan.get("thinking_summary", ""),
+355 |             "nodes": nodes,
+356 |             "edges": edges,
+357 |             "agent_talk": [{"id": f"plan-{a['senderId']}", "senderId": a["senderId"], "senderName": a["senderName"], "senderIcon": a["senderIcon"], "text": a["text"], "timestamp": ""} for a in plan.get("agent_talk", [])],
+358 |             "follow_up_suggestions": plan.get("follow_up_suggestions", []),
+359 |         }
+360 |         async def plan_stream():
+361 |             yield f"event: metadata\ndata: {json.dumps(plan_meta)}\n\n"
+362 |             yield "event: done\ndata: {}\n\n"
+363 |         return StreamingResponse(plan_stream(), media_type="text/event-stream")
+364 | 
+365 |     return StreamingResponse(
+366 |         run_agent_execution_loop(
+367 |             session_id=session_id,
+368 |             prompt=req.prompt,
+369 |             history=req.history,
+370 |             api_key=api_key,
+371 |             nodes=nodes,
+372 |             edges=edges,
+373 |             complexity=plan.get("complexity", "simple"),
+374 |             capabilities=plan.get("capabilities", []),
+375 |             thinking_summary=plan.get("thinking_summary", ""),
+376 |             follow_up_suggestions=plan.get("follow_up_suggestions", []),
+377 |             provider=req.provider,
+378 |             model=req.model,
+379 |             fallback_provider=req.fallback_provider,
+380 |             api_keys=req.api_keys,
+381 |             base_url=req.base_url,
+382 |             resume_from_checkpoint=False,
+383 |             backup_api_keys=req.backup_api_keys,
+384 |         ),
+385 |         media_type="text/event-stream",
+386 |     )
+387 | 
+388 | 
+389 | # ─── Custom Execute (Manual Flow Mode) ───────────────────────────────
+390 | 
+391 | @app.post("/execute_custom")
+392 | async def execute_custom(req: ExecuteCustomRequest):
+393 |     """Execute a user-customized node canvas directly."""
+394 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
+395 |     from providers import get_provider_config as _get_cfg
+396 |     if not api_key and not _get_cfg(req.provider).get("is_local", False):
+397 |         raise HTTPException(status_code=400, detail="API key required.")
+398 | 
+399 |     return StreamingResponse(
+400 |         run_agent_execution_loop(
+401 |             session_id=req.session_id,
+402 |             prompt=req.prompt,
+403 |             history=req.history,
+404 |             api_key=api_key,
+405 |             nodes=req.nodes,
+406 |             edges=req.edges,
+407 |             complexity="complex",
+408 |             capabilities=[],
+409 |             thinking_summary="",
+410 |             follow_up_suggestions=[],
+411 |             provider=req.provider,
+412 |             model=req.model,
+413 |             fallback_provider=req.fallback_provider,
+414 |             api_keys=req.api_keys,
+415 |             base_url=req.base_url,
+416 |             resume_from_checkpoint=False,
+417 |             backup_api_keys=req.backup_api_keys,
+418 |         ),
+419 |         media_type="text/event-stream",
+420 |     )
+421 | 
+422 | 
+423 | # ─── Tool Approval ────────────────────────────────────────────────────
 424 | 
-425 | # ─── Session Management ───────────────────────────────────────────────
-426 | 
-427 | @app.get("/sessions")
-428 | async def get_sessions():
-429 |     sessions = await load_sessions()
-430 |     result = []
-431 |     for s in sessions:
-432 |         result.append({
-433 |             "session_id": s["session_id"],
-434 |             "title": s["title"],
-435 |             "prompt": s["prompt"],
-436 |             "mode": s.get("mode", "auto"),
-437 |             "execution_state": s.get("execution_state", "setup"),
-438 |             "status_message": s.get("status_message", ""),
-439 |         })
-440 |     return result
-441 | 
-442 | 
-443 | @app.get("/sessions/{session_id}")
-444 | async def get_session(session_id: str):
-445 |     session = await load_session(session_id)
-446 |     if not session:
-447 |         raise HTTPException(status_code=404, detail="Session not found")
-448 |     return {
-449 |         "id": session["session_id"],
-450 |         "title": session["title"],
-451 |         "prompt": session["prompt"],
-452 |         "mode": session.get("mode", "auto"),
-453 |         "nodes": session.get("nodes", []),
-454 |         "edges": session.get("edges", []),
-455 |         "chatMessages": session.get("chat_messages", []),
-456 |         "agentTalkLogs": session.get("agent_talk_logs", []),
-457 |         "executionState": session.get("execution_state", "setup"),
-458 |         "statusMessage": session.get("status_message", ""),
-459 |         "followUpSuggestions": session.get("follow_up_suggestions", []),
-460 |     }
-461 | 
-462 | 
-463 | @app.delete("/sessions/{session_id}")
-464 | async def delete_session_route(session_id: str):
-465 |     await delete_session(session_id)
-466 |     return {"status": "deleted"}
-467 | 
-468 | 
-469 | @app.post("/sessions/save")
-470 | async def save_session_route(req: SaveSessionRequest):
-471 |     await save_session(
-472 |         session_id=req.session_id,
-473 |         title=req.title,
-474 |         prompt=req.prompt,
-475 |         mode=req.mode,
-476 |         nodes=req.nodes,
-477 |         edges=req.edges,
-478 |         chat_messages=req.chat_messages,
-479 |         agent_talk_logs=req.agent_talk_logs,
-480 |         execution_state=req.execution_state,
-481 |         status_message=req.status_message,
-482 |         follow_up_suggestions=req.follow_up_suggestions,
-483 |     )
-484 |     return {"status": "saved"}
-485 | 
-486 | 
-487 | class TestAgentRequest(BaseModel):
-488 |     node: Dict[str, Any]
-489 |     provider: str
-490 |     api_key: Optional[str] = None
-491 |     api_keys: Optional[Dict[str, str]] = None
-492 |     base_url: Optional[str] = None
-493 | 
-494 | 
-495 | @app.post("/test_agent")
-496 | async def test_agent_route(req: TestAgentRequest):
-497 |     """
-498 |     Test execution of a single agent node.
-499 |     Runs a simple prompt and verifies the LLM connection and system prompt.
-500 |     """
-501 |     from providers import get_provider_config, call_provider
-502 |     provider_config = get_provider_config(req.provider)
-503 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
-504 |     if not api_key and not provider_config.get("is_local", False):
-505 |         raise HTTPException(status_code=400, detail="API Key required.")
-506 | 
-507 |     test_prompt = "Hello! Output a short 3-word test greeting."
-508 |     node = req.node
-509 |     try:
-510 |         response = await call_provider(
-511 |             provider=req.provider,
-512 |             model=req.node.get("data", {}).get("model") or provider_config.get("default_model", "llama3"),
-513 |             api_key=api_key,
-514 |             messages=[{"role": "user", "content": test_prompt}],
-515 |             system_prompt=node.get("data", {}).get("systemPrompt", "You are a test agent."),
-516 |             temperature=0.7,
-517 |             timeout=10.0,
-518 |             api_keys=req.api_keys,
-519 |             base_url=req.base_url,
-520 |         )
-521 |         return {"status": "success", "response": response}
-522 |     except Exception as e:
-523 |         return {"status": "error", "detail": str(e)}
-524 | 
-525 | 
-526 | @app.post("/echohouse/init")
-527 | async def echohouse_init(req: EchoHouseInitRequest):
-528 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
-529 |     from providers import PROVIDERS, call_provider, extract_json_from_text
-530 |     is_local = PROVIDERS.get(req.provider.lower(), {}).get("is_local", False)
-531 |     if not api_key and not is_local:
-532 |         raise HTTPException(status_code=400, detail="API key required for initialization.")
-533 |         
-534 |     model = req.model or PROVIDERS.get(req.provider.lower(), {}).get("default_model")
-535 |     
-536 |     system_prompt = (
-537 |         "You are a professional relationship counselor and social dynamics simulator.\n"
-538 |         "Given the user's life problem, infer 2-4 key people in their life who are likely involved in or affect this situation (e.g., family, friends, colleagues, partners, or their own internal self).\n"
-539 |         "Always include one cast member representing the user themselves. For the user themselves, set is_self to true, and role to \"self\".\n\n"
-540 |         "Output JSON format ONLY. Do NOT enclose in markdown formatting, just raw JSON list.\n"
-541 |         "Each item in the list must have:\n"
-542 |         "- inferred_name (string): Name of the person (e.g. \"You (Self)\", \"Sarah\", \"Dad\")\n"
-543 |         "- role (string): Their relation/role (e.g. \"self\", \"friend\", \"father\")\n"
-544 |         "- inferred_problem (string): What this person likely thinks/feels about the situation (their perspective)\n"
-545 |         "- emotional_core (string): One sentence describing the deepest emotional need or fear driving this person's behavior. Example: \"Needs to feel respected and not dismissed.\"\n"
-546 |         "- is_self (boolean): True if it represents the user, False otherwise.\n\n"
-547 |         "Example JSON output:\n"
-548 |         "[\n"
-549 |         "  {\"inferred_name\": \"You (Self)\", \"role\": \"self\", \"inferred_problem\": \"I feel stuck and overwhelmed.\", \"emotional_core\": \"Needs to feel heard and understood.\", \"is_self\": true},\n"
-550 |         "  {\"inferred_name\": \"Mom\", \"role\": \"mother\", \"inferred_problem\": \"She thinks I'm not trying hard enough.\", \"emotional_core\": \"Fears losing connection with her child.\", \"is_self\": false}\n"
-551 |         "]"
-552 |     )
-553 |     
-554 |     user_prompt = f"User's life problem: \"{req.problem_text}\""
-555 |     
-556 |     try:
-557 |         response = await call_provider(
-558 |             provider=req.provider,
-559 |             model=model,
-560 |             api_key=api_key,
-561 |             messages=[{"role": "user", "content": user_prompt}],
-562 |             system_prompt=system_prompt,
-563 |             temperature=0.7,
-564 |             timeout=15.0,
-565 |             api_keys=req.api_keys,
-566 |             base_url=req.base_url
-567 |         )
-568 |         cast = extract_json_from_text(response)
-569 |         if isinstance(cast, list) and len(cast) > 0:
-570 |             validated_cast = []
-571 |             for item in cast:
-572 |                 if isinstance(item, dict) and "inferred_name" in item and "role" in item:
-573 |                     validated_cast.append({
-574 |                         "inferred_name": str(item["inferred_name"]),
-575 |                         "role": str(item["role"]),
-576 |                         "inferred_problem": str(item.get("inferred_problem", "")),
-577 |                         "emotional_core": str(item.get("emotional_core", "")),
-578 |                         "is_self": bool(item.get("is_self", False))
-579 |                     })
-580 |             if validated_cast:
-581 |                 return validated_cast
-582 |     except Exception as e:
-583 |         print(f"[EchoHouse Init Error] {e}")
-584 |         
-585 |     return [
-586 |         {
-587 |             "inferred_name": "You (Self)",
-588 |             "role": "self",
-589 |             "inferred_problem": req.problem_text,
-590 |             "is_self": True
-591 |         },
-592 |         {
-593 |             "inferred_name": "Friend",
-594 |             "role": "friend",
-595 |             "inferred_problem": "They are concerned about you but might not know how to help.",
-596 |             "is_self": False
-597 |         }
-598 |     ]
-599 | 
-600 | 
-601 | @app.post("/echohouse/simulate")
-602 | async def echohouse_simulate(req: EchoHouseSimulateRequest):
-603 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
-604 |     from core.echohouse import run_echohouse_simulation
-605 |     from providers import PROVIDERS
-606 |     is_local = PROVIDERS.get(req.provider.lower(), {}).get("is_local", False)
-607 |     if not api_key and not is_local:
-608 |         raise HTTPException(status_code=400, detail="API key required for simulation.")
-609 |         
-610 |     model = req.model or PROVIDERS.get(req.provider.lower(), {}).get("default_model")
-611 |     
-612 |     return StreamingResponse(
-613 |         run_echohouse_simulation(
-614 |             session_id=req.session_id,
-615 |             problem_text=req.problem_text,
-616 |             cast=req.cast,
-617 |             provider=req.provider,
-618 |             model=model,
-619 |             api_key=api_key,
-620 |             api_keys=req.api_keys,
-621 |             base_url=req.base_url,
-622 |             rounds=req.rounds,
-623 |             tone=req.tone
-624 |         ),
-625 |         media_type="text/event-stream"
-626 |     )
-627 | 
-628 | 
-629 | @app.post("/echohouse/takeaways")
-630 | async def echohouse_takeaways(req: EchoHouseTakeawaysRequest):
-631 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
-632 |     from providers import PROVIDERS, call_provider, extract_json_from_text
-633 |     is_local = PROVIDERS.get(req.provider.lower(), {}).get("is_local", False)
-634 |     if not api_key and not is_local:
-635 |         raise HTTPException(status_code=400, detail="API key required.")
-636 | 
-637 |     model = req.model or PROVIDERS.get(req.provider.lower(), {}).get("default_model")
-638 | 
-639 |     system_prompt = (
-640 |         "You are a concise therapeutic coach. Given the simulation text and problem below, "
-641 |         "output EXACTLY a JSON array of 3 strings. Each string is a specific, actionable step "
-642 |         "written in second person (\"You could...\", \"Try...\", \"Next time...\"). "
-643 |         "Each string must be under 25 words. Do NOT output generic advice. Be behavioral and specific. "
-644 |         "Output raw JSON only, no markdown fences. Example: "
-645 |         '["Try stating one boundary out loud before the next family call.", '
-646 |         '"Write down one thing you felt but did not say, then say it to a mirror.", '
-647 |         '"Ask directly for what you need rather than waiting for others to notice."]'
-648 |     )
-649 | 
-650 |     user_prompt = (
-651 |         f"Problem: {req.problem_text}\n\n"
-652 |         f"Simulation transcript:\n{req.simulation_text[:6000]}"
-653 |     )
-654 | 
-655 |     try:
-656 |         response = await call_provider(
-657 |             provider=req.provider,
-658 |             model=model,
-659 |             api_key=api_key,
-660 |             messages=[{"role": "user", "content": user_prompt}],
-661 |             system_prompt=system_prompt,
-662 |             temperature=0.5,
-663 |             timeout=15.0,
-664 |             api_keys=req.api_keys,
-665 |             base_url=req.base_url
-666 |         )
-667 |         takeaways = extract_json_from_text(response)
-668 |         if isinstance(takeaways, list) and len(takeaways) >= 1:
-669 |             result = [str(t) for t in takeaways[:3]]
-670 |             while len(result) < 3:
-671 |                 result.append("Reflect on what you truly need from this relationship.")
-672 |             return {"takeaways": result}
-673 |     except Exception as e:
-674 |         print(f"[EchoHouse Takeaways Error] {e}")
-675 | 
-676 |     return {"takeaways": [
-677 |         "Notice one moment this week where you held back, and speak up instead.",
-678 |         "Write down what you wish the other person understood about your perspective.",
-679 |         "Before the next difficult interaction, state your need clearly to yourself first."
-680 |     ]}
-681 | 
-682 | 
-683 | @app.get("/ollama/models")
-684 | async def get_ollama_models():
-685 |     url = "http://localhost:11434/api/tags"
-686 |     try:
-687 |         async with httpx.AsyncClient(timeout=5.0) as client:
-688 |             resp = await client.get(url)
-689 |             if resp.status_code == 200:
-690 |                 data = resp.json()
-691 |                 raw_models = data.get("models", [])
-692 |                 models = []
-693 |                 for m in raw_models:
-694 |                     name = m.get("name")
-695 |                     if name:
-696 |                         models.append({
-697 |                             "id": name,
-698 |                             "name": name,
-699 |                             "tier": "local"
-700 |                         })
-701 |                 return {"models": models, "ollama_available": True}
-702 |     except Exception as e:
-703 |         print(f"[Ollama Check Failed] {e}")
-704 |     return {"models": [], "ollama_available": False}
-705 | 
-706 | 
-707 |
+425 | @app.post("/approve_tool")
+426 | async def approve_tool(req: ApprovalRequest):
+427 |     status = "approved" if req.action == "approve" else "denied"
+428 |     if req.logId:
+429 |         await update_tool_approval(req.sessionId, req.nodeId, req.toolName, req.logId, status)
+430 |     else:
+431 |         await update_tool_approval_wildcard(req.sessionId, req.nodeId, req.toolName, status)
+432 |     return {"status": "ok", "approval": status}
+433 | 
+434 | 
+435 | # ─── Session Management ───────────────────────────────────────────────
+436 | 
+437 | @app.get("/sessions")
+438 | async def get_sessions():
+439 |     sessions = await load_sessions()
+440 |     result = []
+441 |     for s in sessions:
+442 |         result.append({
+443 |             "session_id": s["session_id"],
+444 |             "title": s["title"],
+445 |             "prompt": s["prompt"],
+446 |             "mode": s.get("mode", "auto"),
+447 |             "execution_state": s.get("execution_state", "setup"),
+448 |             "status_message": s.get("status_message", ""),
+449 |         })
+450 |     return result
+451 | 
+452 | 
+453 | @app.get("/sessions/{session_id}")
+454 | async def get_session(session_id: str):
+455 |     session = await load_session(session_id)
+456 |     if not session:
+457 |         raise HTTPException(status_code=404, detail="Session not found")
+458 |     return {
+459 |         "id": session["session_id"],
+460 |         "title": session["title"],
+461 |         "prompt": session["prompt"],
+462 |         "mode": session.get("mode", "auto"),
+463 |         "nodes": session.get("nodes", []),
+464 |         "edges": session.get("edges", []),
+465 |         "chatMessages": session.get("chat_messages", []),
+466 |         "agentTalkLogs": session.get("agent_talk_logs", []),
+467 |         "executionState": session.get("execution_state", "setup"),
+468 |         "statusMessage": session.get("status_message", ""),
+469 |         "followUpSuggestions": session.get("follow_up_suggestions", []),
+470 |     }
+471 | 
+472 | 
+473 | @app.delete("/sessions/{session_id}")
+474 | async def delete_session_route(session_id: str):
+475 |     await delete_session(session_id)
+476 |     return {"status": "deleted"}
+477 | 
+478 | 
+479 | @app.post("/sessions/save")
+480 | async def save_session_route(req: SaveSessionRequest):
+481 |     await save_session(
+482 |         session_id=req.session_id,
+483 |         title=req.title,
+484 |         prompt=req.prompt,
+485 |         mode=req.mode,
+486 |         nodes=req.nodes,
+487 |         edges=req.edges,
+488 |         chat_messages=req.chat_messages,
+489 |         agent_talk_logs=req.agent_talk_logs,
+490 |         execution_state=req.execution_state,
+491 |         status_message=req.status_message,
+492 |         follow_up_suggestions=req.follow_up_suggestions,
+493 |     )
+494 |     return {"status": "saved"}
+495 | 
+496 | 
+497 | class TestAgentRequest(BaseModel):
+498 |     node: Dict[str, Any]
+499 |     provider: str
+500 |     api_key: Optional[str] = None
+501 |     api_keys: Optional[Dict[str, str]] = None
+502 |     base_url: Optional[str] = None
+503 |     backup_api_keys: Optional[List[str]] = None
+504 | 
+505 | 
+506 | @app.post("/test_agent")
+507 | async def test_agent_route(req: TestAgentRequest):
+508 |     """
+509 |     Test execution of a single agent node.
+510 |     Runs a simple prompt and verifies the LLM connection and system prompt.
+511 |     """
+512 |     from providers import get_provider_config, call_provider
+513 |     provider_config = get_provider_config(req.provider)
+514 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
+515 |     if not api_key and not provider_config.get("is_local", False):
+516 |         raise HTTPException(status_code=400, detail="API Key required.")
+517 | 
+518 |     test_prompt = "Hello! Output a short 3-word test greeting."
+519 |     node = req.node
+520 |     try:
+521 |         response = await call_provider(
+522 |             provider=req.provider,
+523 |             model=req.node.get("data", {}).get("model") or provider_config.get("default_model", "llama3"),
+524 |             api_key=api_key,
+525 |             messages=[{"role": "user", "content": test_prompt}],
+526 |             system_prompt=node.get("data", {}).get("systemPrompt", "You are a test agent."),
+527 |             temperature=0.7,
+528 |             timeout=10.0,
+529 |             api_keys=req.api_keys,
+530 |             base_url=req.base_url,
+531 |             backup_api_keys=req.backup_api_keys,
+532 |         )
+533 |         return {"status": "success", "response": response}
+534 |     except Exception as e:
+535 |         return {"status": "error", "detail": str(e)}
+536 | 
+537 | 
+538 | @app.post("/echohouse/init")
+539 | async def echohouse_init(req: EchoHouseInitRequest):
+540 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
+541 |     from providers import PROVIDERS, call_provider, extract_json_from_text
+542 |     is_local = PROVIDERS.get(req.provider.lower(), {}).get("is_local", False)
+543 |     if not api_key and not is_local:
+544 |         raise HTTPException(status_code=400, detail="API key required for initialization.")
+545 |         
+546 |     model = req.model or PROVIDERS.get(req.provider.lower(), {}).get("default_model")
+547 |     
+548 |     system_prompt = (
+549 |         "You are a professional relationship counselor and social dynamics simulator.\n"
+550 |         "Given the user's life problem, infer 2-4 key people in their life who are likely involved in or affect this situation (e.g., family, friends, colleagues, partners, or their own internal self).\n"
+551 |         "Always include one cast member representing the user themselves. For the user themselves, set is_self to true, and role to \"self\".\n\n"
+552 |         "Output JSON format ONLY. Do NOT enclose in markdown formatting, just raw JSON list.\n"
+553 |         "Each item in the list must have:\n"
+554 |         "- inferred_name (string): Name of the person (e.g. \"You (Self)\", \"Sarah\", \"Dad\")\n"
+555 |         "- role (string): Their relation/role (e.g. \"self\", \"friend\", \"father\")\n"
+556 |         "- inferred_problem (string): What this person likely thinks/feels about the situation (their perspective)\n"
+557 |         "- emotional_core (string): One sentence describing the deepest emotional need or fear driving this person's behavior. Example: \"Needs to feel respected and not dismissed.\"\n"
+558 |         "- is_self (boolean): True if it represents the user, False otherwise.\n\n"
+559 |         "Example JSON output:\n"
+560 |         "[\n"
+561 |         "  {\"inferred_name\": \"You (Self)\", \"role\": \"self\", \"inferred_problem\": \"I feel stuck and overwhelmed.\", \"emotional_core\": \"Needs to feel heard and understood.\", \"is_self\": true},\n"
+562 |         "  {\"inferred_name\": \"Mom\", \"role\": \"mother\", \"inferred_problem\": \"She thinks I'm not trying hard enough.\", \"emotional_core\": \"Fears losing connection with her child.\", \"is_self\": false}\n"
+563 |         "]"
+564 |     )
+565 |     
+566 |     user_prompt = f"User's life problem: \"{req.problem_text}\""
+567 |     
+568 |     try:
+569 |         response = await call_provider(
+570 |             provider=req.provider,
+571 |             model=model,
+572 |             api_key=api_key,
+573 |             messages=[{"role": "user", "content": user_prompt}],
+574 |             system_prompt=system_prompt,
+575 |             temperature=0.7,
+576 |             timeout=15.0,
+577 |             api_keys=req.api_keys,
+578 |             base_url=req.base_url,
+579 |             backup_api_keys=req.backup_api_keys,
+580 |         )
+581 |         cast = extract_json_from_text(response)
+582 |         if isinstance(cast, list) and len(cast) > 0:
+583 |             validated_cast = []
+584 |             for item in cast:
+585 |                 if isinstance(item, dict) and "inferred_name" in item and "role" in item:
+586 |                     validated_cast.append({
+587 |                         "inferred_name": str(item["inferred_name"]),
+588 |                         "role": str(item["role"]),
+589 |                         "inferred_problem": str(item.get("inferred_problem", "")),
+590 |                         "emotional_core": str(item.get("emotional_core", "")),
+591 |                         "is_self": bool(item.get("is_self", False))
+592 |                     })
+593 |             if validated_cast:
+594 |                 return validated_cast
+595 |     except Exception as e:
+596 |         print(f"[EchoHouse Init Error] {e}")
+597 |         
+598 |     return [
+599 |         {
+600 |             "inferred_name": "You (Self)",
+601 |             "role": "self",
+602 |             "inferred_problem": req.problem_text,
+603 |             "is_self": True
+604 |         },
+605 |         {
+606 |             "inferred_name": "Friend",
+607 |             "role": "friend",
+608 |             "inferred_problem": "They are concerned about you but might not know how to help.",
+609 |             "is_self": False
+610 |         }
+611 |     ]
+612 | 
+613 | 
+614 | @app.post("/echohouse/simulate")
+615 | async def echohouse_simulate(req: EchoHouseSimulateRequest):
+616 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
+617 |     from core.echohouse import run_echohouse_simulation
+618 |     from providers import PROVIDERS
+619 |     is_local = PROVIDERS.get(req.provider.lower(), {}).get("is_local", False)
+620 |     if not api_key and not is_local:
+621 |         raise HTTPException(status_code=400, detail="API key required for simulation.")
+622 |         
+623 |     model = req.model or PROVIDERS.get(req.provider.lower(), {}).get("default_model")
+624 |     
+625 |     return StreamingResponse(
+626 |         run_echohouse_simulation(
+627 |             session_id=req.session_id,
+628 |             problem_text=req.problem_text,
+629 |             cast=req.cast,
+630 |             provider=req.provider,
+631 |             model=model,
+632 |             api_key=api_key,
+633 |             api_keys=req.api_keys,
+634 |             base_url=req.base_url,
+635 |             rounds=req.rounds,
+636 |             tone=req.tone,
+637 |             backup_api_keys=req.backup_api_keys,
+638 |         ),
+639 |         media_type="text/event-stream"
+640 |     )
+641 | 
+642 | 
+643 | @app.post("/echohouse/takeaways")
+644 | async def echohouse_takeaways(req: EchoHouseTakeawaysRequest):
+645 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
+646 |     from providers import PROVIDERS, call_provider, extract_json_from_text
+647 |     is_local = PROVIDERS.get(req.provider.lower(), {}).get("is_local", False)
+648 |     if not api_key and not is_local:
+649 |         raise HTTPException(status_code=400, detail="API key required.")
+650 | 
+651 |     model = req.model or PROVIDERS.get(req.provider.lower(), {}).get("default_model")
+652 | 
+653 |     system_prompt = (
+654 |         "You are a concise therapeutic coach. Given the simulation text and problem below, "
+655 |         "output EXACTLY a JSON array of 3 strings. Each string is a specific, actionable step "
+656 |         "written in second person (\"You could...\", \"Try...\", \"Next time...\"). "
+657 |         "Each string must be under 25 words. Do NOT output generic advice. Be behavioral and specific. "
+658 |         "Output raw JSON only, no markdown fences. Example: "
+659 |         '["Try stating one boundary out loud before the next family call.", '
+660 |         '"Write down one thing you felt but did not say, then say it to a mirror.", '
+661 |         '"Ask directly for what you need rather than waiting for others to notice."]'
+662 |     )
+663 | 
+664 |     user_prompt = (
+665 |         f"Problem: {req.problem_text}\n\n"
+666 |         f"Simulation transcript:\n{req.simulation_text[:6000]}"
+667 |     )
+668 | 
+669 |     try:
+670 |         response = await call_provider(
+671 |             provider=req.provider,
+672 |             model=model,
+673 |             api_key=api_key,
+674 |             messages=[{"role": "user", "content": user_prompt}],
+675 |             system_prompt=system_prompt,
+676 |             temperature=0.5,
+677 |             timeout=15.0,
+678 |             api_keys=req.api_keys,
+679 |             base_url=req.base_url,
+680 |             backup_api_keys=req.backup_api_keys,
+681 |         )
+682 |         takeaways = extract_json_from_text(response)
+683 |         if isinstance(takeaways, list) and len(takeaways) >= 1:
+684 |             result = [str(t) for t in takeaways[:3]]
+685 |             while len(result) < 3:
+686 |                 result.append("Reflect on what you truly need from this relationship.")
+687 |             return {"takeaways": result}
+688 |     except Exception as e:
+689 |         print(f"[EchoHouse Takeaways Error] {e}")
+690 | 
+691 |     return {"takeaways": [
+692 |         "Notice one moment this week where you held back, and speak up instead.",
+693 |         "Write down what you wish the other person understood about your perspective.",
+694 |         "Before the next difficult interaction, state your need clearly to yourself first."
+695 |     ]}
+696 | 
+697 | 
+698 | @app.get("/ollama/models")
+699 | async def get_ollama_models():
+700 |     url = "http://localhost:11434/api/tags"
+701 |     try:
+702 |         async with httpx.AsyncClient(timeout=5.0) as client:
+703 |             resp = await client.get(url)
+704 |             if resp.status_code == 200:
+705 |                 data = resp.json()
+706 |                 raw_models = data.get("models", [])
+707 |                 models = []
+708 |                 for m in raw_models:
+709 |                     name = m.get("name")
+710 |                     if name:
+711 |                         models.append({
+712 |                             "id": name,
+713 |                             "name": name,
+714 |                             "tier": "local"
+715 |                         })
+716 |                 return {"models": models, "ollama_available": True}
+717 |     except Exception as e:
+718 |         print(f"[Ollama Check Failed] {e}")
+719 |     return {"models": [], "ollama_available": False}
+720 | 
+721 | 
+722 |
 ```
 
 ### File: `Backend/requirements.txt`
@@ -5648,7 +5761,7 @@ SoloSpace/
 
 ### File: `Frontend/app/page.tsx`
 
-> 979 lines | 61.2 KB
+> 975 lines | 61.0 KB
 
 ```tsx
   1 | 'use client';
@@ -5832,804 +5945,800 @@ SoloSpace/
 179 |           model: useWorkflowStore.getState().model,
 180 |           api_key: apiKey,
 181 |           api_keys: useWorkflowStore.getState().apiKeys,
-182 |           base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null
-183 |         })
-184 |       });
-185 |       if (resp.ok) {
-186 |         const castData = await resp.json();
-187 |         if (Array.isArray(castData)) {
-188 |           setEchoCast(castData);
-189 |         }
-190 |       }
-191 |     } catch (e) {
-192 |       console.error("Failed to fetch cast:", e);
-193 |     } finally {
-194 |       setIsLoadingCast(false);
-195 |     }
-196 |   };
-197 | 
-198 |   const beginEchoHouseSimulation = () => {
-199 |     const selfMember = echoCast.find(m => m.is_self || m.role === "self");
-200 |     const selfNode = {
-201 |       id: "self-node",
-202 |       type: "custom",
-203 |       position: { x: 300, y: 200 },
-204 |       data: {
-205 |         name: selfMember?.inferred_name || "You (Self)",
-206 |         tag: "SELF",
-207 |         icon: "bot",
-208 |         objective: echoSituation.length > 120 ? echoSituation.substring(0, 120) + "..." : echoSituation,
-209 |         systemPrompt: "You are the user themselves, experiencing this problem from the inside.",
-210 |         status: "IDLE" as const,
-211 |         enabled: true,
-212 |         isEchoHouseAgent: true,
-213 |         echohouseRole: "self",
-214 |         echohouseProblem: echoSituation,
-215 |         emotional_core: selfMember?.emotional_core || "",
-216 |         rules: [],
-217 |         dependencies: [],
-218 |         tools: [],
-219 |         toolPermissions: {},
-220 |         temp: 0.7,
-221 |         logic: 70,
-222 |         empathy: 50,
-223 |         priority: 5,
-224 |         toolLogs: [],
-225 |         personality: "",
-226 |         senderId: "self-node"
-227 |       }
-228 |     };
-229 |     const nodesList: any[] = [selfNode];
-230 |     echoCast.forEach((member: any, idx: number) => {
-231 |       if (member.is_self || member.role === "self") return;
-232 |       const angle = (idx * 2 * Math.PI) / Math.max(echoCast.length - 1, 1);
-233 |       const x = 300 + Math.cos(angle) * 250;
-234 |       const y = 200 + Math.sin(angle) * 200;
-235 |       nodesList.push({
-236 |         id: `echo-agent-${idx}-${Date.now()}`,
-237 |         type: "custom",
-238 |         position: { x: Math.max(50, x), y: Math.max(50, y) },
-239 |         data: {
-240 |           name: member.inferred_name,
-241 |           tag: member.role.toUpperCase().replace(/\s+/g, "_"),
-242 |           icon: "science",
-243 |           objective: `Provide perspective as ${member.inferred_name} (${member.role}).`,
-244 |           systemPrompt: `You are ${member.inferred_name}, whose role in the user's life is ${member.role}. From your perspective about their situation: ${member.inferred_problem}`,
-245 |           status: "IDLE" as const,
-246 |           enabled: true,
-247 |           isEchoHouseAgent: true,
-248 |           echohouseRole: member.role,
-249 |           echohouseProblem: member.inferred_problem,
-250 |           emotional_core: member.emotional_core || "",
-251 |           rules: [],
-252 |           dependencies: [],
-253 |           tools: [],
-254 |           toolPermissions: {},
-255 |           temp: 0.8,
-256 |           logic: 70,
-257 |           empathy: 50,
-258 |           priority: 5,
-259 |           toolLogs: [],
-260 |           personality: "",
-261 |           senderId: `echo-agent-${idx}-${Date.now()}`
-262 |         }
-263 |       });
-264 |     });
-265 |     setNodes(nodesList);
-266 |     setEdges([]);
-267 |     setWorkspaceState("active");
-268 |     setCurrentTab("arena");
-269 |   };
-270 | 
-271 |   const startOrchestration = async (promptText: string) => {
-272 |     if (!promptText.trim()) return;
-273 | 
-274 |     if (isEchoHouseMode) {
-275 |       const userMsgId = Date.now().toString();
-276 |       const userMsg: ChatMessage = {
-277 |         id: userMsgId,
-278 |         sender: "user",
-279 |         text: promptText,
-280 |         speakerName: "You (Self)",
-281 |         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-282 |       };
-283 |       setChatMessages((prev) => [...prev, userMsg]);
-284 |       setUserQuery("");
-285 |       setCurrentTab("arena");
-286 | 
-287 |       const selfNode = {
-288 |         id: "self-node",
-289 |         type: "custom",
-290 |         position: { x: 300, y: 200 },
-291 |         data: {
-292 |           name: "You (Self)",
-293 |           tag: "SELF",
-294 |           icon: "bot",
-295 |           objective: promptText.length > 120 ? promptText.substring(0, 120) + "..." : promptText,
-296 |           systemPrompt: "You are the user themselves, experiencing this problem from the inside.",
-297 |           status: "IDLE" as const,
-298 |           enabled: true,
-299 |           isEchoHouseAgent: true,
-300 |           echohouseRole: "self",
-301 |           echohouseProblem: promptText,
-302 |           rules: [],
-303 |           dependencies: [],
-304 |           tools: [],
-305 |           toolPermissions: {},
-306 |           temp: 0.7,
-307 |           logic: 70,
-308 |           empathy: 50,
-309 |           priority: 5,
-310 |           toolLogs: [],
-311 |           personality: "",
-312 |           senderId: "self-node"
-313 |         }
-314 |       };
-315 |       setNodes([selfNode]);
-316 |       setEdges([]);
-317 | 
-318 |       try {
-319 |         const activeProv = useWorkflowStore.getState().provider;
-320 |         const apiKey = useWorkflowStore.getState().apiKeys[activeProv] || useWorkflowStore.getState().apiKey || "";
-321 |         const resp = await fetch("/api/gemini/echohouse/init", {
-322 |           method: "POST",
-323 |           headers: { "Content-Type": "application/json" },
-324 |           body: JSON.stringify({
-325 |             problem_text: promptText,
-326 |             provider: activeProv,
-327 |             model: useWorkflowStore.getState().model,
-328 |             api_key: apiKey,
-329 |             api_keys: useWorkflowStore.getState().apiKeys,
-330 |             base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null
-331 |           })
-332 |         });
-333 |         if (resp.ok) {
-334 |           const suggestedCast = await resp.json();
-335 |           const nodesList = [selfNode];
-336 |           suggestedCast.forEach((member: any, idx: number) => {
-337 |             if (member.is_self || member.role === "self") return;
-338 |             
-339 |             const angle = (idx * 2 * Math.PI) / (suggestedCast.length - 1 || 1);
-340 |             const x = 300 + Math.cos(angle) * 250;
-341 |             const y = 200 + Math.sin(angle) * 200;
-342 |             
-343 |             nodesList.push({
-344 |               id: `echo-agent-${idx}-${Date.now()}`,
-345 |               type: "custom",
-346 |               position: { x: Math.max(50, x), y: Math.max(50, y) },
-347 |               data: {
-348 |                 name: member.inferred_name,
-349 |                 tag: member.role.toUpperCase().replace(/\s+/g, "_"),
-350 |                 icon: "science",
-351 |                 objective: `Provide perspective as ${member.inferred_name} (${member.role}).`,
-352 |                 systemPrompt: `You are ${member.inferred_name}, whose role in the user's life is ${member.role}. From your perspective about their situation: ${member.inferred_problem}`,
-353 |                 status: "IDLE" as const,
-354 |                 enabled: true,
-355 |                 isEchoHouseAgent: true,
-356 |                 echohouseRole: member.role,
-357 |                 echohouseProblem: member.inferred_problem,
-358 |                 rules: [],
-359 |                 dependencies: [],
-360 |                 tools: [],
-361 |                 toolPermissions: {},
-362 |                 temp: 0.8,
-363 |                 logic: 70,
-364 |                 empathy: 50,
-365 |                 priority: 5,
-366 |                 toolLogs: [],
-367 |                 personality: "",
-368 |                 senderId: `echo-agent-${idx}-${Date.now()}`
-369 |               }
-370 |             });
-371 |           });
-372 |           setNodes(nodesList);
-373 |         }
-374 |       } catch (e) {
-375 |         console.error("Failed to suggest cast:", e);
-376 |       }
-377 |       return;
-378 |     }
-379 | 
-380 |     setWorkspaceState("active");
-381 |     let sessionId = activeSessionId;
-382 |     if (!sessionId) sessionId = createSession(promptText, executionMode);
-383 |     setExecutionState("running");
-384 |     if (executionMode === "custom") {
-385 |       setCurrentTab("arena");
-386 |       triggerSteerOrchestration(promptText, false, "custom");
-387 |       // executionState will be set to "paused" by the store after the plan arrives
-388 |     } else {
-389 |       setCurrentTab("chat");
-390 |       triggerSteerOrchestration(promptText, true, "auto");
-391 |     }
-392 |     setUserQuery("");
-393 |   };
-394 | 
-395 |   const handleRegenerate = () => {
-396 |     const lastAIIdx = chatMessages.findLastIndex(m => m.sender === "ai");
-397 |     if (lastAIIdx === -1) return;
-398 |     
-399 |     const lastUserMsg = chatMessages.slice(0, lastAIIdx).findLast(m => m.sender === "user");
-400 |     if (!lastUserMsg) return;
-401 | 
-402 |     setChatMessages((prev) => prev.slice(0, lastAIIdx));
-403 |     startOrchestration(lastUserMsg.text);
-404 |   };
-405 | 
-406 |   const handleAddRule = () => {
-407 |     if (!newRuleText.trim() || !selectedNodeId) return;
-408 |     addRule(selectedNodeId, newRuleText.trim());
-409 |     setNewRuleText("");
-410 |   };
-411 | 
-412 |   const activeNodeDetail = nodes.find(n => n.id === selectedNodeId) as any;
+182 |           base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null,
+183 |           backup_api_keys: useWorkflowStore.getState().backupApiKeys[activeProv] || []
+184 |         })
+185 |       });
+186 |       if (resp.ok) {
+187 |         const castData = await resp.json();
+188 |         if (Array.isArray(castData)) {
+189 |           setEchoCast(castData);
+190 |         }
+191 |       }
+192 |     } catch (e) {
+193 |       console.error("Failed to fetch cast:", e);
+194 |     } finally {
+195 |       setIsLoadingCast(false);
+196 |     }
+197 |   };
+198 | 
+199 |   const beginEchoHouseSimulation = () => {
+200 |     const selfMember = echoCast.find(m => m.is_self || m.role === "self");
+201 |     const selfNode = {
+202 |       id: "self-node",
+203 |       type: "custom",
+204 |       position: { x: 300, y: 200 },
+205 |       data: {
+206 |         name: selfMember?.inferred_name || "You (Self)",
+207 |         tag: "SELF",
+208 |         icon: "bot",
+209 |         objective: echoSituation.length > 120 ? echoSituation.substring(0, 120) + "..." : echoSituation,
+210 |         systemPrompt: "You are the user themselves, experiencing this problem from the inside.",
+211 |         status: "IDLE" as const,
+212 |         enabled: true,
+213 |         isEchoHouseAgent: true,
+214 |         echohouseRole: "self",
+215 |         echohouseProblem: echoSituation,
+216 |         emotional_core: selfMember?.emotional_core || "",
+217 |         rules: [],
+218 |         dependencies: [],
+219 |         tools: [],
+220 |         toolPermissions: {},
+221 |         temp: 0.7,
+222 |         logic: 70,
+223 |         empathy: 50,
+224 |         priority: 5,
+225 |         toolLogs: [],
+226 |         personality: "",
+227 |         senderId: "self-node"
+228 |       }
+229 |     };
+230 |     const nodesList: any[] = [selfNode];
+231 |     echoCast.forEach((member: any, idx: number) => {
+232 |       if (member.is_self || member.role === "self") return;
+233 |       const angle = (idx * 2 * Math.PI) / Math.max(echoCast.length - 1, 1);
+234 |       const x = 300 + Math.cos(angle) * 250;
+235 |       const y = 200 + Math.sin(angle) * 200;
+236 |       nodesList.push({
+237 |         id: `echo-agent-${idx}-${Date.now()}`,
+238 |         type: "custom",
+239 |         position: { x: Math.max(50, x), y: Math.max(50, y) },
+240 |         data: {
+241 |           name: member.inferred_name,
+242 |           tag: member.role.toUpperCase().replace(/\s+/g, "_"),
+243 |           icon: "science",
+244 |           objective: `Provide perspective as ${member.inferred_name} (${member.role}).`,
+245 |           systemPrompt: `You are ${member.inferred_name}, whose role in the user's life is ${member.role}. From your perspective about their situation: ${member.inferred_problem}`,
+246 |           status: "IDLE" as const,
+247 |           enabled: true,
+248 |           isEchoHouseAgent: true,
+249 |           echohouseRole: member.role,
+250 |           echohouseProblem: member.inferred_problem,
+251 |           emotional_core: member.emotional_core || "",
+252 |           rules: [],
+253 |           dependencies: [],
+254 |           tools: [],
+255 |           toolPermissions: {},
+256 |           temp: 0.8,
+257 |           logic: 70,
+258 |           empathy: 50,
+259 |           priority: 5,
+260 |           toolLogs: [],
+261 |           personality: "",
+262 |           senderId: `echo-agent-${idx}-${Date.now()}`
+263 |         }
+264 |       });
+265 |     });
+266 |     setNodes(nodesList);
+267 |     setEdges([]);
+268 |     setWorkspaceState("active");
+269 |     setCurrentTab("arena");
+270 |   };
+271 | 
+272 |   const startOrchestration = async (promptText: string) => {
+273 |     if (!promptText.trim()) return;
+274 | 
+275 |     if (isEchoHouseMode) {
+276 |       const userMsgId = Date.now().toString();
+277 |       const userMsg: ChatMessage = {
+278 |         id: userMsgId,
+279 |         sender: "user",
+280 |         text: promptText,
+281 |         speakerName: "You (Self)",
+282 |         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+283 |       };
+284 |       setChatMessages((prev) => [...prev, userMsg]);
+285 |       setUserQuery("");
+286 |       setCurrentTab("arena");
+287 | 
+288 |       const selfNode = {
+289 |         id: "self-node",
+290 |         type: "custom",
+291 |         position: { x: 300, y: 200 },
+292 |         data: {
+293 |           name: "You (Self)",
+294 |           tag: "SELF",
+295 |           icon: "bot",
+296 |           objective: promptText.length > 120 ? promptText.substring(0, 120) + "..." : promptText,
+297 |           systemPrompt: "You are the user themselves, experiencing this problem from the inside.",
+298 |           status: "IDLE" as const,
+299 |           enabled: true,
+300 |           isEchoHouseAgent: true,
+301 |           echohouseRole: "self",
+302 |           echohouseProblem: promptText,
+303 |           rules: [],
+304 |           dependencies: [],
+305 |           tools: [],
+306 |           toolPermissions: {},
+307 |           temp: 0.7,
+308 |           logic: 70,
+309 |           empathy: 50,
+310 |           priority: 5,
+311 |           toolLogs: [],
+312 |           personality: "",
+313 |           senderId: "self-node"
+314 |         }
+315 |       };
+316 |       setNodes([selfNode]);
+317 |       setEdges([]);
+318 | 
+319 |       try {
+320 |         const activeProv = useWorkflowStore.getState().provider;
+321 |         const apiKey = useWorkflowStore.getState().apiKeys[activeProv] || useWorkflowStore.getState().apiKey || "";
+322 |         const resp = await fetch("/api/gemini/echohouse/init", {
+323 |           method: "POST",
+324 |           headers: { "Content-Type": "application/json" },
+325 |           body: JSON.stringify({
+326 |             problem_text: promptText,
+327 |             provider: activeProv,
+328 |             model: useWorkflowStore.getState().model,
+329 |             api_key: apiKey,
+330 |             api_keys: useWorkflowStore.getState().apiKeys,
+331 |             base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null,
+332 |             backup_api_keys: useWorkflowStore.getState().backupApiKeys[activeProv] || []
+333 |           })
+334 |         });
+335 |         if (resp.ok) {
+336 |           const suggestedCast = await resp.json();
+337 |           const nodesList = [selfNode];
+338 |           suggestedCast.forEach((member: any, idx: number) => {
+339 |             if (member.is_self || member.role === "self") return;
+340 |             
+341 |             const angle = (idx * 2 * Math.PI) / (suggestedCast.length - 1 || 1);
+342 |             const x = 300 + Math.cos(angle) * 250;
+343 |             const y = 200 + Math.sin(angle) * 200;
+344 |             
+345 |             nodesList.push({
+346 |               id: `echo-agent-${idx}-${Date.now()}`,
+347 |               type: "custom",
+348 |               position: { x: Math.max(50, x), y: Math.max(50, y) },
+349 |               data: {
+350 |                 name: member.inferred_name,
+351 |                 tag: member.role.toUpperCase().replace(/\s+/g, "_"),
+352 |                 icon: "science",
+353 |                 objective: `Provide perspective as ${member.inferred_name} (${member.role}).`,
+354 |                 systemPrompt: `You are ${member.inferred_name}, whose role in the user's life is ${member.role}. From your perspective about their situation: ${member.inferred_problem}`,
+355 |                 status: "IDLE" as const,
+356 |                 enabled: true,
+357 |                 isEchoHouseAgent: true,
+358 |                 echohouseRole: member.role,
+359 |                 echohouseProblem: member.inferred_problem,
+360 |                 rules: [],
+361 |                 dependencies: [],
+362 |                 tools: [],
+363 |                 toolPermissions: {},
+364 |                 temp: 0.8,
+365 |                 logic: 70,
+366 |                 empathy: 50,
+367 |                 priority: 5,
+368 |                 toolLogs: [],
+369 |                 personality: "",
+370 |                 senderId: `echo-agent-${idx}-${Date.now()}`
+371 |               }
+372 |             });
+373 |           });
+374 |           setNodes(nodesList);
+375 |         }
+376 |       } catch (e) {
+377 |         console.error("Failed to suggest cast:", e);
+378 |       }
+379 |       return;
+380 |     }
+381 | 
+382 |     setWorkspaceState("active");
+383 |     let sessionId = activeSessionId;
+384 |     if (!sessionId) sessionId = createSession(promptText, executionMode);
+385 |     setExecutionState("running");
+386 |     if (executionMode === "custom") {
+387 |       setCurrentTab("arena");
+388 |       triggerSteerOrchestration(promptText, false, "custom");
+389 |       // executionState will be set to "paused" by the store after the plan arrives
+390 |     } else {
+391 |       setCurrentTab("chat");
+392 |       triggerSteerOrchestration(promptText, true, "auto");
+393 |     }
+394 |     setUserQuery("");
+395 |   };
+396 | 
+397 |   const handleRegenerate = () => {
+398 |     const lastAIIdx = chatMessages.findLastIndex(m => m.sender === "ai");
+399 |     if (lastAIIdx === -1) return;
+400 |     
+401 |     const lastUserMsg = chatMessages.slice(0, lastAIIdx).findLast(m => m.sender === "user");
+402 |     if (!lastUserMsg) return;
+403 | 
+404 |     setChatMessages((prev) => prev.slice(0, lastAIIdx));
+405 |     startOrchestration(lastUserMsg.text);
+406 |   };
+407 | 
+408 |   const handleAddRule = () => {
+409 |     if (!newRuleText.trim() || !selectedNodeId) return;
+410 |     addRule(selectedNodeId, newRuleText.trim());
+411 |     setNewRuleText("");
+412 |   };
 413 | 
-414 |   const ModeSelector = () => (
-415 |     <div className="flex items-center gap-1 bg-neutral-900/40 rounded-full p-0.5 border border-[#1f1f1f]">
-416 |       <button onClick={() => setExecutionMode("auto")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "auto" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Smart</button>
-417 |       <button onClick={() => setExecutionMode("custom")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "custom" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Custom</button>
-418 |     </div>
-419 |   );
-420 | 
-421 |   const handleFileAttach = () => {
-422 |     const input = document.createElement("input");
-423 |     input.type = "file";
-424 |     input.accept = ".txt,.md,.json,.csv,.py,.js,.ts,.tsx,.html,.css,.yaml,.yml,.xml,.ini,.cfg,.pdf,.jpg,.png";
-425 |     input.onchange = (e: any) => {
-426 |       const file = e.target.files?.[0];
-427 |       if (!file) return;
-428 |       const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-429 |       if (['.txt', '.md', '.json', '.csv', '.py', '.js', '.ts', '.tsx', '.html', '.css', '.yaml', '.yml', '.xml', '.ini', '.cfg'].includes(ext)) {
-430 |         const reader = new FileReader();
-431 |         reader.onload = (ev) => setUserQuery((prev) => prev + `\n[Attached: ${file.name}]\n${ev.target?.result as string}\n`);
-432 |         reader.readAsText(file);
-433 |       }
-434 |     };
-435 |     input.click();
-436 |   };
-437 | 
-438 |   return (
-439 |     <div className="flex h-screen w-full bg-black text-[#f5f5f5] overflow-hidden font-sans">
-440 |       <aside onClick={() => { if (!isSidebarExpanded) setIsSidebarExpanded(true); }} className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-30 select-none cursor-pointer ${isSidebarExpanded ? "w-64 cursor-default" : "w-[60px]"}`}>
-441 |         <div className="flex items-center gap-3 h-16 border-b border-[#1f1f1f] px-4 justify-between">
-442 |           {isSidebarExpanded ? (
-443 |             <div className="flex items-center gap-2.5">
-444 |               <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
-445 |               <h1 className="text-sm font-bold text-white tracking-tight leading-none">Solospace</h1>
-446 |             </div>
-447 |           ) : (
-448 |             <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center mx-auto"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
-449 |           )}
-450 |           {isSidebarExpanded && <button onClick={(e) => { e.stopPropagation(); setIsSidebarExpanded(false); }} className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>}
-451 |         </div>
-452 | 
-453 |         <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto custom-scrollbar">
-454 |           <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); useWorkflowStore.getState().abortController?.abort(); setWorkspaceState("home"); setUserQuery(""); useWorkflowStore.setState({ activeSessionId: null, nodes: [], edges: [], chatMessages: [], agentTalkLogs: [], executionState: "setup", statusMessage: "", isThinking: false, isOrchestrating: false, liveThoughts: "", pendingApproval: null, followUpSuggestions: [], abortController: null }); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
-455 |             <SquarePlus className="w-5 h-5 stroke-[1.8]" />
-456 |             {isSidebarExpanded && <span className="text-xs font-semibold">New Chat</span>}
-457 |           </button>
-458 | 
-459 |           <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsSecretOpen(true); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
-460 |             <Key className="w-5 h-5 stroke-[1.8]" />
-461 |             {isSidebarExpanded && <span className="text-xs font-semibold">API Keys</span>}
-462 |           </button>
-463 | 
-464 |           {/* Templates Section */}
-465 |           <div className="pt-2 select-none">
-466 |             {isSidebarExpanded ? (
-467 |               <>
-468 |                 <button
-469 |                   onClick={(e) => { e.stopPropagation(); setIsTemplatesExpanded(!isTemplatesExpanded); }}
-470 |                   className="w-full flex items-center justify-between px-3 py-1.5 text-neutral-600 hover:text-neutral-400 cursor-pointer"
-471 |                 >
-472 |                   <span className="text-[10px] font-bold uppercase tracking-widest font-mono">Templates</span>
-473 |                   <ChevronRight className={`w-3.5 h-3.5 transition-transform duration-200 ${isTemplatesExpanded ? "rotate-90" : ""}`} />
-474 |                 </button>
-475 |                 {isTemplatesExpanded && (
-476 |                   <button
-477 |                     onClick={(e) => {
-478 |                       e.stopPropagation();
-479 |                       createSession("EchoHouse Simulation", "echohouse");
-480 |                       setWorkspaceState("active");
-481 |                       setCurrentTab("chat");
-482 |                     }}
-483 |                     className="w-full flex items-center rounded-lg transition-all duration-150 py-2.5 px-3 gap-3 hover:bg-neutral-900 text-neutral-200 cursor-pointer"
-484 |                   >
-485 |                     <Globe className="w-5 h-5 stroke-[1.8]" />
-486 |                     <span className="text-xs font-semibold">EchoHouse</span>
-487 |                   </button>
-488 |                 )}
-489 |               </>
-490 |             ) : (
-491 |               <button
-492 |                 onClick={() => {
-493 |                   createSession("EchoHouse Simulation", "echohouse");
-494 |                   setWorkspaceState("active");
-495 |                   setCurrentTab("chat");
-496 |                 }}
-497 |                 className="w-full flex items-center justify-center rounded-lg transition-all duration-150 py-2.5 hover:bg-neutral-900 text-neutral-400 cursor-pointer"
-498 |                 title="EchoHouse Template"
-499 |               >
-500 |                 <Globe className="w-5 h-5 stroke-[1.8]" />
-501 |               </button>
-502 |             )}
-503 |           </div>
-504 | 
-505 |           {isSidebarExpanded && (
-506 |             <div className="pt-6 space-y-2 select-none">
-507 |               <div className="flex items-center gap-1.5 px-3"><History className="w-3.5 h-3.5 text-neutral-600" /><span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest font-mono">Recents</span></div>
-508 |               <div className="space-y-1 max-h-[220px] overflow-y-auto custom-scrollbar">
-509 |                 {Object.values(sessions).length === 0 ? <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span> : (
-510 |                   Object.values(sessions).reverse().map((s) => (
-511 |                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
-512 |                       <button disabled={isLoadingSession} onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsLoadingSession(true); try { await loadSessionFromDb(s.id); setWorkspaceState("active"); setCurrentTab("chat"); } catch (err) { console.error(err); } finally { setIsLoadingSession(false); } } }} className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${activeSessionId === s.id ? "text-white font-bold" : "text-neutral-500 hover:text-white"}`} title={s.prompt}>{s.title}</button>
-513 |                       <button onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); if (confirm(`Delete "${s.title}"?`)) await deleteSessionFromDb(s.id); } }} className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
-514 |                     </div>
-515 |                   ))
-516 |                 )}
-517 |               </div>
-518 |             </div>
-519 |           )}
-520 |         </nav>
-521 |       </aside>
-522 | 
-523 |       <main onClick={() => { if (isSidebarExpanded && window.innerWidth < 768) setIsSidebarExpanded(false); }} className="flex-1 flex flex-col min-w-0 bg-[#000000] relative transition-all duration-300">
-524 |         <header className="flex justify-between items-center w-full px-6 h-16 border-b border-[#141414] shrink-0 z-10 bg-black/85 backdrop-blur-md">
-525 |           <div className="flex items-center gap-2">
-526 |             {isConnected && activeSessionId && (
-527 |               <span className="flex items-center gap-1.5 text-[9px] font-mono text-emerald-400 bg-emerald-950/30 border border-emerald-500/20 px-2 py-0.5 rounded-full">
-528 |                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> LIVE SYNC
-529 |               </span>
-530 |             )}
-531 |           </div>
-532 |           <div className="flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-[2px] rounded-full select-none">
-533 |             <button onClick={() => { if (workspaceState !== "home") setCurrentTab("chat"); }} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${currentTab === "chat" || workspaceState === "home" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>Chat</button>
-534 |             {workspaceState === "active" && (
-535 |               <button onClick={() => setCurrentTab("arena")} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${currentTab === "arena" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>
-536 |                 <GitFork className="w-3 h-3" /> Flow {nodes.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse ml-0.5" />}
-537 |               </button>
-538 |             )}
-539 |           </div>
-540 |           <div className="flex items-center gap-2 select-none">
-541 |             <button onClick={() => alert("Solospace AI OS")} className="text-neutral-400 hover:text-white p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer"><HelpCircle className="w-4 h-4 stroke-[1.8]" /></button>
-542 |           </div>
-543 |         </header>
-544 | 
-545 |         <div className="flex-1 relative overflow-hidden">
-546 |           {workspaceState === "home" && !isEchoHouseMode && (
-547 |             <div className="absolute inset-0 flex flex-col justify-between overflow-y-auto custom-scrollbar">
-548 |               <div />
-549 |               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
-550 |                 <div className="text-center mb-10 space-y-2 select-none">
-551 |                   <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">What&apos;s on your mind?</h1>
-552 |                   <p className="text-sm text-neutral-400 font-sans">Ask anything. Get a real, complete answer instantly.</p>
-553 |                 </div>
-554 |                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
-555 |                   <div className="flex items-center gap-3">
-556 |                     <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
-557 |                     <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder="Describe your idea, problem, or question..." className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
-558 |                     <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim()} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
-559 |                   </div>
-560 |                 </div>
-561 |                 <div className="flex items-center gap-3 mt-5 select-none">
-562 |                   <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">Mode:</span>
-563 |                   <button onClick={() => setExecutionMode("auto")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "auto" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sparkles className="w-3 h-3 stroke-[2]" /><span>Smart Auto</span></button>
-564 |                   <button onClick={() => setExecutionMode("custom")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "custom" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sliders className="w-3 h-3" /><span>Custom Agent</span></button>
-565 |                 </div>
-566 |               </div>
-567 |               <div />
-568 |             </div>
-569 |           )}
-570 | 
-571 |           {workspaceState === "home" && isEchoHouseMode && (
-572 |             <div className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto custom-scrollbar px-6 py-12">
-573 |               <div className="w-full max-w-xl space-y-8">
-574 |                 {/* Step indicator */}
-575 |                 <div className="flex items-center gap-2 select-none">
-576 |                   {[1, 2, 3].map((s) => (
-577 |                     <div key={s} className="flex items-center gap-2">
-578 |                       <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-mono font-bold transition-all ${echoStep >= s ? 'bg-white text-black' : 'bg-neutral-800 text-neutral-500'}`}>{s}</div>
-579 |                       {s < 3 && <div className={`w-8 h-px transition-all ${echoStep > s ? 'bg-white' : 'bg-neutral-800'}`} />}
-580 |                     </div>
-581 |                   ))}
-582 |                   <span className="text-[10px] font-mono text-neutral-500 ml-2 uppercase tracking-wider">
-583 |                     {echoStep === 1 ? 'Situation' : echoStep === 2 ? 'Focus' : 'Cast Review'}
-584 |                   </span>
-585 |                 </div>
-586 | 
-587 |                 {/* Step 1 — Situation */}
-588 |                 {echoStep === 1 && (
-589 |                   <div className="space-y-4">
-590 |                     <div className="space-y-1">
-591 |                       <h1 className="text-2xl font-bold text-white tracking-tight">Describe the situation you are navigating.</h1>
-592 |                       <p className="text-xs text-neutral-500 font-sans">Write freely. This is private. The more specific, the more useful the simulation.</p>
-593 |                     </div>
-594 |                     <textarea
-595 |                       rows={6}
-596 |                       value={echoSituation}
-597 |                       onChange={(e) => setEchoSituation(e.target.value)}
-598 |                       placeholder="My manager keeps dismissing my ideas in meetings. Last week they took credit for a suggestion I made and..."
-599 |                       className="w-full bg-neutral-950 border border-[#1f1f1f] rounded-2xl p-4 text-sm text-neutral-200 outline-none placeholder:text-neutral-700 focus:border-neutral-600 resize-none leading-relaxed transition-colors custom-scrollbar"
-600 |                     />
-601 |                     <button
-602 |                       onClick={() => { if (echoSituation.trim()) setEchoStep(2); }}
-603 |                       disabled={!echoSituation.trim()}
-604 |                       className="w-full py-3 bg-white text-black font-semibold text-sm rounded-2xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
-605 |                     >
-606 |                       Continue
-607 |                     </button>
-608 |                   </div>
-609 |                 )}
-610 | 
-611 |                 {/* Step 2 — Focus */}
-612 |                 {echoStep === 2 && (
-613 |                   <div className="space-y-4">
-614 |                     <div className="space-y-1">
-615 |                       <h1 className="text-2xl font-bold text-white tracking-tight">What do you want from this simulation?</h1>
-616 |                       <p className="text-xs text-neutral-500 font-sans">Select the focus that best fits your goal.</p>
-617 |                     </div>
-618 |                     <div className="space-y-2">
-619 |                       {[
-620 |                         "Understand why this keeps happening",
-621 |                         "Prepare for a difficult conversation",
-622 |                         "Process feelings about a past event"
-623 |                       ].map((option) => (
-624 |                         <button
-625 |                           key={option}
-626 |                           onClick={() => setEchoFocus(option)}
-627 |                           className={`w-full text-left px-4 py-3 rounded-xl border text-sm transition-all cursor-pointer ${echoFocus === option ? 'border-white bg-white/[0.06] text-white font-semibold' : 'border-[#1f1f1f] text-neutral-400 hover:border-neutral-600 hover:text-white'}`}
-628 |                         >
-629 |                           {option}
-630 |                         </button>
-631 |                       ))}
-632 |                     </div>
-633 |                     <div className="flex gap-2">
-634 |                       <button onClick={() => setEchoStep(1)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
-635 |                       <button
-636 |                         onClick={async () => {
-637 |                           if (echoFocus.trim()) {
-638 |                             setEchoStep(3);
-639 |                             await fetchEchoCast(echoSituation, echoFocus);
-640 |                           }
-641 |                         }}
-642 |                         disabled={!echoFocus.trim()}
-643 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
-644 |                       >
-645 |                         {isLoadingCast ? "Inferring cast..." : "Next"}
-646 |                       </button>
-647 |                     </div>
-648 |                   </div>
-649 |                 )}
-650 | 
-651 |                 {/* Step 3 — Cast Review */}
-652 |                 {echoStep === 3 && (
-653 |                   <div className="space-y-4">
-654 |                     <div className="space-y-1">
-655 |                       <h1 className="text-2xl font-bold text-white tracking-tight">Review the cast.</h1>
-656 |                       <p className="text-xs text-neutral-500 font-sans">These are the people who will participate in the simulation. Edit, remove, or add as needed.</p>
-657 |                     </div>
-658 |                     {isLoadingCast ? (
-659 |                       <div className="flex items-center justify-center py-12">
-660 |                         <div className="w-5 h-5 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
-661 |                         <span className="text-xs text-neutral-500 ml-3 font-mono">Inferring cast...</span>
-662 |                       </div>
-663 |                     ) : (
-664 |                       <div className="space-y-2">
-665 |                         {echoCast.map((member, idx) => (
-666 |                           <div key={idx} className="bg-neutral-950 border border-[#1f1f1f] rounded-xl p-3 space-y-2">
-667 |                             {editingCastIdx === idx ? (
-668 |                               <div className="space-y-2">
-669 |                                 <input
-670 |                                   type="text"
-671 |                                   value={member.inferred_name}
-672 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_name: e.target.value } : m))}
-673 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
-674 |                                   placeholder="Name"
-675 |                                 />
-676 |                                 <input
-677 |                                   type="text"
-678 |                                   value={member.role}
-679 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, role: e.target.value } : m))}
-680 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
-681 |                                   placeholder="Role"
-682 |                                 />
-683 |                                 <textarea
-684 |                                   value={member.inferred_problem}
-685 |                                   rows={2}
-686 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_problem: e.target.value } : m))}
-687 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2.5 text-xs text-white outline-none focus:border-neutral-500 resize-none"
-688 |                                   placeholder="Their perspective..."
-689 |                                 />
-690 |                                 <button onClick={() => setEditingCastIdx(null)} className="text-[10px] font-mono text-neutral-400 hover:text-white cursor-pointer">Done</button>
-691 |                               </div>
-692 |                             ) : (
-693 |                               <div className="flex items-start justify-between gap-2">
-694 |                                 <div className="min-w-0 flex-1">
-695 |                                   <div className="flex items-center gap-2">
-696 |                                     <span className="text-xs font-semibold text-white">{member.inferred_name}</span>
-697 |                                     <span className="text-[9px] font-mono text-neutral-500 uppercase tracking-wider">{member.role}</span>
-698 |                                   </div>
-699 |                                   <p className="text-[11px] text-neutral-500 leading-relaxed mt-0.5 line-clamp-2">{member.inferred_problem}</p>
-700 |                                 </div>
-701 |                                 {!member.is_self && (
-702 |                                   <div className="flex gap-1 shrink-0">
-703 |                                     <button onClick={() => setEditingCastIdx(idx)} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><Pencil className="w-3 h-3" /></button>
-704 |                                     <button onClick={() => setEchoCast(prev => prev.filter((_, i) => i !== idx))} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><X className="w-3 h-3" /></button>
-705 |                                   </div>
-706 |                                 )}
-707 |                               </div>
-708 |                             )}
-709 |                           </div>
-710 |                         ))}
-711 |                         <button
-712 |                           onClick={() => setEchoCast(prev => [...prev, { inferred_name: "New Person", role: "acquaintance", inferred_problem: "Enter their perspective...", emotional_core: "", is_self: false }])}
-713 |                           className="w-full py-2.5 border border-dashed border-[#1f1f1f] rounded-xl text-xs text-neutral-500 hover:text-white hover:border-neutral-600 transition-all cursor-pointer"
-714 |                         >
-715 |                           Add Person
-716 |                         </button>
-717 |                       </div>
-718 |                     )}
-719 |                     <div className="flex gap-2">
-720 |                       <button onClick={() => setEchoStep(2)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
-721 |                       <button
-722 |                         onClick={beginEchoHouseSimulation}
-723 |                         disabled={isLoadingCast || echoCast.filter(m => !m.is_self).length === 0}
-724 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
-725 |                       >
-726 |                         Begin Simulation
-727 |                       </button>
-728 |                     </div>
-729 |                   </div>
-730 |                 )}
-731 |               </div>
-732 |             </div>
-733 |           )}
-734 | 
-735 |           {workspaceState === "active" && (
-736 |             <div className="absolute inset-0 flex">
-737 |               {currentTab === "chat" && (
-738 |                 <div className="flex-1 flex flex-col justify-between overflow-hidden bg-black">
-739 |                   <div ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
-740 |                     {isLoadingSession ? (
-741 |                       <div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" /></div>
-742 |                     ) : (
-743 |                       <div className="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto space-y-4 select-text">
-744 |                         {chatMessages.length === 0 ? (
-745 |                           <div className="flex flex-col items-center justify-center py-20 text-center space-y-2 select-none">
-746 |                             <h1 className="text-2xl font-bold text-white">
-747 |                               {isEchoHouseMode ? "What is your problem in life?" : "What's on your mind?"}
-748 |                             </h1>
-749 |                             <p className="text-xs text-neutral-500">
-750 |                               {isEchoHouseMode ? "Type your struggle below to initialize the simulation." : "Start a conversation to see AI response."}
-751 |                             </p>
-752 |                           </div>
-753 |                         ) : (
-754 |                           chatMessages.map((msg, msgIdx) => (
-755 |                             <motion.div key={msg.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={`flex w-full ${msg.sender === "divider" ? "justify-center" : msg.sender === "user" ? "justify-end" : "justify-start"}`}>
-756 |                               {msg.sender === "divider" ? (
-757 |                                 <div className="w-full flex items-center gap-4 my-4 select-none">
-758 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
-759 |                                   <span className="text-[10px] font-mono text-neutral-500 tracking-wider uppercase">{msg.text}</span>
-760 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
-761 |                                 </div>
-762 |                               ) : msg.sender === "user" ? (
-763 |                                 <div className="flex flex-col items-end space-y-1 max-w-[72%] group">
-764 |                                   {msg.speakerName && (
-765 |                                     <span className="text-[10px] font-mono text-neutral-500 mr-2">{msg.speakerName}</span>
-766 |                                   )}
-767 |                                   <div className={`rounded-3xl px-5 py-3 text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'bg-neutral-800' : 'bg-[#2f2f2f]'}`}><p className="whitespace-pre-wrap">{msg.text}</p></div>
-768 |                                   <div className="flex items-center gap-3 mt-1.5 text-neutral-500 select-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 mr-2">
-769 |                                     <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
-770 |                                       {copiedMsgId === msg.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-771 |                                       <span>{copiedMsgId === msg.id ? "Copied" : "Copy"}</span>
+414 |   const activeNodeDetail = nodes.find(n => n.id === selectedNodeId) as any;
+415 | 
+416 |   const ModeSelector = () => (
+417 |     <div className="flex items-center gap-1 bg-neutral-900/40 rounded-full p-0.5 border border-[#1f1f1f]">
+418 |       <button onClick={() => setExecutionMode("auto")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "auto" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Smart</button>
+419 |       <button onClick={() => setExecutionMode("custom")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "custom" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Custom</button>
+420 |     </div>
+421 |   );
+422 | 
+423 |   const handleFileAttach = () => {
+424 |     const input = document.createElement("input");
+425 |     input.type = "file";
+426 |     input.accept = ".txt,.md,.json,.csv,.py,.js,.ts,.tsx,.html,.css,.yaml,.yml,.xml,.ini,.cfg,.pdf,.jpg,.png";
+427 |     input.onchange = (e: any) => {
+428 |       const file = e.target.files?.[0];
+429 |       if (!file) return;
+430 |       const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+431 |       if (['.txt', '.md', '.json', '.csv', '.py', '.js', '.ts', '.tsx', '.html', '.css', '.yaml', '.yml', '.xml', '.ini', '.cfg'].includes(ext)) {
+432 |         const reader = new FileReader();
+433 |         reader.onload = (ev) => setUserQuery((prev) => prev + `\n[Attached: ${file.name}]\n${ev.target?.result as string}\n`);
+434 |         reader.readAsText(file);
+435 |       }
+436 |     };
+437 |     input.click();
+438 |   };
+439 | 
+440 |   return (
+441 |     <div className="flex h-screen w-full bg-black text-[#f5f5f5] overflow-hidden font-sans">
+442 |       <aside onClick={() => { if (!isSidebarExpanded) setIsSidebarExpanded(true); }} className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-30 select-none cursor-pointer ${isSidebarExpanded ? "w-64 cursor-default" : "w-[60px]"}`}>
+443 |         <div className="flex items-center gap-3 h-16 border-b border-[#1f1f1f] px-4 justify-between">
+444 |           {isSidebarExpanded ? (
+445 |             <div className="flex items-center gap-2.5">
+446 |               <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
+447 |               <h1 className="text-sm font-bold text-white tracking-tight leading-none">Solospace</h1>
+448 |             </div>
+449 |           ) : (
+450 |             <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center mx-auto"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
+451 |           )}
+452 |           {isSidebarExpanded && <button onClick={(e) => { e.stopPropagation(); setIsSidebarExpanded(false); }} className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>}
+453 |         </div>
+454 | 
+455 |         <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto custom-scrollbar">
+456 |           <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); useWorkflowStore.getState().abortController?.abort(); setWorkspaceState("home"); setUserQuery(""); useWorkflowStore.setState({ activeSessionId: null, nodes: [], edges: [], chatMessages: [], agentTalkLogs: [], executionState: "setup", statusMessage: "", isThinking: false, isOrchestrating: false, liveThoughts: "", pendingApproval: null, followUpSuggestions: [], abortController: null }); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
+457 |             <SquarePlus className="w-5 h-5 stroke-[1.8]" />
+458 |             {isSidebarExpanded && <span className="text-xs font-semibold">New Chat</span>}
+459 |           </button>
+460 | 
+461 |           <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsSecretOpen(true); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
+462 |             <Key className="w-5 h-5 stroke-[1.8]" />
+463 |             {isSidebarExpanded && <span className="text-xs font-semibold">API Keys</span>}
+464 |           </button>
+465 | 
+466 |           {/* Templates Section */}
+467 |           <div className="pt-2 select-none">
+468 |             {isSidebarExpanded ? (
+469 |               <>
+470 |                 <button
+471 |                   onClick={(e) => { e.stopPropagation(); setIsTemplatesExpanded(!isTemplatesExpanded); }}
+472 |                   className="w-full flex items-center justify-between px-3 py-1.5 text-neutral-600 hover:text-neutral-400 cursor-pointer"
+473 |                 >
+474 |                   <span className="text-[10px] font-bold uppercase tracking-widest font-mono">Templates</span>
+475 |                   <ChevronRight className={`w-3.5 h-3.5 transition-transform duration-200 ${isTemplatesExpanded ? "rotate-90" : ""}`} />
+476 |                 </button>
+477 |                 {isTemplatesExpanded && (
+478 |                   <button
+479 |                     onClick={(e) => {
+480 |                       e.stopPropagation();
+481 |                       createSession("EchoHouse Simulation", "echohouse");
+482 |                       setWorkspaceState("active");
+483 |                       setCurrentTab("chat");
+484 |                     }}
+485 |                     className="w-full flex items-center rounded-lg transition-all duration-150 py-2.5 px-3 gap-3 hover:bg-neutral-900 text-neutral-200 cursor-pointer"
+486 |                   >
+487 |                     <Globe className="w-5 h-5 stroke-[1.8]" />
+488 |                     <span className="text-xs font-semibold">EchoHouse</span>
+489 |                   </button>
+490 |                 )}
+491 |               </>
+492 |             ) : (
+493 |               <button
+494 |                 onClick={() => {
+495 |                   createSession("EchoHouse Simulation", "echohouse");
+496 |                   setWorkspaceState("active");
+497 |                   setCurrentTab("chat");
+498 |                 }}
+499 |                 className="w-full flex items-center justify-center rounded-lg transition-all duration-150 py-2.5 hover:bg-neutral-900 text-neutral-400 cursor-pointer"
+500 |                 title="EchoHouse Template"
+501 |               >
+502 |                 <Globe className="w-5 h-5 stroke-[1.8]" />
+503 |               </button>
+504 |             )}
+505 |           </div>
+506 | 
+507 |           {isSidebarExpanded && (
+508 |             <div className="pt-6 space-y-2 select-none">
+509 |               <div className="flex items-center gap-1.5 px-3"><History className="w-3.5 h-3.5 text-neutral-600" /><span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest font-mono">Recents</span></div>
+510 |               <div className="space-y-1 max-h-[220px] overflow-y-auto custom-scrollbar">
+511 |                 {Object.values(sessions).length === 0 ? <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span> : (
+512 |                   Object.values(sessions).reverse().map((s) => (
+513 |                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
+514 |                       <button disabled={isLoadingSession} onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsLoadingSession(true); try { await loadSessionFromDb(s.id); setWorkspaceState("active"); setCurrentTab("chat"); } catch (err) { console.error(err); } finally { setIsLoadingSession(false); } } }} className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${activeSessionId === s.id ? "text-white font-bold" : "text-neutral-500 hover:text-white"}`} title={s.prompt}>{s.title}</button>
+515 |                       <button onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); if (confirm(`Delete "${s.title}"?`)) await deleteSessionFromDb(s.id); } }} className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+516 |                     </div>
+517 |                   ))
+518 |                 )}
+519 |               </div>
+520 |             </div>
+521 |           )}
+522 |         </nav>
+523 |       </aside>
+524 | 
+525 |       <main onClick={() => { if (isSidebarExpanded && window.innerWidth < 768) setIsSidebarExpanded(false); }} className="flex-1 flex flex-col min-w-0 bg-[#000000] relative transition-all duration-300">
+526 |         <header className="flex justify-between items-center w-full px-6 h-16 border-b border-[#141414] shrink-0 z-10 bg-black/85 backdrop-blur-md">
+527 |           <div className="flex items-center gap-2" />
+528 |           <div className="flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-[2px] rounded-full select-none">
+529 |             <button onClick={() => { if (workspaceState !== "home") setCurrentTab("chat"); }} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${currentTab === "chat" || workspaceState === "home" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>Chat</button>
+530 |             {workspaceState === "active" && (
+531 |               <button onClick={() => setCurrentTab("arena")} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${currentTab === "arena" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>
+532 |                 <GitFork className="w-3 h-3" /> Flow {nodes.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse ml-0.5" />}
+533 |               </button>
+534 |             )}
+535 |           </div>
+536 |           <div className="flex items-center gap-2 select-none">
+537 |             <button onClick={() => alert("Solospace AI OS")} className="text-neutral-400 hover:text-white p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer"><HelpCircle className="w-4 h-4 stroke-[1.8]" /></button>
+538 |           </div>
+539 |         </header>
+540 | 
+541 |         <div className="flex-1 relative overflow-hidden">
+542 |           {workspaceState === "home" && !isEchoHouseMode && (
+543 |             <div className="absolute inset-0 flex flex-col justify-between overflow-y-auto custom-scrollbar">
+544 |               <div />
+545 |               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
+546 |                 <div className="text-center mb-10 space-y-2 select-none">
+547 |                   <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">What&apos;s on your mind?</h1>
+548 |                   <p className="text-sm text-neutral-400 font-sans">Ask anything. Get a real, complete answer instantly.</p>
+549 |                 </div>
+550 |                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
+551 |                   <div className="flex items-center gap-3">
+552 |                     <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
+553 |                     <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder="Describe your idea, problem, or question..." className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
+554 |                     <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim()} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
+555 |                   </div>
+556 |                 </div>
+557 |                 <div className="flex items-center gap-3 mt-5 select-none">
+558 |                   <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">Mode:</span>
+559 |                   <button onClick={() => setExecutionMode("auto")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "auto" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sparkles className="w-3 h-3 stroke-[2]" /><span>Smart Auto</span></button>
+560 |                   <button onClick={() => setExecutionMode("custom")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "custom" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sliders className="w-3 h-3" /><span>Custom Agent</span></button>
+561 |                 </div>
+562 |               </div>
+563 |               <div />
+564 |             </div>
+565 |           )}
+566 | 
+567 |           {workspaceState === "home" && isEchoHouseMode && (
+568 |             <div className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto custom-scrollbar px-6 py-12">
+569 |               <div className="w-full max-w-xl space-y-8">
+570 |                 {/* Step indicator */}
+571 |                 <div className="flex items-center gap-2 select-none">
+572 |                   {[1, 2, 3].map((s) => (
+573 |                     <div key={s} className="flex items-center gap-2">
+574 |                       <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-mono font-bold transition-all ${echoStep >= s ? 'bg-white text-black' : 'bg-neutral-800 text-neutral-500'}`}>{s}</div>
+575 |                       {s < 3 && <div className={`w-8 h-px transition-all ${echoStep > s ? 'bg-white' : 'bg-neutral-800'}`} />}
+576 |                     </div>
+577 |                   ))}
+578 |                   <span className="text-[10px] font-mono text-neutral-500 ml-2 uppercase tracking-wider">
+579 |                     {echoStep === 1 ? 'Situation' : echoStep === 2 ? 'Focus' : 'Cast Review'}
+580 |                   </span>
+581 |                 </div>
+582 | 
+583 |                 {/* Step 1 — Situation */}
+584 |                 {echoStep === 1 && (
+585 |                   <div className="space-y-4">
+586 |                     <div className="space-y-1">
+587 |                       <h1 className="text-2xl font-bold text-white tracking-tight">Describe the situation you are navigating.</h1>
+588 |                       <p className="text-xs text-neutral-500 font-sans">Write freely. This is private. The more specific, the more useful the simulation.</p>
+589 |                     </div>
+590 |                     <textarea
+591 |                       rows={6}
+592 |                       value={echoSituation}
+593 |                       onChange={(e) => setEchoSituation(e.target.value)}
+594 |                       placeholder="My manager keeps dismissing my ideas in meetings. Last week they took credit for a suggestion I made and..."
+595 |                       className="w-full bg-neutral-950 border border-[#1f1f1f] rounded-2xl p-4 text-sm text-neutral-200 outline-none placeholder:text-neutral-700 focus:border-neutral-600 resize-none leading-relaxed transition-colors custom-scrollbar"
+596 |                     />
+597 |                     <button
+598 |                       onClick={() => { if (echoSituation.trim()) setEchoStep(2); }}
+599 |                       disabled={!echoSituation.trim()}
+600 |                       className="w-full py-3 bg-white text-black font-semibold text-sm rounded-2xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
+601 |                     >
+602 |                       Continue
+603 |                     </button>
+604 |                   </div>
+605 |                 )}
+606 | 
+607 |                 {/* Step 2 — Focus */}
+608 |                 {echoStep === 2 && (
+609 |                   <div className="space-y-4">
+610 |                     <div className="space-y-1">
+611 |                       <h1 className="text-2xl font-bold text-white tracking-tight">What do you want from this simulation?</h1>
+612 |                       <p className="text-xs text-neutral-500 font-sans">Select the focus that best fits your goal.</p>
+613 |                     </div>
+614 |                     <div className="space-y-2">
+615 |                       {[
+616 |                         "Understand why this keeps happening",
+617 |                         "Prepare for a difficult conversation",
+618 |                         "Process feelings about a past event"
+619 |                       ].map((option) => (
+620 |                         <button
+621 |                           key={option}
+622 |                           onClick={() => setEchoFocus(option)}
+623 |                           className={`w-full text-left px-4 py-3 rounded-xl border text-sm transition-all cursor-pointer ${echoFocus === option ? 'border-white bg-white/[0.06] text-white font-semibold' : 'border-[#1f1f1f] text-neutral-400 hover:border-neutral-600 hover:text-white'}`}
+624 |                         >
+625 |                           {option}
+626 |                         </button>
+627 |                       ))}
+628 |                     </div>
+629 |                     <div className="flex gap-2">
+630 |                       <button onClick={() => setEchoStep(1)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
+631 |                       <button
+632 |                         onClick={async () => {
+633 |                           if (echoFocus.trim()) {
+634 |                             setEchoStep(3);
+635 |                             await fetchEchoCast(echoSituation, echoFocus);
+636 |                           }
+637 |                         }}
+638 |                         disabled={!echoFocus.trim()}
+639 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
+640 |                       >
+641 |                         {isLoadingCast ? "Inferring cast..." : "Next"}
+642 |                       </button>
+643 |                     </div>
+644 |                   </div>
+645 |                 )}
+646 | 
+647 |                 {/* Step 3 — Cast Review */}
+648 |                 {echoStep === 3 && (
+649 |                   <div className="space-y-4">
+650 |                     <div className="space-y-1">
+651 |                       <h1 className="text-2xl font-bold text-white tracking-tight">Review the cast.</h1>
+652 |                       <p className="text-xs text-neutral-500 font-sans">These are the people who will participate in the simulation. Edit, remove, or add as needed.</p>
+653 |                     </div>
+654 |                     {isLoadingCast ? (
+655 |                       <div className="flex items-center justify-center py-12">
+656 |                         <div className="w-5 h-5 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
+657 |                         <span className="text-xs text-neutral-500 ml-3 font-mono">Inferring cast...</span>
+658 |                       </div>
+659 |                     ) : (
+660 |                       <div className="space-y-2">
+661 |                         {echoCast.map((member, idx) => (
+662 |                           <div key={idx} className="bg-neutral-950 border border-[#1f1f1f] rounded-xl p-3 space-y-2">
+663 |                             {editingCastIdx === idx ? (
+664 |                               <div className="space-y-2">
+665 |                                 <input
+666 |                                   type="text"
+667 |                                   value={member.inferred_name}
+668 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_name: e.target.value } : m))}
+669 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
+670 |                                   placeholder="Name"
+671 |                                 />
+672 |                                 <input
+673 |                                   type="text"
+674 |                                   value={member.role}
+675 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, role: e.target.value } : m))}
+676 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
+677 |                                   placeholder="Role"
+678 |                                 />
+679 |                                 <textarea
+680 |                                   value={member.inferred_problem}
+681 |                                   rows={2}
+682 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_problem: e.target.value } : m))}
+683 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2.5 text-xs text-white outline-none focus:border-neutral-500 resize-none"
+684 |                                   placeholder="Their perspective..."
+685 |                                 />
+686 |                                 <button onClick={() => setEditingCastIdx(null)} className="text-[10px] font-mono text-neutral-400 hover:text-white cursor-pointer">Done</button>
+687 |                               </div>
+688 |                             ) : (
+689 |                               <div className="flex items-start justify-between gap-2">
+690 |                                 <div className="min-w-0 flex-1">
+691 |                                   <div className="flex items-center gap-2">
+692 |                                     <span className="text-xs font-semibold text-white">{member.inferred_name}</span>
+693 |                                     <span className="text-[9px] font-mono text-neutral-500 uppercase tracking-wider">{member.role}</span>
+694 |                                   </div>
+695 |                                   <p className="text-[11px] text-neutral-500 leading-relaxed mt-0.5 line-clamp-2">{member.inferred_problem}</p>
+696 |                                 </div>
+697 |                                 {!member.is_self && (
+698 |                                   <div className="flex gap-1 shrink-0">
+699 |                                     <button onClick={() => setEditingCastIdx(idx)} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><Pencil className="w-3 h-3" /></button>
+700 |                                     <button onClick={() => setEchoCast(prev => prev.filter((_, i) => i !== idx))} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><X className="w-3 h-3" /></button>
+701 |                                   </div>
+702 |                                 )}
+703 |                               </div>
+704 |                             )}
+705 |                           </div>
+706 |                         ))}
+707 |                         <button
+708 |                           onClick={() => setEchoCast(prev => [...prev, { inferred_name: "New Person", role: "acquaintance", inferred_problem: "Enter their perspective...", emotional_core: "", is_self: false }])}
+709 |                           className="w-full py-2.5 border border-dashed border-[#1f1f1f] rounded-xl text-xs text-neutral-500 hover:text-white hover:border-neutral-600 transition-all cursor-pointer"
+710 |                         >
+711 |                           Add Person
+712 |                         </button>
+713 |                       </div>
+714 |                     )}
+715 |                     <div className="flex gap-2">
+716 |                       <button onClick={() => setEchoStep(2)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
+717 |                       <button
+718 |                         onClick={beginEchoHouseSimulation}
+719 |                         disabled={isLoadingCast || echoCast.filter(m => !m.is_self).length === 0}
+720 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
+721 |                       >
+722 |                         Begin Simulation
+723 |                       </button>
+724 |                     </div>
+725 |                   </div>
+726 |                 )}
+727 |               </div>
+728 |             </div>
+729 |           )}
+730 | 
+731 |           {workspaceState === "active" && (
+732 |             <div className="absolute inset-0 flex">
+733 |               {currentTab === "chat" && (
+734 |                 <div className="flex-1 flex flex-col justify-between overflow-hidden bg-black">
+735 |                   <div ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
+736 |                     {isLoadingSession ? (
+737 |                       <div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" /></div>
+738 |                     ) : (
+739 |                       <div className="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto space-y-4 select-text">
+740 |                         {chatMessages.length === 0 ? (
+741 |                           <div className="flex flex-col items-center justify-center py-20 text-center space-y-2 select-none">
+742 |                             <h1 className="text-2xl font-bold text-white">
+743 |                               {isEchoHouseMode ? "What is your problem in life?" : "What's on your mind?"}
+744 |                             </h1>
+745 |                             <p className="text-xs text-neutral-500">
+746 |                               {isEchoHouseMode ? "Type your struggle below to initialize the simulation." : "Start a conversation to see AI response."}
+747 |                             </p>
+748 |                           </div>
+749 |                         ) : (
+750 |                           chatMessages.map((msg, msgIdx) => (
+751 |                             <motion.div key={msg.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={`flex w-full ${msg.sender === "divider" ? "justify-center" : msg.sender === "user" ? "justify-end" : "justify-start"}`}>
+752 |                               {msg.sender === "divider" ? (
+753 |                                 <div className="w-full flex items-center gap-4 my-4 select-none">
+754 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
+755 |                                   <span className="text-[10px] font-mono text-neutral-500 tracking-wider uppercase">{msg.text}</span>
+756 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
+757 |                                 </div>
+758 |                               ) : msg.sender === "user" ? (
+759 |                                 <div className="flex flex-col items-end space-y-1 max-w-[72%] group">
+760 |                                   {msg.speakerName && (
+761 |                                     <span className="text-[10px] font-mono text-neutral-500 mr-2">{msg.speakerName}</span>
+762 |                                   )}
+763 |                                   <div className={`rounded-3xl px-5 py-3 text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'bg-neutral-800' : 'bg-[#2f2f2f]'}`}><p className="whitespace-pre-wrap">{msg.text}</p></div>
+764 |                                   <div className="flex items-center gap-3 mt-1.5 text-neutral-500 select-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 mr-2">
+765 |                                     <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
+766 |                                       {copiedMsgId === msg.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+767 |                                       <span>{copiedMsgId === msg.id ? "Copied" : "Copy"}</span>
+768 |                                     </button>
+769 |                                     <button onClick={() => { setUserQuery(msg.text); textareaRef.current?.focus(); textareaRef.current?.scrollIntoView({ behavior: "smooth" }); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
+770 |                                       <Pencil className="w-3 h-3" />
+771 |                                       <span>Edit</span>
 772 |                                     </button>
-773 |                                     <button onClick={() => { setUserQuery(msg.text); textareaRef.current?.focus(); textareaRef.current?.scrollIntoView({ behavior: "smooth" }); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
-774 |                                       <Pencil className="w-3 h-3" />
-775 |                                       <span>Edit</span>
-776 |                                     </button>
-777 |                                   </div>
-778 |                                 </div>
-779 |                               ) : (
-780 |                                 <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
-781 |                                   {msg.speakerName && msg.speakerName !== "insight" && msg.speakerName !== "takeaways" && (
-782 |                                     <span className="text-[10px] font-mono text-neutral-500 ml-1">{msg.speakerName}</span>
-783 |                                   )}
-784 |                                   {msg.speakerName === "takeaways" && msg.takeaways ? (
-785 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 space-y-3 mt-2">
-786 |                                       <span className="text-[10px] font-mono text-neutral-400 uppercase tracking-wider font-bold block">What you can try</span>
-787 |                                       <ol className="space-y-2">
-788 |                                         {msg.takeaways.map((item, ti) => (
-789 |                                           <li key={ti} className="flex gap-2.5 text-xs text-neutral-300 leading-relaxed">
-790 |                                             <span className="font-mono text-neutral-600 shrink-0">{ti + 1}.</span>
-791 |                                             <span>{item}</span>
-792 |                                           </li>
-793 |                                         ))}
-794 |                                       </ol>
+773 |                                   </div>
+774 |                                 </div>
+775 |                               ) : (
+776 |                                 <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
+777 |                                   {msg.speakerName && msg.speakerName !== "insight" && msg.speakerName !== "takeaways" && (
+778 |                                     <span className="text-[10px] font-mono text-neutral-500 ml-1">{msg.speakerName}</span>
+779 |                                   )}
+780 |                                   {msg.speakerName === "takeaways" && msg.takeaways ? (
+781 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 space-y-3 mt-2">
+782 |                                       <span className="text-[10px] font-mono text-neutral-400 uppercase tracking-wider font-bold block">What you can try</span>
+783 |                                       <ol className="space-y-2">
+784 |                                         {msg.takeaways.map((item, ti) => (
+785 |                                           <li key={ti} className="flex gap-2.5 text-xs text-neutral-300 leading-relaxed">
+786 |                                             <span className="font-mono text-neutral-600 shrink-0">{ti + 1}.</span>
+787 |                                             <span>{item}</span>
+788 |                                           </li>
+789 |                                         ))}
+790 |                                       </ol>
+791 |                                     </div>
+792 |                                   ) : msg.speakerName === "insight" ? (
+793 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+794 |                                       {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
 795 |                                     </div>
-796 |                                   ) : msg.speakerName === "insight" ? (
-797 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+796 |                                   ) : (
+797 |                                     <div className={`w-full text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'rounded-2xl px-4 py-3 bg-neutral-900' : 'px-1 py-2'}`}>
 798 |                                       {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
-799 |                                     </div>
-800 |                                   ) : (
-801 |                                     <div className={`w-full text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'rounded-2xl px-4 py-3 bg-neutral-900' : 'px-1 py-2'}`}>
-802 |                                       {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
-803 |                                       {msg.text && (!isOrchestrating || msgIdx !== chatMessages.length - 1) && (
-804 |                                         <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
-805 |                                           <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
-806 |                                             {copiedMsgId === msg.id ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400 font-medium">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
-807 |                                           </button>
-808 |                                           {!isEchoHouseMode && msgIdx === chatMessages.length - 1 && !isOrchestrating && (
-809 |                                             <button onClick={handleRegenerate} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
-810 |                                               <RefreshCw className="w-3.5 h-3.5" />
-811 |                                               <span>Regenerate</span>
-812 |                                             </button>
-813 |                                           )}
-814 |                                         </div>
-815 |                                       )}
-816 |                                     </div>
-817 |                                   )}
-818 |                                   {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && nodes.length > 0 && (
-819 |                                     <div className="flex gap-3 mt-4 select-none">
-820 |                                       <button onClick={() => setCurrentTab("arena")} className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max">
-821 |                                         <GitFork className="w-3.5 h-3.5 text-cyan-400" /><span>See Agent Flow</span>
-822 |                                       </button>
-823 |                                       {!isEchoHouseMode && useWorkflowStore.getState().executionState === "paused" && (
-824 |                                         <button
-825 |                                           onClick={async () => {
-826 |                                             setExecutionState("running");
-827 |                                             await useWorkflowStore.getState().triggerCustomExecution();
-828 |                                           }}
-829 |                                           className="px-4 py-2 bg-white hover:bg-neutral-200 rounded-xl text-xs font-bold text-black transition-all flex items-center gap-1.5 cursor-pointer max-w-max"
-830 |                                         >
-831 |                                           Proceed
-832 |                                         </button>
-833 |                                       )}
-834 |                                     </div>
-835 |                                   )}
-836 |                                 </div>
-837 |                               )}
-838 |                             </motion.div>
-839 |                           ))
-840 |                         )}
-841 |                         <div ref={chatEndRef} />
-842 |                       </div>
-843 |                     )}
-844 |                   </div>
-845 |                   <div className="px-4 sm:px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
-846 |                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
-847 |                       <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
-848 |                       <textarea ref={textareaRef} rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery); } }} placeholder={isOrchestrating ? "Streaming..." : isEchoHouseMode ? "What is your problem in life?" : "Ask a follow-up..."} disabled={isOrchestrating} className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar" />
-849 |                       <div className="flex items-center gap-2 shrink-0">
-850 |                         <ModeSelector />
-851 |                         {isOrchestrating ? (
-852 |                           <button onClick={cancelOrchestration} className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all cursor-pointer"><Square className="w-3.5 h-3.5 text-white fill-white" /></button>
-853 |                         ) : (
-854 |                           <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim() || isThinking} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
-855 |                         )}
-856 |                       </div>
-857 |                     </div>
-858 |                   </div>
-859 |                 </div>
-860 |               )}
-861 |               {currentTab === "arena" && (
-862 |                 <div className="flex-1 relative overflow-hidden bg-[#000000] flex">
-863 |                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#0d0d0d]/90 border border-[#1f1f1f] rounded-full px-4 py-2 backdrop-blur-md shadow-xl pointer-events-auto">
-864 |                     <button onClick={() => setCurrentTab("chat")} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-mono"><ChevronLeft className="w-3.5 h-3.5" /> Back to Chat</button>
-865 |                   </div>
-866 |                   <FlowArena onProceed={() => setCurrentTab("chat")} />
-867 |                 </div>
-868 |               )}
-869 |             </div>
-870 |           )}
-871 |         </div>
-872 |       </main>
-873 | 
-874 |       {currentTab === "arena" && isConfigPanelOpen && activeNodeDetail && (
-875 |         <div className="fixed top-0 right-0 h-full w-80 bg-[#0c0c0c]/95 border-l border-[#1f1f1f] z-40 flex flex-col justify-between shadow-2xl transition-transform duration-300 right-panel select-none">
-876 |           <div className="p-5 border-b border-[#1f1f1f] flex justify-between items-center bg-[#0d0d0d]">
-877 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider">{activeNodeDetail.data.name}</h3>
-878 |             <button onClick={() => { setIsConfigPanelOpen(false); setSelectedNodeId(null); }} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
-879 |           </div>
-880 |           <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
-881 |             {activeNodeDetail.data.isEchoHouseAgent ? (
-882 |               <>
-883 |                 <div className="space-y-1.5">
-884 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label>
-885 |                   <input
-886 |                     type="text"
-887 |                     value={activeNodeDetail.data.name}
-888 |                     onChange={(e) => {
-889 |                       const nameVal = e.target.value;
-890 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
-891 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
-892 |                       updateNodeField(activeNodeDetail.id, {
-893 |                         name: nameVal,
-894 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
-895 |                         objective: nameVal === "You (Self)" || roleVal === "self"
-896 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
-897 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
-898 |                       });
-899 |                     }}
-900 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
-901 |                   />
-902 |                 </div>
-903 |                 <div className="space-y-1.5">
-904 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Role</label>
-905 |                   <input
-906 |                     type="text"
-907 |                     value={activeNodeDetail.data.echohouseRole}
-908 |                     disabled={activeNodeDetail.data.echohouseRole === "self"}
-909 |                     onChange={(e) => {
-910 |                       const nameVal = activeNodeDetail.data.name || "";
-911 |                       const roleVal = e.target.value;
-912 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
-913 |                       updateNodeField(activeNodeDetail.id, {
-914 |                         echohouseRole: roleVal,
-915 |                         tag: roleVal.toUpperCase().replace(/\s+/g, '_'),
-916 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
-917 |                         objective: `Provide perspective as ${nameVal} (${roleVal}).`
-918 |                       });
-919 |                     }}
-920 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none disabled:opacity-40"
-921 |                   />
-922 |                 </div>
-923 |                 <div className="space-y-1.5">
-924 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">
-925 |                     {activeNodeDetail.data.echohouseRole === "self" ? "Your problem in life" : "What do they think about your situation?"}
-926 |                   </label>
-927 |                   <textarea
-928 |                     value={activeNodeDetail.data.echohouseProblem}
-929 |                     onChange={(e) => {
-930 |                       const nameVal = activeNodeDetail.data.name || "";
-931 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
-932 |                       const probVal = e.target.value;
-933 |                       updateNodeField(activeNodeDetail.id, {
-934 |                         echohouseProblem: probVal,
-935 |                         systemPrompt: roleVal === "self"
-936 |                           ? "You are the user themselves, experiencing this problem from the inside."
-937 |                           : `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
-938 |                         objective: roleVal === "self"
-939 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
-940 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
-941 |                       });
-942 |                     }}
-943 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[100px] resize-none leading-relaxed"
-944 |                   />
-945 |                 </div>
-946 |               </>
-947 |             ) : (
-948 |               <>
-949 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label><input type="text" value={activeNodeDetail.data.name} onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none" /></div>
-950 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label><textarea value={activeNodeDetail.data.systemPrompt} onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed" /></div>
-951 |               </>
-952 |             )}
-953 |           </div>
-954 |         </div>
-955 |       )}
-956 | 
-957 |       <AnimatePresence>
-958 |         {isSecretOpen && <APIKeysModal isOpen={isSecretOpen} onClose={() => setIsSecretOpen(false)} />}
-959 |         
-960 |         {pendingApproval && (
-961 |           <div className="fixed bottom-6 right-6 w-96 bg-[#0d0d0d] border border-amber-500/50 shadow-[0_0_50px_rgba(245,158,11,0.15)] rounded-2xl p-5 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300 select-none">
-962 |             <div className="flex gap-4 items-start">
-963 |               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 shrink-0"><Sliders className="w-5 h-5 animate-pulse" /></div>
-964 |               <div className="flex-1 space-y-2">
-965 |                 <h4 className="text-xs font-bold text-white">&apos;{(nodes.find(n => n.id === pendingApproval.nodeId)?.data as any)?.name}&apos; wants to use <span className="text-amber-400 font-mono">[{pendingApproval.toolName}]</span></h4>
-966 |                 <p className="text-[10px] text-neutral-400 leading-normal">Action: <span className="text-white font-semibold">{pendingApproval.action}</span> — {pendingApproval.detail}</p>
-967 |                 <div className="pt-3 flex gap-2">
-968 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "approve", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Approve</button>
-969 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "deny", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="px-4 py-2 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Deny</button>
-970 |                 </div>
-971 |               </div>
-972 |             </div>
-973 |           </div>
-974 |         )}
-975 |       </AnimatePresence>
-976 |     </div>
-977 |   );
-978 | }
-979 |
+799 |                                       {msg.text && (!isOrchestrating || msgIdx !== chatMessages.length - 1) && (
+800 |                                         <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
+801 |                                           <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
+802 |                                             {copiedMsgId === msg.id ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400 font-medium">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
+803 |                                           </button>
+804 |                                           {!isEchoHouseMode && msgIdx === chatMessages.length - 1 && !isOrchestrating && (
+805 |                                             <button onClick={handleRegenerate} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
+806 |                                               <RefreshCw className="w-3.5 h-3.5" />
+807 |                                               <span>Regenerate</span>
+808 |                                             </button>
+809 |                                           )}
+810 |                                         </div>
+811 |                                       )}
+812 |                                     </div>
+813 |                                   )}
+814 |                                   {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && nodes.length > 0 && (
+815 |                                     <div className="flex gap-3 mt-4 select-none">
+816 |                                       <button onClick={() => setCurrentTab("arena")} className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max">
+817 |                                         <GitFork className="w-3.5 h-3.5 text-cyan-400" /><span>See Agent Flow</span>
+818 |                                       </button>
+819 |                                       {!isEchoHouseMode && useWorkflowStore.getState().executionState === "paused" && (
+820 |                                         <button
+821 |                                           onClick={async () => {
+822 |                                             setExecutionState("running");
+823 |                                             await useWorkflowStore.getState().triggerCustomExecution();
+824 |                                           }}
+825 |                                           className="px-4 py-2 bg-white hover:bg-neutral-200 rounded-xl text-xs font-bold text-black transition-all flex items-center gap-1.5 cursor-pointer max-w-max"
+826 |                                         >
+827 |                                           Proceed
+828 |                                         </button>
+829 |                                       )}
+830 |                                     </div>
+831 |                                   )}
+832 |                                 </div>
+833 |                               )}
+834 |                             </motion.div>
+835 |                           ))
+836 |                         )}
+837 |                         <div ref={chatEndRef} />
+838 |                       </div>
+839 |                     )}
+840 |                   </div>
+841 |                   <div className="px-4 sm:px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
+842 |                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
+843 |                       <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
+844 |                       <textarea ref={textareaRef} rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery); } }} placeholder={isOrchestrating ? "Streaming..." : isEchoHouseMode ? "What is your problem in life?" : "Ask a follow-up..."} disabled={isOrchestrating} className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar" />
+845 |                       <div className="flex items-center gap-2 shrink-0">
+846 |                         <ModeSelector />
+847 |                         {isOrchestrating ? (
+848 |                           <button onClick={cancelOrchestration} className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all cursor-pointer"><Square className="w-3.5 h-3.5 text-white fill-white" /></button>
+849 |                         ) : (
+850 |                           <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim() || isThinking} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
+851 |                         )}
+852 |                       </div>
+853 |                     </div>
+854 |                   </div>
+855 |                 </div>
+856 |               )}
+857 |               {currentTab === "arena" && (
+858 |                 <div className="flex-1 relative overflow-hidden bg-[#000000] flex">
+859 |                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#0d0d0d]/90 border border-[#1f1f1f] rounded-full px-4 py-2 backdrop-blur-md shadow-xl pointer-events-auto">
+860 |                     <button onClick={() => setCurrentTab("chat")} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-mono"><ChevronLeft className="w-3.5 h-3.5" /> Back to Chat</button>
+861 |                   </div>
+862 |                   <FlowArena onProceed={() => setCurrentTab("chat")} />
+863 |                 </div>
+864 |               )}
+865 |             </div>
+866 |           )}
+867 |         </div>
+868 |       </main>
+869 | 
+870 |       {currentTab === "arena" && isConfigPanelOpen && activeNodeDetail && (
+871 |         <div className="fixed top-0 right-0 h-full w-80 bg-[#0c0c0c]/95 border-l border-[#1f1f1f] z-40 flex flex-col justify-between shadow-2xl transition-transform duration-300 right-panel select-none">
+872 |           <div className="p-5 border-b border-[#1f1f1f] flex justify-between items-center bg-[#0d0d0d]">
+873 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider">{activeNodeDetail.data.name}</h3>
+874 |             <button onClick={() => { setIsConfigPanelOpen(false); setSelectedNodeId(null); }} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
+875 |           </div>
+876 |           <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
+877 |             {activeNodeDetail.data.isEchoHouseAgent ? (
+878 |               <>
+879 |                 <div className="space-y-1.5">
+880 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label>
+881 |                   <input
+882 |                     type="text"
+883 |                     value={activeNodeDetail.data.name}
+884 |                     onChange={(e) => {
+885 |                       const nameVal = e.target.value;
+886 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
+887 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
+888 |                       updateNodeField(activeNodeDetail.id, {
+889 |                         name: nameVal,
+890 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+891 |                         objective: nameVal === "You (Self)" || roleVal === "self"
+892 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
+893 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
+894 |                       });
+895 |                     }}
+896 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
+897 |                   />
+898 |                 </div>
+899 |                 <div className="space-y-1.5">
+900 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Role</label>
+901 |                   <input
+902 |                     type="text"
+903 |                     value={activeNodeDetail.data.echohouseRole}
+904 |                     disabled={activeNodeDetail.data.echohouseRole === "self"}
+905 |                     onChange={(e) => {
+906 |                       const nameVal = activeNodeDetail.data.name || "";
+907 |                       const roleVal = e.target.value;
+908 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
+909 |                       updateNodeField(activeNodeDetail.id, {
+910 |                         echohouseRole: roleVal,
+911 |                         tag: roleVal.toUpperCase().replace(/\s+/g, '_'),
+912 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+913 |                         objective: `Provide perspective as ${nameVal} (${roleVal}).`
+914 |                       });
+915 |                     }}
+916 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none disabled:opacity-40"
+917 |                   />
+918 |                 </div>
+919 |                 <div className="space-y-1.5">
+920 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">
+921 |                     {activeNodeDetail.data.echohouseRole === "self" ? "Your problem in life" : "What do they think about your situation?"}
+922 |                   </label>
+923 |                   <textarea
+924 |                     value={activeNodeDetail.data.echohouseProblem}
+925 |                     onChange={(e) => {
+926 |                       const nameVal = activeNodeDetail.data.name || "";
+927 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
+928 |                       const probVal = e.target.value;
+929 |                       updateNodeField(activeNodeDetail.id, {
+930 |                         echohouseProblem: probVal,
+931 |                         systemPrompt: roleVal === "self"
+932 |                           ? "You are the user themselves, experiencing this problem from the inside."
+933 |                           : `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+934 |                         objective: roleVal === "self"
+935 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
+936 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
+937 |                       });
+938 |                     }}
+939 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[100px] resize-none leading-relaxed"
+940 |                   />
+941 |                 </div>
+942 |               </>
+943 |             ) : (
+944 |               <>
+945 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label><input type="text" value={activeNodeDetail.data.name} onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none" /></div>
+946 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label><textarea value={activeNodeDetail.data.systemPrompt} onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed" /></div>
+947 |               </>
+948 |             )}
+949 |           </div>
+950 |         </div>
+951 |       )}
+952 | 
+953 |       <AnimatePresence>
+954 |         {isSecretOpen && <APIKeysModal isOpen={isSecretOpen} onClose={() => setIsSecretOpen(false)} />}
+955 |         
+956 |         {pendingApproval && (
+957 |           <div className="fixed bottom-6 right-6 w-96 bg-[#0d0d0d] border border-amber-500/50 shadow-[0_0_50px_rgba(245,158,11,0.15)] rounded-2xl p-5 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300 select-none">
+958 |             <div className="flex gap-4 items-start">
+959 |               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 shrink-0"><Sliders className="w-5 h-5 animate-pulse" /></div>
+960 |               <div className="flex-1 space-y-2">
+961 |                 <h4 className="text-xs font-bold text-white">&apos;{(nodes.find(n => n.id === pendingApproval.nodeId)?.data as any)?.name}&apos; wants to use <span className="text-amber-400 font-mono">[{pendingApproval.toolName}]</span></h4>
+962 |                 <p className="text-[10px] text-neutral-400 leading-normal">Action: <span className="text-white font-semibold">{pendingApproval.action}</span> — {pendingApproval.detail}</p>
+963 |                 <div className="pt-3 flex gap-2">
+964 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "approve", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Approve</button>
+965 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "deny", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="px-4 py-2 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Deny</button>
+966 |                 </div>
+967 |               </div>
+968 |             </div>
+969 |           </div>
+970 |         )}
+971 |       </AnimatePresence>
+972 |     </div>
+973 |   );
+974 | }
+975 |
 ```
 
 ### File: `Frontend/components/edges/CustomEdge.tsx`
@@ -7155,7 +7264,7 @@ SoloSpace/
 
 ### File: `Frontend/components/APIKeysModal.tsx`
 
-> 609 lines | 26.3 KB
+> 763 lines | 33.7 KB
 
 ```tsx
   1 | 'use client';
@@ -7167,606 +7276,760 @@ SoloSpace/
   7 | } from "lucide-react";
   8 | import { motion, AnimatePresence } from "motion/react";
   9 | import { useWorkflowStore } from "@/store/workflowStore";
- 10 | 
- 11 | interface APIKeysModalProps {
- 12 |   isOpen: boolean;
- 13 |   onClose: () => void;
- 14 | }
- 15 | 
- 16 | const FALLBACK_PROVIDERS = {
- 17 |   gemini: {
- 18 |     name: "Google Gemini",
- 19 |     description: "Google's flagship multimodal AI models",
- 20 |     key_url: "https://aistudio.google.com/apikey",
- 21 |     key_hint: "AIzaSy...",
- 22 |     default_model: "gemini-2.5-flash",
- 23 |     models: [
- 24 |       { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", tier: "fast" },
- 25 |       { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", tier: "advanced" },
- 26 |       { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", tier: "fast" },
- 27 |       { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite", tier: "fast" }
- 28 |     ]
- 29 |   },
- 30 |   openai: {
- 31 |     name: "OpenAI",
- 32 |     description: "GPT-4o and o-series reasoning models",
- 33 |     key_url: "https://platform.openai.com/api-keys",
- 34 |     key_hint: "sk-...",
- 35 |     default_model: "gpt-4o",
- 36 |     models: [
- 37 |       { id: "gpt-4o", name: "GPT-4o", tier: "advanced" },
- 38 |       { id: "gpt-4o-mini", name: "GPT-4o Mini", tier: "fast" },
- 39 |       { id: "o3-mini", name: "o3-mini", tier: "reasoning" },
- 40 |       { id: "o1", name: "o1", tier: "reasoning" }
- 41 |     ]
- 42 |   },
- 43 |   claude: {
- 44 |     name: "Anthropic Claude",
- 45 |     description: "Sovereign intelligence with Claude 3.5 & 3.7 family",
- 46 |     key_url: "https://console.anthropic.com/settings/keys",
- 47 |     key_hint: "sk-ant-...",
- 48 |     default_model: "claude-sonnet-4-20250514",
- 49 |     models: [
- 50 |       { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", tier: "advanced" },
- 51 |       { id: "claude-3-7-sonnet-20250219", name: "Claude 3.7 Sonnet", tier: "advanced" },
- 52 |       { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet", tier: "advanced" },
- 53 |       { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku", tier: "fast" }
- 54 |     ]
- 55 |   },
- 56 |   deepseek: {
- 57 |     name: "DeepSeek",
- 58 |     description: "High-intelligence open reasoning and chat models",
- 59 |     key_url: "https://platform.deepseek.com/api_keys",
- 60 |     key_hint: "sk-...",
- 61 |     default_model: "deepseek-chat",
- 62 |     models: [
- 63 |       { id: "deepseek-chat", name: "DeepSeek V3", tier: "advanced" },
- 64 |       { id: "deepseek-reasoner", name: "DeepSeek R1", tier: "reasoning" }
- 65 |     ]
- 66 |   },
- 67 |   groq: {
- 68 |     name: "Groq",
- 69 |     description: "Ultra-low-latency LPU model execution",
- 70 |     key_url: "https://console.groq.com/keys",
- 71 |     key_hint: "gsk_...",
- 72 |     default_model: "llama-3.3-70b-versatile",
- 73 |     models: [
- 74 |       { id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B", tier: "fast" },
- 75 |       { id: "deepseek-r1-distill-llama-70b", name: "DeepSeek R1 Distill Llama 70B", tier: "reasoning" },
- 76 |       { id: "llama-3.1-8b-instant", name: "Llama 3.1 8B Instant", tier: "fast" }
- 77 |     ]
- 78 |   },
- 79 |   openrouter: {
- 80 |     name: "OpenRouter",
- 81 |     description: "Consolidated API for hundreds of LLMs",
- 82 |     key_url: "https://openrouter.ai/keys",
- 83 |     key_hint: "sk-or-...",
- 84 |     default_model: "openai/gpt-4o",
- 85 |     models: [
- 86 |       { id: "openai/gpt-4o", name: "GPT-4o", tier: "advanced" },
- 87 |       { id: "anthropic/claude-3.7-sonnet", name: "Claude 3.7 Sonnet", tier: "advanced" },
- 88 |       { id: "deepseek/deepseek-chat", name: "DeepSeek V3", tier: "open" }
- 89 |     ]
- 90 |   },
- 91 |   ollama: {
- 92 |     name: "Ollama (Local)",
- 93 |     description: "Local model hosting engine running on your system",
- 94 |     key_url: "https://ollama.com",
- 95 |     key_hint: "No credentials needed",
- 96 |     default_model: "llama3",
- 97 |     models: [
- 98 |       { id: "llama3", name: "Llama 3", tier: "open" },
- 99 |       { id: "mistral", name: "Mistral", tier: "open" },
-100 |       { id: "phi3", name: "Phi 3", tier: "open" }
-101 |     ]
-102 |   },
-103 |   alibaba: {
-104 |     name: "Alibaba Cloud (Qwen)",
-105 |     description: "Qwen model family via DashScope OpenAI-compatible endpoint",
-106 |     key_url: "https://www.alibabacloud.com/help/en/model-studio/developer-reference/api-key",
-107 |     key_hint: "sk-...",
-108 |     default_model: "qwen-turbo",
-109 |     models: [
-110 |       { id: "qwen-turbo", name: "Qwen Turbo", tier: "fast" },
-111 |       { id: "qwen-plus", name: "Qwen Plus", tier: "advanced" },
-112 |       { id: "qwen-max", name: "Qwen Max", tier: "advanced" },
-113 |       { id: "qwen-long", name: "Qwen Long", tier: "advanced" },
-114 |       { id: "qwen2.5-72b-instruct", name: "Qwen 2.5 72B Instruct", tier: "advanced" },
-115 |       { id: "qwen2.5-14b-instruct", name: "Qwen 2.5 14B Instruct", tier: "fast" }
-116 |     ]
-117 |   },
-118 |   nvidia: {
-119 |     name: "NVIDIA NIM",
-120 |     description: "NVIDIA NIM inference microservices — optimized open models",
-121 |     key_url: "https://build.nvidia.com",
-122 |     key_hint: "nvapi-...",
-123 |     default_model: "meta/llama-3.1-70b-instruct",
-124 |     models: [
-125 |       { id: "meta/llama-3.1-70b-instruct", name: "Llama 3.1 70B Instruct", tier: "advanced" },
-126 |       { id: "meta/llama-3.1-8b-instruct", name: "Llama 3.1 8B Instruct", tier: "fast" },
-127 |       { id: "mistralai/mixtral-8x7b-instruct-v0.1", name: "Mixtral 8x7B Instruct", tier: "fast" },
-128 |       { id: "microsoft/phi-3-mini-128k-instruct", name: "Phi-3 Mini 128K", tier: "fast" },
-129 |       { id: "google/gemma-2-9b-it", name: "Gemma 2 9B IT", tier: "fast" },
-130 |       { id: "nvidia/llama3-chatqa-1.5-70b", name: "ChatQA 1.5 70B", tier: "advanced" }
-131 |     ]
-132 |   }
-133 | };
-134 | 
-135 | export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
-136 |   const apiKeys = useWorkflowStore((s) => s.apiKeys);
-137 |   const setProviderApiKey = useWorkflowStore((s) => s.setProviderApiKey);
-138 |   const activeProvider = useWorkflowStore((s) => s.provider);
-139 |   const setProvider = useWorkflowStore((s) => s.setProvider);
-140 |   const activeModel = useWorkflowStore((s) => s.model);
-141 |   const setModel = useWorkflowStore((s) => s.setModel);
-142 |   const availableProvidersFromStore = useWorkflowStore((s) => s.availableProviders);
-143 |   const providerBaseUrls = useWorkflowStore((s) => s.providerBaseUrls);
-144 |   const setProviderBaseUrl = useWorkflowStore((s) => s.setProviderBaseUrl);
-145 |   const providerModels = useWorkflowStore((s) => s.providerModels);
-146 |   const fetchProviderModels = useWorkflowStore((s) => s.fetchProviderModels);
-147 |   const fallbackProvider = useWorkflowStore((s) => s.fallbackProvider);
-148 |   const setFallbackProvider = useWorkflowStore((s) => s.setFallbackProvider);
-149 | 
-150 |   // Local Form State
-151 |   const [selectedProvider, setSelectedProvider] = useState<string>("gemini");
-152 |   const [selectedModel, setSelectedModel] = useState<string>("");
-153 |   const [isCustomModelInput, setIsCustomModelInput] = useState<boolean>(false);
-154 |   const [customModelText, setCustomModelText] = useState<string>("");
-155 |   const [apiKeyInput, setApiKeyInput] = useState<string>("");
-156 |   const [baseUrlInput, setUrlInput] = useState<string>("");
-157 |   const [fallbackProv, setFallbackProv] = useState<string>("");
-158 |   const [showKey, setShowKey] = useState<boolean>(false);
-159 |   
-160 |   // Ollama status check state
-161 |   const [ollamaStatus, setOllamaStatus] = useState<'checking' | 'available' | 'unavailable'>('checking');
-162 |   
-163 |   // Connection Testing State
-164 |   const [isTesting, setIsTesting] = useState<boolean>(false);
-165 |   const [testResult, setTestResult] = useState<{ status: 'idle' | 'success' | 'error'; message: string }>({ status: 'idle', message: '' });
-166 | 
-167 |   // Load backend providers config or fallback
-168 |   const providersConfig: Record<string, any> = Object.keys(availableProvidersFromStore || {}).length > 0 
-169 |     ? availableProvidersFromStore 
-170 |     : FALLBACK_PROVIDERS;
-171 | 
-172 |   const checkOllama = async () => {
-173 |     setOllamaStatus('checking');
-174 |     try {
-175 |       const resp = await fetch("/api/gemini/ollama");
-176 |       if (resp.ok) {
-177 |         const data = await resp.json();
-178 |         if (data.ollama_available || (Array.isArray(data.models) && data.models.length > 0)) {
-179 |           setOllamaStatus('available');
-180 |         } else {
-181 |           setOllamaStatus('unavailable');
-182 |         }
-183 |       } else {
-184 |         setOllamaStatus('unavailable');
-185 |       }
-186 |     } catch (e) {
-187 |       setOllamaStatus('unavailable');
-188 |     }
-189 |   };
-190 | 
-191 |   // Initialize fields when modal opens
-192 |   useEffect(() => {
-193 |     if (isOpen) {
-194 |       const currentProv = activeProvider || "gemini";
-195 |       setSelectedProvider(currentProv);
-196 |       setSelectedModel(activeModel || "");
-197 |       setFallbackProv(fallbackProvider || "");
-198 |       setApiKeyInput(apiKeys[currentProv] || "");
-199 |       
-200 |       const defaultUrl = currentProv === 'ollama' ? "http://localhost:11434/v1" : "";
-201 |       setUrlInput(providerBaseUrls[currentProv] || defaultUrl);
-202 |       setShowKey(false);
-203 |       setTestResult({ status: 'idle', message: '' });
-204 | 
-205 |       const provConfig = providersConfig[currentProv] || {};
-206 |       const modelsList = providerModels[currentProv] || provConfig.models || [];
-207 |       const isPredefined = modelsList.some((m: any) => m.id === activeModel);
-208 |       if (!isPredefined && activeModel) {
-209 |         setIsCustomModelInput(true);
-210 |         setCustomModelText(activeModel);
-211 |       } else {
-212 |         setIsCustomModelInput(false);
-213 |         setCustomModelText("");
-214 |       }
-215 | 
-216 |       fetchProviderModels(currentProv).catch(() => {});
-217 |       if (currentProv === 'ollama') {
-218 |         checkOllama();
-219 |       }
-220 |     }
-221 |   }, [isOpen]);
-222 | 
-223 |   // Sync inputs when selected provider changes
-224 |   const handleProviderChange = (newProvider: string) => {
-225 |     setSelectedProvider(newProvider);
-226 |     setApiKeyInput(apiKeys[newProvider] || "");
-227 |     
-228 |     const defaultUrl = newProvider === 'ollama' ? "http://localhost:11434/v1" : "";
-229 |     setUrlInput(providerBaseUrls[newProvider] || defaultUrl);
-230 |     setTestResult({ status: 'idle', message: '' });
-231 | 
-232 |     // Pick default model or first model for this new provider
-233 |     const provConfig = providersConfig[newProvider] || {};
-234 |     const modelsList = providerModels[newProvider] || provConfig.models || [];
-235 |     const defaultMod = modelsList.length > 0 ? modelsList[0].id : (provConfig.default_model || "");
-236 |     setSelectedModel(defaultMod);
-237 |     setIsCustomModelInput(modelsList.length === 0 && newProvider !== 'ollama');
-238 |     setCustomModelText("");
-239 | 
-240 |     // Fetch latest models list in the background
-241 |     fetchProviderModels(newProvider).catch(() => {});
-242 |     if (newProvider === 'ollama') {
-243 |       checkOllama();
-244 |     }
-245 |   };
-246 | 
-247 |   const handleTestConnection = async () => {
-248 |     setIsTesting(true);
-249 |     setTestResult({ status: 'idle', message: '' });
-250 | 
-251 |     try {
-252 |       const response = await fetch("/api/gemini/test_agent", {
-253 |         method: "POST",
-254 |         headers: { "Content-Type": "application/json" },
-255 |         body: JSON.stringify({
-256 |           node: {
-257 |             id: "test",
-258 |             data: {
-259 |               name: "Test Connection Agent",
-260 |               systemPrompt: "You are a friendly connection validation utility. Keep answers brief.",
-261 |               model: selectedModel
-262 |             }
-263 |           },
-264 |           provider: selectedProvider,
-265 |           api_key: apiKeyInput.trim(),
-266 |           api_keys: { ...apiKeys, [selectedProvider]: apiKeyInput.trim() },
-267 |           base_url: baseUrlInput.trim() || undefined
-268 |         })
-269 |       });
-270 | 
-271 |       const data = await response.json();
-272 |       if (response.ok && data.status === "success") {
-273 |         setTestResult({
-274 |           status: 'success',
-275 |           message: `Connection successful! Output: "${data.response?.substring(0, 50) || 'Success'}"`
-276 |         });
-277 |       } else {
-278 |         setTestResult({
-279 |           status: 'error',
-280 |           message: data.detail || data.error || "Connection failed. Please check credentials and endpoint."
-281 |         });
-282 |       }
-283 |     } catch (e: any) {
-284 |       setTestResult({
-285 |         status: 'error',
-286 |         message: e.message || "Failed to reach the API server. Ensure your backend is running."
-287 |       });
-288 |     } finally {
-289 |       setIsTesting(false);
-290 |     }
-291 |   };
-292 | 
-293 |   const handleSaveSettings = async () => {
-294 |     // Save to Zustand store & IndexedDB
-295 |     await setProviderApiKey(selectedProvider, apiKeyInput.trim());
-296 |     setProviderBaseUrl(selectedProvider, baseUrlInput.trim());
-297 |     setProvider(selectedProvider);
-298 |     setModel(selectedModel);
-299 |     setFallbackProvider(fallbackProv);
-300 |     onClose();
-301 |   };
-302 | 
-303 |   if (!isOpen) return null;
-304 | 
-305 |   const currentProviderInfo = providersConfig[selectedProvider] || {};
-306 |   const modelsList = providerModels[selectedProvider] || currentProviderInfo.models || [];
-307 |   
-308 |   // Custom or local providers require base URL
-309 |   const isCustomOrLocal = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || selectedProvider === 'custom' || currentProviderInfo.is_custom || currentProviderInfo.is_local;
-310 |   const isLocalProvider = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || !!currentProviderInfo.is_local;
-311 | 
-312 |   return (
-313 |     <motion.div
-314 |       initial={{ opacity: 0 }}
-315 |       animate={{ opacity: 1 }}
-316 |       exit={{ opacity: 0 }}
-317 |       className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
-318 |     >
-319 |       <motion.div
-320 |         initial={{ scale: 0.95 }}
-321 |         animate={{ scale: 1 }}
-322 |         exit={{ scale: 0.95 }}
-323 |         className="w-full max-w-md bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl text-white overflow-y-auto max-h-[90vh] custom-scrollbar"
-324 |       >
-325 |         {/* Close Button */}
-326 |         <button onClick={onClose} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer transition-colors">
-327 |           <X className="w-5 h-5" />
-328 |         </button>
-329 | 
-330 |         {/* Header */}
-331 |         <div className="flex gap-4 items-center mb-6">
-332 |           <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
-333 |             <Key className="w-6 h-6 text-white" />
-334 |           </div>
-335 |           <div>
-336 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">AI Engine Settings</h3>
-337 |             <p className="text-xs text-neutral-400 font-sans mt-0.5">Configure your active AI provider, model routing, and keys.</p>
-338 |           </div>
-339 |         </div>
-340 | 
-341 |         <div className="space-y-4">
-342 |           {/* 1. Provider Selector */}
-343 |           <div className="space-y-1.5">
-344 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Provider</label>
-345 |             <select
-346 |               value={selectedProvider}
-347 |               onChange={(e) => handleProviderChange(e.target.value)}
-348 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
-349 |             >
-350 |               {Object.keys(providersConfig).map((pKey) => (
-351 |                 <option key={pKey} value={pKey}>
-352 |                   {providersConfig[pKey]?.name || pKey}
-353 |                 </option>
-354 |               ))}
-355 |             </select>
-356 |           </div>
-357 | 
-358 |           {/* 2. Model Selector */}
-359 |           <div className="space-y-1.5">
-360 |             <div className="flex justify-between items-center">
-361 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Model</label>
-362 |               {(modelsList.length > 0 || selectedProvider === 'ollama') && (
-363 |                 <button
-364 |                   type="button"
-365 |                   onClick={() => {
-366 |                     const willBeCustom = !isCustomModelInput;
-367 |                     setIsCustomModelInput(willBeCustom);
-368 |                     if (willBeCustom) {
-369 |                       setCustomModelText(selectedModel);
-370 |                     } else {
-371 |                       const defaultMod = modelsList[0]?.id || currentProviderInfo.default_model || "";
-372 |                       setSelectedModel(defaultMod);
-373 |                     }
-374 |                   }}
-375 |                   className="text-[9px] text-cyan-400 hover:underline font-mono cursor-pointer"
-376 |                 >
-377 |                   {isCustomModelInput ? "Select from list" : "Enter custom model ID"}
-378 |                 </button>
-379 |               )}
-380 |             </div>
-381 |             {isCustomModelInput || (modelsList.length === 0 && selectedProvider !== 'ollama') ? (
-382 |               <input
-383 |                 type="text"
-384 |                 placeholder="e.g. custom-fine-tune-v1, llama3"
-385 |                 value={isCustomModelInput ? customModelText : selectedModel}
-386 |                 onChange={(e) => {
-387 |                   const val = e.target.value;
-388 |                   if (isCustomModelInput) {
-389 |                     setCustomModelText(val);
-390 |                   }
-391 |                   setSelectedModel(val);
-392 |                 }}
-393 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-394 |               />
-395 |             ) : (
-396 |               <select
-397 |                 value={selectedModel}
-398 |                 onChange={(e) => {
-399 |                   const val = e.target.value;
-400 |                   if (val === "__custom__") {
-401 |                     setIsCustomModelInput(true);
-402 |                     setCustomModelText(selectedModel);
-403 |                   } else {
-404 |                     setSelectedModel(val);
-405 |                   }
-406 |                 }}
-407 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
-408 |               >
-409 |                 {selectedProvider === "ollama" && modelsList.length === 0 ? (
-410 |                   <option value="" disabled>
-411 |                     No local models detected
-412 |                   </option>
-413 |                 ) : (
-414 |                   modelsList.map((m: any) => (
-415 |                     <option key={m.id} value={m.id}>
-416 |                       {m.name || m.id} ({m.tier || "standard"})
-417 |                     </option>
-418 |                   ))
-419 |                 )}
-420 |                 <option value="__custom__">Custom Model ID...</option>
-421 |               </select>
-422 |             )}
-423 |           </div>
-424 | 
-425 |           {/* 3. Custom Base URL Gateway */}
-426 |           <div className="space-y-1.5">
-427 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold flex items-center gap-1">
-428 |               <Globe className="w-3.5 h-3.5" /> Base URL {isCustomOrLocal ? "(Required)" : "(Optional)"}
-429 |             </label>
-430 |             <input
-431 |               type="text"
-432 |               placeholder={currentProviderInfo.base_url || "https://api.provider.com/v1"}
-433 |               value={baseUrlInput}
-434 |               onChange={(e) => setUrlInput(e.target.value)}
-435 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-436 |             />
-437 |           </div>
-438 | 
-439 |           {/* 4. API Key Input or Status Box (Ollama) */}
-440 |           {selectedProvider === "ollama" ? (
-441 |             <div className="space-y-1.5">
-442 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
-443 |                 Ollama Status
-444 |               </label>
-445 |               <div className="bg-black border border-[#1f1f1f] rounded-xl p-4 flex flex-col gap-2">
-446 |                 <div className="flex items-center gap-2 text-xs">
-447 |                   {ollamaStatus === "checking" && (
-448 |                     <>
-449 |                       <div className="w-3.5 h-3.5 border-2 border-neutral-400 border-t-transparent rounded-full animate-spin shrink-0" />
-450 |                       <span className="text-neutral-400 font-mono">Checking local Ollama availability...</span>
-451 |                     </>
-452 |                   )}
-453 |                   {ollamaStatus === "available" && (
-454 |                     <>
-455 |                       <Check className="w-4 h-4 text-emerald-500 shrink-0" />
-456 |                       <span className="text-emerald-400 font-mono font-bold">Ollama running locally</span>
-457 |                     </>
-458 |                   )}
-459 |                   {ollamaStatus === "unavailable" && (
-460 |                     <>
-461 |                       <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
-462 |                       <span className="text-rose-400 font-mono font-bold">Ollama not detected</span>
-463 |                     </>
-464 |                   )}
-465 |                 </div>
-466 |                 {ollamaStatus === "unavailable" && (
-467 |                   <p className="text-[10px] text-neutral-400 leading-normal font-sans">
-468 |                     Make sure Ollama is running on your machine. You can download it from{" "}
-469 |                     <a
-470 |                       href="https://ollama.com"
-471 |                       target="_blank"
-472 |                       rel="noreferrer"
-473 |                       className="text-cyan-400 hover:underline inline-flex items-center gap-0.5"
-474 |                     >
-475 |                       ollama.com <ExternalLink className="w-2.5 h-2.5" />
-476 |                     </a>
-477 |                   </p>
-478 |                 )}
-479 |               </div>
-480 |             </div>
-481 |           ) : (
-482 |             <div className="space-y-1.5">
-483 |               <div className="flex justify-between items-center">
-484 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
-485 |                   {selectedProvider.toUpperCase()}_API_KEY
-486 |                 </label>
-487 |                 {currentProviderInfo.key_url && (
-488 |                   <a
-489 |                     href={currentProviderInfo.key_url}
-490 |                     target="_blank"
-491 |                     rel="noreferrer"
-492 |                     className="text-[9px] text-cyan-400 hover:underline flex items-center gap-1 cursor-pointer"
-493 |                   >
-494 |                     Get key <ExternalLink className="w-3 h-3" />
-495 |                   </a>
-496 |                 )}
-497 |               </div>
-498 |               <div className="relative">
-499 |                 <input
-500 |                   type={showKey ? "text" : "password"}
-501 |                   placeholder={
-502 |                     currentProviderInfo.key_hint
-503 |                       ? `Enter key (starts with ${currentProviderInfo.key_hint})`
-504 |                       : "Enter API key"
-505 |                   }
-506 |                   value={apiKeyInput}
-507 |                   onChange={(e) => setApiKeyInput(e.target.value)}
-508 |                   className="w-full bg-black border border-[#1f1f1f] rounded-xl pl-4 pr-12 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-509 |                 />
-510 |                 <button
-511 |                   type="button"
-512 |                   onClick={() => setShowKey(!showKey)}
-513 |                   className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
-514 |                 >
-515 |                   {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-516 |                 </button>
-517 |               </div>
-518 |             </div>
-519 |           )}
-520 | 
-521 |           {/* 5. Fallback Provider Selector */}
-522 |           <div className="space-y-1.5">
-523 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Automatic Fallback</label>
-524 |             <select
-525 |               value={fallbackProv}
-526 |               onChange={(e) => setFallbackProv(e.target.value)}
-527 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
-528 |             >
-529 |               <option value="">No Fallback (Error immediately)</option>
-530 |               {Object.keys(providersConfig)
-531 |                 .filter((pKey) => pKey !== selectedProvider)
-532 |                 .map((pKey) => (
-533 |                   <option key={pKey} value={pKey}>
-534 |                     Fallback: {providersConfig[pKey]?.name || pKey}
-535 |                   </option>
-536 |                 ))}
-537 |             </select>
-538 |           </div>
-539 | 
-540 |           {/* Connection Test pipeline */}
-541 |           {isLocalProvider ? (
-542 |             <div className="p-3 bg-neutral-950/40 border border-[#1f1f1f] rounded-xl text-[10px] text-neutral-400 font-mono leading-normal">
-543 |               ℹ️ Local models run directly on your machine and do not require API connection testing.
-544 |             </div>
-545 |           ) : (
-546 |             <div className="pt-2">
-547 |               <button
-548 |                 type="button"
-549 |                 onClick={handleTestConnection}
-550 |                 disabled={isTesting || (!apiKeyInput && selectedProvider !== "ollama" && selectedProvider !== "lmstudio")}
-551 |                 className="w-full py-2 bg-neutral-900 hover:bg-neutral-800 border border-[#1f1f1f] text-neutral-300 hover:text-white font-bold rounded-xl text-xs font-mono transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-20 disabled:scale-100"
-552 |               >
-553 |                 {isTesting ? (
-554 |                   <>
-555 |                     <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-556 |                     Testing Pipeline...
-557 |                   </>
-558 |                 ) : (
-559 |                   "Test Connection"
-560 |                 )}
-561 |               </button>
-562 | 
-563 |               {/* Test Connection Results */}
-564 |               <AnimatePresence>
-565 |                 {testResult.status !== 'idle' && (
-566 |                   <motion.div
-567 |                     initial={{ opacity: 0, y: 5 }}
-568 |                     animate={{ opacity: 1, y: 0 }}
-569 |                     exit={{ opacity: 0, y: 5 }}
-570 |                     className={`mt-3 flex items-start gap-2.5 p-3 rounded-xl text-[10px] leading-normal font-mono border ${
-571 |                       testResult.status === 'success'
-572 |                         ? 'bg-emerald-950/20 border-emerald-950/30 text-emerald-400'
-573 |                         : 'bg-rose-950/20 border-rose-950/30 text-rose-400'
-574 |                     }`}
-575 |                   >
-576 |                     {testResult.status === 'success' ? (
-577 |                       <Check className="w-4 h-4 shrink-0 text-emerald-500 mt-0.5" />
-578 |                     ) : (
-579 |                       <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
-580 |                     )}
-581 |                     <span className="whitespace-pre-wrap">{testResult.message}</span>
-582 |                   </motion.div>
-583 |                 )}
-584 |               </AnimatePresence>
-585 |             </div>
-586 |           )}
-587 | 
-588 |           {/* 6. Save and Cancel Buttons */}
-589 |           <div className="pt-4 flex gap-3 border-t border-[#141414]">
-590 |             <button
-591 |               id="save-api-key-btn"
-592 |               onClick={handleSaveSettings}
-593 |               className="flex-1 py-2.5 bg-white hover:bg-neutral-100 text-black font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
-594 |             >
-595 |               Save Settings
-596 |             </button>
-597 |             <button
-598 |               onClick={onClose}
-599 |               className="px-5 py-2.5 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-xl text-xs font-mono transition-colors cursor-pointer"
-600 |             >
-601 |               Cancel
-602 |             </button>
-603 |           </div>
-604 |         </div>
-605 |       </motion.div>
-606 |     </motion.div>
-607 |   );
-608 | }
-609 |
+ 10 | import { set as idbSet, del as idbDel } from 'idb-keyval';
+ 11 | 
+ 12 | interface APIKeysModalProps {
+ 13 |   isOpen: boolean;
+ 14 |   onClose: () => void;
+ 15 | }
+ 16 | 
+ 17 | const FALLBACK_PROVIDERS = {
+ 18 |   gemini: {
+ 19 |     name: "Google Gemini",
+ 20 |     description: "Google's flagship multimodal AI models",
+ 21 |     key_url: "https://aistudio.google.com/apikey",
+ 22 |     key_hint: "AIzaSy...",
+ 23 |     default_model: "gemini-2.5-flash",
+ 24 |     models: [
+ 25 |       { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", tier: "fast" },
+ 26 |       { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", tier: "advanced" },
+ 27 |       { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", tier: "fast" },
+ 28 |       { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite", tier: "fast" }
+ 29 |     ]
+ 30 |   },
+ 31 |   openai: {
+ 32 |     name: "OpenAI",
+ 33 |     description: "GPT-4o and o-series reasoning models",
+ 34 |     key_url: "https://platform.openai.com/api-keys",
+ 35 |     key_hint: "sk-...",
+ 36 |     default_model: "gpt-4o",
+ 37 |     models: [
+ 38 |       { id: "gpt-4o", name: "GPT-4o", tier: "advanced" },
+ 39 |       { id: "gpt-4o-mini", name: "GPT-4o Mini", tier: "fast" },
+ 40 |       { id: "o3-mini", name: "o3-mini", tier: "reasoning" },
+ 41 |       { id: "o1", name: "o1", tier: "reasoning" }
+ 42 |     ]
+ 43 |   },
+ 44 |   claude: {
+ 45 |     name: "Anthropic Claude",
+ 46 |     description: "Sovereign intelligence with Claude 3.5 & 3.7 family",
+ 47 |     key_url: "https://console.anthropic.com/settings/keys",
+ 48 |     key_hint: "sk-ant-...",
+ 49 |     default_model: "claude-sonnet-4-20250514",
+ 50 |     models: [
+ 51 |       { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", tier: "advanced" },
+ 52 |       { id: "claude-3-7-sonnet-20250219", name: "Claude 3.7 Sonnet", tier: "advanced" },
+ 53 |       { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet", tier: "advanced" },
+ 54 |       { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku", tier: "fast" }
+ 55 |     ]
+ 56 |   },
+ 57 |   deepseek: {
+ 58 |     name: "DeepSeek",
+ 59 |     description: "High-intelligence open reasoning and chat models",
+ 60 |     key_url: "https://platform.deepseek.com/api_keys",
+ 61 |     key_hint: "sk-...",
+ 62 |     default_model: "deepseek-chat",
+ 63 |     models: [
+ 64 |       { id: "deepseek-chat", name: "DeepSeek V3", tier: "advanced" },
+ 65 |       { id: "deepseek-reasoner", name: "DeepSeek R1", tier: "reasoning" }
+ 66 |     ]
+ 67 |   },
+ 68 |   groq: {
+ 69 |     name: "Groq",
+ 70 |     description: "Ultra-low-latency LPU model execution",
+ 71 |     key_url: "https://console.groq.com/keys",
+ 72 |     key_hint: "gsk_...",
+ 73 |     default_model: "llama-3.3-70b-versatile",
+ 74 |     models: [
+ 75 |       { id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B", tier: "fast" },
+ 76 |       { id: "deepseek-r1-distill-llama-70b", name: "DeepSeek R1 Distill Llama 70B", tier: "reasoning" },
+ 77 |       { id: "llama-3.1-8b-instant", name: "Llama 3.1 8B Instant", tier: "fast" }
+ 78 |     ]
+ 79 |   },
+ 80 |   openrouter: {
+ 81 |     name: "OpenRouter",
+ 82 |     description: "Consolidated API for hundreds of LLMs",
+ 83 |     key_url: "https://openrouter.ai/keys",
+ 84 |     key_hint: "sk-or-...",
+ 85 |     default_model: "openai/gpt-4o",
+ 86 |     models: [
+ 87 |       { id: "openai/gpt-4o", name: "GPT-4o", tier: "advanced" },
+ 88 |       { id: "anthropic/claude-3.7-sonnet", name: "Claude 3.7 Sonnet", tier: "advanced" },
+ 89 |       { id: "deepseek/deepseek-chat", name: "DeepSeek V3", tier: "open" }
+ 90 |     ]
+ 91 |   },
+ 92 |   ollama: {
+ 93 |     name: "Ollama (Local)",
+ 94 |     description: "Local model hosting engine running on your system",
+ 95 |     key_url: "https://ollama.com",
+ 96 |     key_hint: "No credentials needed",
+ 97 |     default_model: "llama3",
+ 98 |     models: [
+ 99 |       { id: "llama3", name: "Llama 3", tier: "open" },
+100 |       { id: "mistral", name: "Mistral", tier: "open" },
+101 |       { id: "phi3", name: "Phi 3", tier: "open" }
+102 |     ]
+103 |   },
+104 |   alibaba: {
+105 |     name: "Alibaba Cloud (Qwen)",
+106 |     description: "Qwen model family via DashScope OpenAI-compatible endpoint",
+107 |     key_url: "https://www.alibabacloud.com/help/en/model-studio/developer-reference/api-key",
+108 |     key_hint: "sk-...",
+109 |     default_model: "qwen-turbo",
+110 |     models: [
+111 |       { id: "qwen-turbo", name: "Qwen Turbo", tier: "fast" },
+112 |       { id: "qwen-plus", name: "Qwen Plus", tier: "advanced" },
+113 |       { id: "qwen-max", name: "Qwen Max", tier: "advanced" },
+114 |       { id: "qwen-long", name: "Qwen Long", tier: "advanced" },
+115 |       { id: "qwen2.5-72b-instruct", name: "Qwen 2.5 72B Instruct", tier: "advanced" },
+116 |       { id: "qwen2.5-14b-instruct", name: "Qwen 2.5 14B Instruct", tier: "fast" }
+117 |     ]
+118 |   },
+119 |   nvidia: {
+120 |     name: "NVIDIA NIM",
+121 |     description: "NVIDIA NIM inference microservices — optimized open models",
+122 |     key_url: "https://build.nvidia.com",
+123 |     key_hint: "nvapi-...",
+124 |     default_model: "meta/llama-3.1-70b-instruct",
+125 |     models: [
+126 |       { id: "meta/llama-3.1-70b-instruct", name: "Llama 3.1 70B Instruct", tier: "advanced" },
+127 |       { id: "meta/llama-3.1-8b-instruct", name: "Llama 3.1 8B Instruct", tier: "fast" },
+128 |       { id: "mistralai/mixtral-8x7b-instruct-v0.1", name: "Mixtral 8x7B Instruct", tier: "fast" },
+129 |       { id: "microsoft/phi-3-mini-128k-instruct", name: "Phi-3 Mini 128K", tier: "fast" },
+130 |       { id: "google/gemma-2-9b-it", name: "Gemma 2 9B IT", tier: "fast" },
+131 |       { id: "nvidia/llama3-chatqa-1.5-70b", name: "ChatQA 1.5 70B", tier: "advanced" }
+132 |     ]
+133 |   },
+134 |   glm: {
+135 |     name: "Zhipu GLM",
+136 |     description: "GLM models from Zhipu AI (via z.ai)",
+137 |     key_url: "https://api.z.ai/",
+138 |     key_hint: "",
+139 |     default_model: "glm-4-flash",
+140 |     models: [
+141 |       { id: "glm-4-flash", name: "GLM 4 Flash", tier: "fast" },
+142 |       { id: "glm-4-plus", name: "GLM 4 Plus", tier: "advanced" },
+143 |       { id: "glm-4-air", name: "GLM 4 Air", tier: "fast" },
+144 |       { id: "glm-4", name: "GLM 4", tier: "advanced" }
+145 |     ]
+146 |   },
+147 |   "z.ai": {
+148 |     name: "z.ai",
+149 |     description: "GLM models from z.ai",
+150 |     key_url: "https://api.z.ai/",
+151 |     key_hint: "",
+152 |     default_model: "glm-4-flash",
+153 |     models: [
+154 |       { id: "glm-4-flash", name: "GLM 4 Flash", tier: "fast" },
+155 |       { id: "glm-4-plus", name: "GLM 4 Plus", tier: "advanced" },
+156 |       { id: "glm-4-air", name: "GLM 4 Air", tier: "fast" },
+157 |       { id: "glm-4", name: "GLM 4", tier: "advanced" }
+158 |     ]
+159 |   }
+160 | };
+161 | 
+162 | export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
+163 |   const apiKeys = useWorkflowStore((s) => s.apiKeys);
+164 |   const setProviderApiKey = useWorkflowStore((s) => s.setProviderApiKey);
+165 |   const backupApiKeys = useWorkflowStore((s) => s.backupApiKeys);
+166 |   const setBackupApiKey = useWorkflowStore((s) => s.setBackupApiKey);
+167 |   const activeProvider = useWorkflowStore((s) => s.provider);
+168 |   const setProvider = useWorkflowStore((s) => s.setProvider);
+169 |   const activeModel = useWorkflowStore((s) => s.model);
+170 |   const setModel = useWorkflowStore((s) => s.setModel);
+171 |   const availableProvidersFromStore = useWorkflowStore((s) => s.availableProviders);
+172 |   const providerBaseUrls = useWorkflowStore((s) => s.providerBaseUrls);
+173 |   const setProviderBaseUrl = useWorkflowStore((s) => s.setProviderBaseUrl);
+174 |   const providerModels = useWorkflowStore((s) => s.providerModels);
+175 |   const fetchProviderModels = useWorkflowStore((s) => s.fetchProviderModels);
+176 |   const fallbackProvider = useWorkflowStore((s) => s.fallbackProvider);
+177 |   const setFallbackProvider = useWorkflowStore((s) => s.setFallbackProvider);
+178 | 
+179 |   // Local Form State
+180 |   const [selectedProvider, setSelectedProvider] = useState<string>("gemini");
+181 |   const [selectedModel, setSelectedModel] = useState<string>("");
+182 |   const [isCustomModelInput, setIsCustomModelInput] = useState<boolean>(false);
+183 |   const [customModelText, setCustomModelText] = useState<string>("");
+184 |   const [apiKeyInput, setApiKeyInput] = useState<string>("");
+185 |   const [backupKey1Input, setBackupKey1Input] = useState<string>("");
+186 |   const [backupKey2Input, setBackupKey2Input] = useState<string>("");
+187 |   const [showBackupKey1, setShowBackupKey1] = useState<boolean>(false);
+188 |   const [showBackupKey2, setShowBackupKey2] = useState<boolean>(false);
+189 |   const [showBackupExpander, setShowBackupExpander] = useState<boolean>(false);
+190 |   const [showSecondBackup, setShowSecondBackup] = useState<boolean>(false);
+191 |   const [baseUrlInput, setUrlInput] = useState<string>("");
+192 |   const [fallbackProv, setFallbackProv] = useState<string>("");
+193 |   const [showKey, setShowKey] = useState<boolean>(false);
+194 |   
+195 |   // Ollama status check state
+196 |   const [ollamaStatus, setOllamaStatus] = useState<'checking' | 'available' | 'unavailable'>('checking');
+197 |   
+198 |   // Connection Testing State
+199 |   const [isTesting, setIsTesting] = useState<boolean>(false);
+200 |   const [testResult, setTestResult] = useState<{ status: 'idle' | 'success' | 'error'; message: string }>({ status: 'idle', message: '' });
+201 | 
+202 |   // Load backend providers config or fallback
+203 |   const providersConfig: Record<string, any> = Object.keys(availableProvidersFromStore || {}).length > 0 
+204 |     ? availableProvidersFromStore 
+205 |     : FALLBACK_PROVIDERS;
+206 | 
+207 |   const checkOllama = async () => {
+208 |     setOllamaStatus('checking');
+209 |     try {
+210 |       const resp = await fetch("/api/gemini/ollama");
+211 |       if (resp.ok) {
+212 |         const data = await resp.json();
+213 |         if (data.ollama_available || (Array.isArray(data.models) && data.models.length > 0)) {
+214 |           setOllamaStatus('available');
+215 |         } else {
+216 |           setOllamaStatus('unavailable');
+217 |         }
+218 |       } else {
+219 |         setOllamaStatus('unavailable');
+220 |       }
+221 |     } catch (e) {
+222 |       setOllamaStatus('unavailable');
+223 |     }
+224 |   };
+225 | 
+226 |   // Initialize fields when modal opens
+227 |   useEffect(() => {
+228 |     if (isOpen) {
+229 |       const currentProv = activeProvider || "gemini";
+230 |       setSelectedProvider(currentProv);
+231 |       setSelectedModel(activeModel || "");
+232 |       setFallbackProv(fallbackProvider || "");
+233 |       setApiKeyInput(apiKeys[currentProv] || "");
+234 |       
+235 |       const backupKeys = backupApiKeys[currentProv] || [];
+236 |       setBackupKey1Input(backupKeys[0] || "");
+237 |       setBackupKey2Input(backupKeys[1] || "");
+238 |       setShowBackupExpander(!!(backupKeys[0] || backupKeys[1]));
+239 |       setShowSecondBackup(!!backupKeys[1]);
+240 | 
+241 |       const defaultUrl = currentProv === 'ollama' ? "http://localhost:11434/v1" : "";
+242 |       setUrlInput(providerBaseUrls[currentProv] || defaultUrl);
+243 |       setShowKey(false);
+244 |       setTestResult({ status: 'idle', message: '' });
+245 | 
+246 |       const provConfig = providersConfig[currentProv] || {};
+247 |       const modelsList = providerModels[currentProv] || provConfig.models || [];
+248 |       const isPredefined = modelsList.some((m: any) => m.id === activeModel);
+249 |       if (!isPredefined && activeModel) {
+250 |         setIsCustomModelInput(true);
+251 |         setCustomModelText(activeModel);
+252 |       } else {
+253 |         setIsCustomModelInput(false);
+254 |         setCustomModelText("");
+255 |       }
+256 | 
+257 |       fetchProviderModels(currentProv).catch(() => {});
+258 |       if (currentProv === 'ollama') {
+259 |         checkOllama();
+260 |       }
+261 |     }
+262 |   }, [isOpen]);
+263 | 
+264 |   // Sync inputs when selected provider changes
+265 |   const handleProviderChange = (newProvider: string) => {
+266 |     setSelectedProvider(newProvider);
+267 |     setApiKeyInput(apiKeys[newProvider] || "");
+268 |     
+269 |     const backupKeys = backupApiKeys[newProvider] || [];
+270 |     setBackupKey1Input(backupKeys[0] || "");
+271 |     setBackupKey2Input(backupKeys[1] || "");
+272 |     setShowBackupExpander(!!(backupKeys[0] || backupKeys[1]));
+273 |     setShowSecondBackup(!!backupKeys[1]);
+274 |     
+275 |     const defaultUrl = newProvider === 'ollama' ? "http://localhost:11434/v1" : "";
+276 |     setUrlInput(providerBaseUrls[newProvider] || defaultUrl);
+277 |     setTestResult({ status: 'idle', message: '' });
+278 | 
+279 |     // Pick default model or first model for this new provider
+280 |     const provConfig = providersConfig[newProvider] || {};
+281 |     const modelsList = providerModels[newProvider] || provConfig.models || [];
+282 |     const defaultMod = modelsList.length > 0 ? modelsList[0].id : (provConfig.default_model || "");
+283 |     setSelectedModel(defaultMod);
+284 |     setIsCustomModelInput(modelsList.length === 0 && newProvider !== 'ollama');
+285 |     setCustomModelText("");
+286 | 
+287 |     // Fetch latest models list in the background
+288 |     fetchProviderModels(newProvider).catch(() => {});
+289 |     if (newProvider === 'ollama') {
+290 |       checkOllama();
+291 |     }
+292 |   };
+293 | 
+294 |   const handleTestConnection = async () => {
+295 |     setIsTesting(true);
+296 |     setTestResult({ status: 'idle', message: '' });
+297 | 
+298 |     try {
+299 |       const response = await fetch("/api/gemini/test_agent", {
+300 |         method: "POST",
+301 |         headers: { "Content-Type": "application/json" },
+302 |         body: JSON.stringify({
+303 |           node: {
+304 |             id: "test",
+305 |             data: {
+306 |               name: "Test Connection Agent",
+307 |               systemPrompt: "You are a friendly connection validation utility. Keep answers brief.",
+308 |               model: selectedModel
+309 |             }
+310 |           },
+311 |           provider: selectedProvider,
+312 |           api_key: apiKeyInput.trim(),
+313 |           api_keys: { ...apiKeys, [selectedProvider]: apiKeyInput.trim() },
+314 |           base_url: baseUrlInput.trim() || undefined
+315 |         })
+316 |       });
+317 | 
+318 |       const data = await response.json();
+319 |       if (response.ok && data.status === "success") {
+320 |         setTestResult({
+321 |           status: 'success',
+322 |           message: `Connection successful! Output: "${data.response?.substring(0, 50) || 'Success'}"`
+323 |         });
+324 |       } else {
+325 |         setTestResult({
+326 |           status: 'error',
+327 |           message: data.detail || data.error || "Connection failed. Please check credentials and endpoint."
+328 |         });
+329 |       }
+330 |     } catch (e: any) {
+331 |       setTestResult({
+332 |         status: 'error',
+333 |         message: e.message || "Failed to reach the API server. Ensure your backend is running."
+334 |       });
+335 |     } finally {
+336 |       setIsTesting(false);
+337 |     }
+338 |   };
+339 | 
+340 |   const handleSaveSettings = async () => {
+341 |     // Save to Zustand store & IndexedDB
+342 |     await setProviderApiKey(selectedProvider, apiKeyInput.trim());
+343 |     await setBackupApiKey(selectedProvider, 0, backupKey1Input.trim());
+344 |     await setBackupApiKey(selectedProvider, 1, backupKey2Input.trim());
+345 |     setProviderBaseUrl(selectedProvider, baseUrlInput.trim());
+346 |     await setProvider(selectedProvider);
+347 |     await setModel(selectedModel);
+348 |     setFallbackProvider(fallbackProv);
+349 | 
+350 |     // Save custom model custom string if user selected custom
+351 |     if (isCustomModelInput && customModelText.trim()) {
+352 |       await idbSet(`solospace_custom_model_${selectedProvider}`, customModelText.trim());
+353 |     } else {
+354 |       await idbDel(`solospace_custom_model_${selectedProvider}`);
+355 |     }
+356 | 
+357 |     onClose();
+358 |   };
+359 | 
+360 |   if (!isOpen) return null;
+361 | 
+362 |   const currentProviderInfo = providersConfig[selectedProvider] || {};
+363 |   const modelsList = providerModels[selectedProvider] || currentProviderInfo.models || [];
+364 |   
+365 |   // Custom or local providers require base URL
+366 |   const isCustomOrLocal = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || selectedProvider === 'custom' || currentProviderInfo.is_custom || currentProviderInfo.is_local;
+367 |   const isLocalProvider = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || !!currentProviderInfo.is_local;
+368 | 
+369 |   return (
+370 |     <motion.div
+371 |       initial={{ opacity: 0 }}
+372 |       animate={{ opacity: 1 }}
+373 |       exit={{ opacity: 0 }}
+374 |       className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
+375 |     >
+376 |       <motion.div
+377 |         initial={{ scale: 0.95 }}
+378 |         animate={{ scale: 1 }}
+379 |         exit={{ scale: 0.95 }}
+380 |         className="w-full max-w-md bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl text-white overflow-y-auto max-h-[90vh] custom-scrollbar"
+381 |       >
+382 |         {/* Close Button */}
+383 |         <button onClick={onClose} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer transition-colors">
+384 |           <X className="w-5 h-5" />
+385 |         </button>
+386 | 
+387 |         {/* Header */}
+388 |         <div className="flex gap-4 items-center mb-6">
+389 |           <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
+390 |             <Key className="w-6 h-6 text-white" />
+391 |           </div>
+392 |           <div>
+393 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">AI Engine Settings</h3>
+394 |             <p className="text-xs text-neutral-400 font-sans mt-0.5">Configure your active AI provider, model routing, and keys.</p>
+395 |           </div>
+396 |         </div>
+397 | 
+398 |         <div className="space-y-4">
+399 |           {/* 1. Provider Selector */}
+400 |           <div className="space-y-1.5">
+401 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Provider</label>
+402 |             <select
+403 |               value={selectedProvider}
+404 |               onChange={(e) => handleProviderChange(e.target.value)}
+405 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
+406 |             >
+407 |               {Object.keys(providersConfig).map((pKey) => (
+408 |                 <option key={pKey} value={pKey}>
+409 |                   {providersConfig[pKey]?.name || pKey}
+410 |                 </option>
+411 |               ))}
+412 |             </select>
+413 |           </div>
+414 | 
+415 |           {/* 2. Model Selector */}
+416 |           <div className="space-y-1.5">
+417 |             <div className="flex justify-between items-center">
+418 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Model</label>
+419 |               {(modelsList.length > 0 || selectedProvider === 'ollama') && (
+420 |                 <button
+421 |                   type="button"
+422 |                   onClick={() => {
+423 |                     const willBeCustom = !isCustomModelInput;
+424 |                     setIsCustomModelInput(willBeCustom);
+425 |                     if (willBeCustom) {
+426 |                       setCustomModelText(selectedModel);
+427 |                     } else {
+428 |                       const defaultMod = modelsList[0]?.id || currentProviderInfo.default_model || "";
+429 |                       setSelectedModel(defaultMod);
+430 |                     }
+431 |                   }}
+432 |                   className="text-[9px] text-cyan-400 hover:underline font-mono cursor-pointer"
+433 |                 >
+434 |                   {isCustomModelInput ? "Select from list" : "Enter custom model ID"}
+435 |                 </button>
+436 |               )}
+437 |             </div>
+438 |             {isCustomModelInput || (modelsList.length === 0 && selectedProvider !== 'ollama') ? (
+439 |               <input
+440 |                 type="text"
+441 |                 placeholder="e.g. custom-fine-tune-v1, llama3"
+442 |                 value={isCustomModelInput ? customModelText : selectedModel}
+443 |                 onChange={(e) => {
+444 |                   const val = e.target.value;
+445 |                   if (isCustomModelInput) {
+446 |                     setCustomModelText(val);
+447 |                   }
+448 |                   setSelectedModel(val);
+449 |                 }}
+450 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+451 |               />
+452 |             ) : (
+453 |               <select
+454 |                 value={selectedModel}
+455 |                 onChange={(e) => {
+456 |                   const val = e.target.value;
+457 |                   if (val === "__custom__") {
+458 |                     setIsCustomModelInput(true);
+459 |                     setCustomModelText(selectedModel);
+460 |                   } else {
+461 |                     setSelectedModel(val);
+462 |                   }
+463 |                 }}
+464 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
+465 |               >
+466 |                 {selectedProvider === "ollama" && modelsList.length === 0 ? (
+467 |                   <option value="" disabled>
+468 |                     No local models detected
+469 |                   </option>
+470 |                 ) : (
+471 |                   modelsList.map((m: any) => (
+472 |                     <option key={m.id} value={m.id}>
+473 |                       {m.name || m.id} ({m.tier || "standard"})
+474 |                     </option>
+475 |                   ))
+476 |                 )}
+477 |                 <option value="__custom__">Custom Model ID...</option>
+478 |               </select>
+479 |             )}
+480 |           </div>
+481 | 
+482 |           {/* 3. Custom Base URL Gateway */}
+483 |           <div className="space-y-1.5">
+484 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold flex items-center gap-1">
+485 |               <Globe className="w-3.5 h-3.5" /> Base URL {isCustomOrLocal ? "(Required)" : "(Optional)"}
+486 |             </label>
+487 |             <input
+488 |               type="text"
+489 |               placeholder={currentProviderInfo.base_url || "https://api.provider.com/v1"}
+490 |               value={baseUrlInput}
+491 |               onChange={(e) => setUrlInput(e.target.value)}
+492 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+493 |             />
+494 |           </div>
+495 | 
+496 |           {/* 4. API Key Input or Status Box (Ollama) */}
+497 |           {selectedProvider === "ollama" ? (
+498 |             <div className="space-y-1.5">
+499 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
+500 |                 Ollama Status
+501 |               </label>
+502 |               <div className="bg-black border border-[#1f1f1f] rounded-xl p-4 flex flex-col gap-2">
+503 |                 <div className="flex items-center gap-2 text-xs">
+504 |                   {ollamaStatus === "checking" && (
+505 |                     <>
+506 |                       <div className="w-3.5 h-3.5 border-2 border-neutral-400 border-t-transparent rounded-full animate-spin shrink-0" />
+507 |                       <span className="text-neutral-400 font-mono">Checking local Ollama availability...</span>
+508 |                     </>
+509 |                   )}
+510 |                   {ollamaStatus === "available" && (
+511 |                     <>
+512 |                       <Check className="w-4 h-4 text-emerald-500 shrink-0" />
+513 |                       <span className="text-emerald-400 font-mono font-bold">Ollama running locally</span>
+514 |                     </>
+515 |                   )}
+516 |                   {ollamaStatus === "unavailable" && (
+517 |                     <>
+518 |                       <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+519 |                       <span className="text-rose-400 font-mono font-bold">Ollama not detected</span>
+520 |                     </>
+521 |                   )}
+522 |                 </div>
+523 |                 {ollamaStatus === "unavailable" && (
+524 |                   <p className="text-[10px] text-neutral-400 leading-normal font-sans">
+525 |                     Make sure Ollama is running on your machine. You can download it from{" "}
+526 |                     <a
+527 |                       href="https://ollama.com"
+528 |                       target="_blank"
+529 |                       rel="noreferrer"
+530 |                       className="text-cyan-400 hover:underline inline-flex items-center gap-0.5"
+531 |                     >
+532 |                       ollama.com <ExternalLink className="w-2.5 h-2.5" />
+533 |                     </a>
+534 |                   </p>
+535 |                 )}
+536 |               </div>
+537 |             </div>
+538 |           ) : (
+539 |             <div className="space-y-1.5">
+540 |               <div className="flex justify-between items-center">
+541 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
+542 |                   {selectedProvider.toUpperCase()}_API_KEY
+543 |                 </label>
+544 |                 {currentProviderInfo.key_url && (
+545 |                   <a
+546 |                     href={currentProviderInfo.key_url}
+547 |                     target="_blank"
+548 |                     rel="noreferrer"
+549 |                     className="text-[9px] text-cyan-400 hover:underline flex items-center gap-1 cursor-pointer"
+550 |                   >
+551 |                     Get key <ExternalLink className="w-3 h-3" />
+552 |                   </a>
+553 |                 )}
+554 |               </div>
+555 |               <div className="relative">
+556 |                 <input
+557 |                   type={showKey ? "text" : "password"}
+558 |                   placeholder={
+559 |                     currentProviderInfo.key_hint
+560 |                       ? `Enter key (starts with ${currentProviderInfo.key_hint})`
+561 |                       : "Enter API key"
+562 |                   }
+563 |                   value={apiKeyInput}
+564 |                   onChange={(e) => setApiKeyInput(e.target.value)}
+565 |                   className="w-full bg-black border border-[#1f1f1f] rounded-xl pl-4 pr-12 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+566 |                 />
+567 |                 <button
+568 |                   type="button"
+569 |                   onClick={() => setShowKey(!showKey)}
+570 |                   className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
+571 |                 >
+572 |                   {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+573 |                 </button>
+574 |               </div>
+575 |             </div>
+576 |           )}
+577 | 
+578 |           {/* Backup API Keys Expandable Section */}
+579 |           {selectedProvider !== "ollama" && (
+580 |             <div className="space-y-2 mt-2">
+581 |               {!showBackupExpander ? (
+582 |                 <button
+583 |                   type="button"
+584 |                   onClick={() => setShowBackupExpander(true)}
+585 |                   className="text-[10px] text-cyan-400 hover:underline font-mono cursor-pointer flex items-center gap-1"
+586 |                 >
+587 |                   + Add backup key
+588 |                 </button>
+589 |               ) : (
+590 |                 <div className="border border-[#1f1f1f] bg-black/40 rounded-xl p-3 space-y-3">
+591 |                   <div className="flex justify-between items-center">
+592 |                     <span className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Backup Keys</span>
+593 |                     <button
+594 |                       type="button"
+595 |                       onClick={() => {
+596 |                         setShowBackupExpander(false);
+597 |                         setBackupKey1Input("");
+598 |                         setBackupKey2Input("");
+599 |                         setShowSecondBackup(false);
+600 |                       }}
+601 |                       className="text-[9px] text-rose-400 hover:underline font-mono cursor-pointer"
+602 |                     >
+603 |                       Remove all
+604 |                     </button>
+605 |                   </div>
+606 |                   
+607 |                   {/* Backup Key 1 */}
+608 |                   <div className="space-y-1">
+609 |                     <label className="text-[9px] font-mono uppercase text-neutral-500">Backup Key 1</label>
+610 |                     <div className="relative">
+611 |                       <input
+612 |                         type={showBackupKey1 ? "text" : "password"}
+613 |                         placeholder="Enter backup key 1"
+614 |                         value={backupKey1Input}
+615 |                         onChange={(e) => setBackupKey1Input(e.target.value)}
+616 |                         className="w-full bg-black border border-[#1f1f1f] rounded-lg pl-3 pr-10 py-2 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+617 |                       />
+618 |                       <button
+619 |                         type="button"
+620 |                         onClick={() => setShowBackupKey1(!showBackupKey1)}
+621 |                         className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
+622 |                       >
+623 |                         {showBackupKey1 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+624 |                       </button>
+625 |                     </div>
+626 |                   </div>
+627 | 
+628 |                   {/* Backup Key 2 */}
+629 |                   {!showSecondBackup ? (
+630 |                     <button
+631 |                       type="button"
+632 |                       onClick={() => setShowSecondBackup(true)}
+633 |                       className="text-[10px] text-cyan-400 hover:underline font-mono cursor-pointer flex items-center gap-1"
+634 |                     >
+635 |                       + Add another backup key
+636 |                     </button>
+637 |                   ) : (
+638 |                     <div className="space-y-1">
+639 |                       <div className="flex justify-between items-center">
+640 |                         <label className="text-[9px] font-mono uppercase text-neutral-500">Backup Key 2</label>
+641 |                         <button
+642 |                           type="button"
+643 |                           onClick={() => {
+644 |                             setShowSecondBackup(false);
+645 |                             setBackupKey2Input("");
+646 |                           }}
+647 |                           className="text-[9px] text-neutral-500 hover:text-neutral-300 font-mono cursor-pointer"
+648 |                         >
+649 |                           Remove
+650 |                         </button>
+651 |                       </div>
+652 |                       <div className="relative">
+653 |                         <input
+654 |                           type={showBackupKey2 ? "text" : "password"}
+655 |                           placeholder="Enter backup key 2"
+656 |                           value={backupKey2Input}
+657 |                           onChange={(e) => setBackupKey2Input(e.target.value)}
+658 |                           className="w-full bg-black border border-[#1f1f1f] rounded-lg pl-3 pr-10 py-2 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+659 |                         />
+660 |                         <button
+661 |                           type="button"
+662 |                           onClick={() => setShowBackupKey2(!showBackupKey2)}
+663 |                           className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
+664 |                         >
+665 |                           {showBackupKey2 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+666 |                         </button>
+667 |                       </div>
+668 |                     </div>
+669 |                   )}
+670 |                 </div>
+671 |               )}
+672 |             </div>
+673 |           )}
+674 | 
+675 |           {/* 5. Fallback Provider Selector */}
+676 |           <div className="space-y-1.5">
+677 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Automatic Fallback</label>
+678 |             <select
+679 |               value={fallbackProv}
+680 |               onChange={(e) => setFallbackProv(e.target.value)}
+681 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
+682 |             >
+683 |               <option value="">No Fallback (Error immediately)</option>
+684 |               {Object.keys(providersConfig)
+685 |                 .filter((pKey) => pKey !== selectedProvider)
+686 |                 .map((pKey) => (
+687 |                   <option key={pKey} value={pKey}>
+688 |                     Fallback: {providersConfig[pKey]?.name || pKey}
+689 |                   </option>
+690 |                 ))}
+691 |             </select>
+692 |           </div>
+693 | 
+694 |           {/* Connection Test pipeline */}
+695 |           {isLocalProvider ? (
+696 |             <div className="p-3 bg-neutral-950/40 border border-[#1f1f1f] rounded-xl text-[10px] text-neutral-400 font-mono leading-normal">
+697 |               ℹ️ Local models run directly on your machine and do not require API connection testing.
+698 |             </div>
+699 |           ) : (
+700 |             <div className="pt-2">
+701 |               <button
+702 |                 type="button"
+703 |                 onClick={handleTestConnection}
+704 |                 disabled={isTesting || (!apiKeyInput && selectedProvider !== "ollama" && selectedProvider !== "lmstudio")}
+705 |                 className="w-full py-2 bg-neutral-900 hover:bg-neutral-800 border border-[#1f1f1f] text-neutral-300 hover:text-white font-bold rounded-xl text-xs font-mono transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-20 disabled:scale-100"
+706 |               >
+707 |                 {isTesting ? (
+708 |                   <>
+709 |                     <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+710 |                     Testing Pipeline...
+711 |                   </>
+712 |                 ) : (
+713 |                   "Test Connection"
+714 |                 )}
+715 |               </button>
+716 | 
+717 |               {/* Test Connection Results */}
+718 |               <AnimatePresence>
+719 |                 {testResult.status !== 'idle' && (
+720 |                   <motion.div
+721 |                     initial={{ opacity: 0, y: 5 }}
+722 |                     animate={{ opacity: 1, y: 0 }}
+723 |                     exit={{ opacity: 0, y: 5 }}
+724 |                     className={`mt-3 flex items-start gap-2.5 p-3 rounded-xl text-[10px] leading-normal font-mono border ${
+725 |                       testResult.status === 'success'
+726 |                         ? 'bg-emerald-950/20 border-emerald-950/30 text-emerald-400'
+727 |                         : 'bg-rose-950/20 border-rose-950/30 text-rose-400'
+728 |                     }`}
+729 |                   >
+730 |                     {testResult.status === 'success' ? (
+731 |                       <Check className="w-4 h-4 shrink-0 text-emerald-500 mt-0.5" />
+732 |                     ) : (
+733 |                       <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
+734 |                     )}
+735 |                     <span className="whitespace-pre-wrap">{testResult.message}</span>
+736 |                   </motion.div>
+737 |                 )}
+738 |               </AnimatePresence>
+739 |             </div>
+740 |           )}
+741 | 
+742 |           {/* 6. Save and Cancel Buttons */}
+743 |           <div className="pt-4 flex gap-3 border-t border-[#141414]">
+744 |             <button
+745 |               id="save-api-key-btn"
+746 |               onClick={handleSaveSettings}
+747 |               className="flex-1 py-2.5 bg-white hover:bg-neutral-100 text-black font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
+748 |             >
+749 |               Save Settings
+750 |             </button>
+751 |             <button
+752 |               onClick={onClose}
+753 |               className="px-5 py-2.5 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-xl text-xs font-mono transition-colors cursor-pointer"
+754 |             >
+755 |               Cancel
+756 |             </button>
+757 |           </div>
+758 |         </div>
+759 |       </motion.div>
+760 |     </motion.div>
+761 |   );
+762 | }
+763 |
 ```
 
 ### File: `Frontend/components/ContextMenu.tsx`
@@ -8541,10 +8804,10 @@ SoloSpace/
 473 |           </Panel>
 474 |         )}
 475 | 
-476 |         {/* Top-center Proceed Buttons */}
+476 |         {/* Bottom-center Proceed Buttons */}
 477 |         {isEchoHouseMode ? (
 478 |           nodes.filter(n => (n.data as any).isEchoHouseAgent && (n.data as any).echohouseRole !== "self").length > 0 && (
-479 |             <Panel position="top-center" className="!top-4 z-20">
+479 |             <Panel position="bottom-center" className="!bottom-14 z-20">
 480 |               <button
 481 |                 onClick={handleEchoHouseProceed}
 482 |                 disabled={isOrchestrating}
@@ -8563,7 +8826,7 @@ SoloSpace/
 495 |           )
 496 |         ) : (
 497 |           nodes.length > 0 && executionState !== "running" && !isOrchestrating && (
-498 |             <Panel position="top-center" className="!top-4 z-20">
+498 |             <Panel position="bottom-center" className="!bottom-14 z-20">
 499 |               <button
 500 |                 onClick={handleNormalProceed}
 501 |                 disabled={isOrchestrating}
@@ -9266,7 +9529,7 @@ SoloSpace/
 
 ### File: `Frontend/store/workflowStore.ts`
 
-> 1324 lines | 44.8 KB
+> 1423 lines | 48.9 KB
 
 ```typescript
    1 | import { create } from 'zustand';
@@ -9377,1222 +9640,1321 @@ SoloSpace/
  106 |   provider: string;
  107 |   model: string;
  108 |   apiKeys: Record<string, string>;
- 109 |   availableProviders: Record<string, any>;
- 110 |   setProvider: (provider: string) => void;
- 111 |   setModel: (model: string) => void;
- 112 |   setProviderApiKey: (provider: string, key: string) => Promise<void>;
- 113 |   loadPersistedKeys: () => Promise<void>;
- 114 |   loadPersistedState: () => Promise<void>;
- 115 |   fetchAvailableProviders: () => Promise<void>;
- 116 |   fallbackProvider: string;
- 117 |   setFallbackProvider: (provider: string) => void;
- 118 |   providerBaseUrls: Record<string, string>;
- 119 |   setProviderBaseUrl: (provider: string, url: string) => void;
- 120 |   providerModels: Record<string, any[]>;
- 121 |   fetchProviderModels: (providerId: string) => Promise<void>;
- 122 |   followUpSuggestions: string[];
- 123 |   liveThoughts: string;
- 124 |   abortController: AbortController | null;
- 125 |   cancelOrchestration: () => void;
- 126 | 
- 127 |   // Actions
- 128 |   setNodes: (nodes: Node[] | ((nds: Node[]) => Node[])) => void;
- 129 |   setEdges: (edges: Edge[] | ((eds: Edge[]) => Edge[])) => void;
- 130 |   onNodesChange: OnNodesChange<Node>;
- 131 |   onEdgesChange: OnEdgesChange;
- 132 |   onConnect: OnConnect;
- 133 |   setSelectedNodeId: (id: string | null) => void;
- 134 |   updateNodeField: (nodeId: string, updates: Partial<CanvasNodeData>) => void;
- 135 |   addNode: (node: Node) => void;
- 136 |   deleteNode: (nodeId: string) => void;
- 137 |   deleteEdge: (edgeId: string) => void;
- 138 |   addRule: (nodeId: string, rule: string) => void;
- 139 |   deleteRule: (nodeId: string, ruleIndex: number) => void;
- 140 |   simulateToolExecution?: never;
- 141 |   setExecutionState: (state: 'setup' | 'running' | 'paused') => void;
- 142 |   setIsOrchestrating: (val: boolean) => void;
- 143 |   setIsThinking: (val: boolean) => void;
- 144 |   setStatusMessage: (msg: string) => void;
- 145 |   setChatMessages: (msgs: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
- 146 |   setAgentTalkLogs: (logs: AgentTalkLog[] | ((prev: AgentTalkLog[]) => AgentTalkLog[])) => void;
- 147 |   setPendingApproval: (val: PendingApproval | null) => void;
- 148 | 
- 149 |   createSession: (prompt: string, mode: 'auto' | 'custom' | 'echohouse') => string;
- 150 |   forkSession: (sessionId: string) => Promise<string | null>;
- 151 |   switchSession: (sessionId: string) => void;
- 152 |   saveCurrentSession: () => void;
- 153 |   fetchSessions: () => Promise<void>;
- 154 |   loadSessionFromDb: (sessionId: string) => Promise<void>;
- 155 |   deleteSessionFromDb: (sessionId: string) => Promise<void>;
- 156 | 
- 157 |   triggerSteerOrchestration: (promptText: string, execute?: boolean, mode?: string) => void;
- 158 |   triggerCustomExecution: () => Promise<void>;
- 159 |   triggerEchoHouseSimulation: (rounds?: number, tone?: string) => Promise<void>;
- 160 | }
- 161 | 
- 162 | let saveTimeout: any = null;
- 163 | const debounceSave = (currentSessionId: string, get: any, set: any) => {
- 164 |   if (saveTimeout) clearTimeout(saveTimeout);
- 165 |   saveTimeout = setTimeout(async () => {
- 166 |     // Re-verify the session is still active before saving to prevent stale writes
- 167 |     const activeId = get().activeSessionId;
- 168 |     if (activeId !== currentSessionId) return;
- 169 | 
- 170 |     let updatedSession: any = null;
- 171 | 
- 172 |     set((state: any) => {
- 173 |       // Only save if the session still exists
- 174 |       if (!state.sessions[currentSessionId]) return state;
- 175 | 
- 176 |       const currentSession = {
- 177 |         id: currentSessionId,
- 178 |         title: state.sessions[currentSessionId]?.title || "Chat",
- 179 |         prompt: state.sessions[currentSessionId]?.prompt || "",
- 180 |         mode: state.sessions[currentSessionId]?.mode || "auto",
- 181 |         nodes: state.nodes,
- 182 |         edges: state.edges,
- 183 |         chatMessages: state.chatMessages,
- 184 |         agentTalkLogs: state.agentTalkLogs,
- 185 |         executionState: state.executionState,
- 186 |         statusMessage: state.statusMessage,
- 187 |         followUpSuggestions: state.followUpSuggestions
- 188 |       };
- 189 |       updatedSession = currentSession;
- 190 |       return { sessions: { ...state.sessions, [currentSessionId]: currentSession } };
- 191 |     });
- 192 | 
- 193 |     if (updatedSession) {
- 194 |       try {
- 195 |         await fetch("/api/gemini/sessions/save", {
- 196 |           method: "POST",
- 197 |           headers: {
- 198 |             "Content-Type": "application/json",
- 199 |           },
- 200 |           body: JSON.stringify({
- 201 |             session_id: updatedSession.id,
- 202 |             title: updatedSession.title,
- 203 |             prompt: updatedSession.prompt,
- 204 |             mode: updatedSession.mode,
- 205 |             nodes: updatedSession.nodes,
- 206 |             edges: updatedSession.edges,
- 207 |             chat_messages: updatedSession.chatMessages,
- 208 |             agent_talk_logs: updatedSession.agentTalkLogs,
- 209 |             execution_state: updatedSession.executionState,
- 210 |             status_message: updatedSession.statusMessage,
- 211 |             follow_up_suggestions: updatedSession.followUpSuggestions || [],
- 212 |           }),
- 213 |         });
- 214 |       } catch (e) {
- 215 |         console.error("Failed to save session to SQLite DB:", e);
- 216 |       }
- 217 |     }
- 218 |   }, 500);
- 219 | };
- 220 | 
- 221 | export const useWorkflowStore = create<WorkflowState>((set, get) => ({
- 222 |   sessions: {},
- 223 |   activeSessionId: null,
- 224 |   nodes: [],
- 225 |   edges: [],
- 226 |   selectedNodeId: null,
- 227 |   executionState: 'setup',
- 228 |   isOrchestrating: false,
- 229 |   isThinking: false,
- 230 |   statusMessage: '',
- 231 |   chatMessages: [],
- 232 |   agentTalkLogs: [],
- 233 |   pendingApproval: null,
- 234 |   apiKey: null,
- 235 |   setApiKey: (key) => set({ apiKey: key }),
- 236 |   provider: "gemini",
- 237 |   model: "gemini-2.5-flash",
- 238 |   apiKeys: {},
- 239 |   availableProviders: {},
- 240 |   setProvider: (provider) => set({ provider }),
- 241 |   setModel: (model) => set({ model }),
- 242 |   setProviderApiKey: async (provider, key) => {
- 243 |     set((state) => ({ apiKeys: { ...state.apiKeys, [provider]: key } }));
- 244 |     try {
- 245 |       if (key) {
- 246 |         const encrypted = await encryptKey(key);
- 247 |         await idbSet(`apikey_${provider}`, encrypted);
- 248 |       } else {
- 249 |         await idbDel(`apikey_${provider}`);
- 250 |       }
- 251 |     } catch (e) {
- 252 |       console.error(`Failed to encrypt/persist key for provider ${provider}:`, e);
- 253 |     }
- 254 |   },
- 255 |   loadPersistedKeys: async () => {
- 256 |     try {
- 257 |       const state = get();
- 258 |       const providers = ['gemini', 'openai', 'anthropic', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia'];
- 259 |       const loadedKeys: Record<string, string> = {};
- 260 |       for (const p of providers) {
- 261 |         const encrypted = await idbGet<string>(`apikey_${p}`);
- 262 |         if (encrypted) {
- 263 |           try {
- 264 |             const decrypted = await decryptKey(encrypted);
- 265 |             loadedKeys[p] = decrypted;
- 266 |           } catch (err) {
- 267 |             console.error(`Failed to decrypt key for provider ${p}:`, err);
- 268 |           }
- 269 |         }
- 270 |       }
- 271 |       set({ apiKeys: { ...state.apiKeys, ...loadedKeys } });
- 272 |     } catch (e) {
- 273 |       console.error("Failed to load persisted API keys:", e);
- 274 |     }
- 275 |   },
- 276 |   loadPersistedState: async () => {
- 277 |     try {
- 278 |       const raw = await idbGet<string>('solospace_workflow_state');
- 279 |       if (raw) {
- 280 |         const parsed = JSON.parse(raw);
- 281 |         set({
- 282 |           activeSessionId: parsed.activeSessionId ?? null,
- 283 |           sessions: parsed.sessions ?? {},
- 284 |           nodes: parsed.nodes ?? [],
- 285 |           edges: parsed.edges ?? [],
- 286 |           provider: parsed.provider ?? "gemini",
- 287 |           model: parsed.model ?? "gemini-2.5-flash",
- 288 |           fallbackProvider: parsed.fallbackProvider ?? "",
- 289 |           providerBaseUrls: parsed.providerBaseUrls ?? {},
- 290 |         });
- 291 |       }
- 292 |     } catch (e) {
- 293 |       console.error("Failed to load persisted state from IndexedDB:", e);
- 294 |     }
- 295 |   },
- 296 |   fetchAvailableProviders: async () => {
- 297 |     try {
- 298 |       const resp = await fetch("/api/gemini/providers");
- 299 |       if (resp.ok) {
- 300 |         const data = await resp.json();
- 301 |         set({ availableProviders: data });
- 302 |       }
- 303 |     } catch (e) {
- 304 |       console.error("Failed to fetch available providers", e);
- 305 |     }
- 306 |   },
- 307 |   fallbackProvider: "",
- 308 |   setFallbackProvider: (provider) => set({ fallbackProvider: provider }),
- 309 |   providerBaseUrls: {},
- 310 |   setProviderBaseUrl: (provider, url) => set((state) => ({ providerBaseUrls: { ...state.providerBaseUrls, [provider]: url } })),
- 311 |   providerModels: {},
- 312 |   fetchProviderModels: async (providerId: string) => {
- 313 |     try {
- 314 |       const state = get();
- 315 |       const apiKey = state.apiKeys[providerId] || state.apiKey || "";
- 316 |       const baseUrl = state.providerBaseUrls[providerId] || "";
- 317 |       const isOllama = providerId === "ollama";
- 318 |       
- 319 |       const endpoint = isOllama ? "/api/gemini/ollama" : "/api/gemini/models";
- 320 |       const method = isOllama ? "GET" : "POST";
- 321 |       const body = isOllama ? undefined : JSON.stringify({
- 322 |         provider: providerId,
- 323 |         api_key: apiKey,
- 324 |         api_keys: state.apiKeys,
- 325 |         base_url: baseUrl
- 326 |       });
- 327 | 
- 328 |       const resp = await fetch(endpoint, {
- 329 |         method,
- 330 |         headers: { "Content-Type": "application/json" },
- 331 |         body
- 332 |       });
- 333 |       if (resp.ok) {
- 334 |         const data = await resp.json();
- 335 |         set((state) => ({
- 336 |           providerModels: {
- 337 |             ...state.providerModels,
- 338 |             [providerId]: data.models || []
- 339 |           }
- 340 |         }));
- 341 |       }
- 342 |     } catch (e) {
- 343 |       console.error(`Failed to fetch models for provider ${providerId}`, e);
- 344 |     }
- 345 |   },
- 346 |   followUpSuggestions: [],
- 347 |   liveThoughts: '',
- 348 |   abortController: null,
- 349 |   cancelOrchestration: () => {
- 350 |     const controller = get().abortController;
- 351 |     if (controller) {
- 352 |       controller.abort();
- 353 |       set({ abortController: null, isOrchestrating: false, isThinking: false });
- 354 |     }
- 355 |   },
- 356 | 
- 357 |   setNodes: (newNodes) => {
- 358 |     set((state) => ({
- 359 |       nodes: typeof newNodes === 'function' ? newNodes(state.nodes) : newNodes
- 360 |     }));
- 361 |     get().saveCurrentSession();
- 362 |   },
- 363 | 
- 364 |   setEdges: (newEdges) => {
- 365 |     set((state) => ({
- 366 |       edges: typeof newEdges === 'function' ? newEdges(state.edges) : newEdges
- 367 |     }));
- 368 |     get().saveCurrentSession();
- 369 |   },
- 370 | 
- 371 |   onNodesChange: (changes) => {
- 372 |     set((state) => ({
- 373 |       nodes: applyNodeChanges(changes, state.nodes)
- 374 |     }));
- 375 |     get().saveCurrentSession();
- 376 |   },
- 377 | 
- 378 |   onEdgesChange: (changes) => {
- 379 |     set((state) => ({
- 380 |       edges: applyEdgeChanges(changes, state.edges)
- 381 |     }));
- 382 |     get().saveCurrentSession();
- 383 |   },
- 384 | 
- 385 |   onConnect: (connection) => {
- 386 |     set((state) => {
- 387 |       const edge: Edge = {
- 388 |         ...connection,
- 389 |         id: `e-${connection.source}-${connection.target}`,
- 390 |         animated: true,
- 391 |         type: 'custom',
- 392 |         style: { stroke: '#06b6d4', strokeWidth: 2 }
- 393 |       };
- 394 | 
- 395 |       // Sync dependency: target node depends on source node
- 396 |       const updatedNodes = state.nodes.map(node => {
- 397 |         if (node.id === connection.target) {
- 398 |           const currentDeps = (node.data as any).dependencies || [];
- 399 |           if (!currentDeps.includes(connection.source)) {
- 400 |             return {
- 401 |               ...node,
- 402 |               data: { ...node.data, dependencies: [...currentDeps, connection.source] }
- 403 |             };
- 404 |           }
- 405 |         }
- 406 |         return node;
- 407 |       });
- 408 | 
- 409 |       return { edges: addEdge(edge, state.edges), nodes: updatedNodes };
- 410 |     });
- 411 |     get().saveCurrentSession();
- 412 |   },
- 413 | 
- 414 |   setSelectedNodeId: (id) => set({ selectedNodeId: id }),
- 415 | 
- 416 |   updateNodeField: (nodeId, updates) => {
- 417 |     set((state) => ({
- 418 |       nodes: state.nodes.map((node) => {
- 419 |         if (node.id === nodeId) {
- 420 |           return { ...node, data: { ...node.data, ...updates } };
- 421 |         }
- 422 |         return node;
- 423 |       })
- 424 |     }));
- 425 |     get().saveCurrentSession();
- 426 |   },
- 427 | 
- 428 |   addNode: (node) => {
- 429 |     set((state) => ({ nodes: [...state.nodes, node] }));
- 430 |     get().saveCurrentSession();
- 431 |   },
- 432 | 
- 433 |   deleteNode: (nodeId) => {
- 434 |     set((state) => ({
- 435 |       nodes: state.nodes.filter((node) => node.id !== nodeId),
- 436 |       edges: state.edges.filter((edge) => edge.source !== nodeId && edge.target !== nodeId),
- 437 |       selectedNodeId: state.selectedNodeId === nodeId ? null : state.selectedNodeId
- 438 |     }));
- 439 |     get().saveCurrentSession();
- 440 |   },
- 441 | 
- 442 |   deleteEdge: (edgeId) => {
- 443 |     set((state) => {
- 444 |       const edge = state.edges.find(e => e.id === edgeId);
- 445 |       let updatedNodes = state.nodes;
- 446 | 
- 447 |       // Sync dependency: remove source from target's dependencies when edge deleted
- 448 |       if (edge) {
- 449 |         updatedNodes = state.nodes.map(node => {
- 450 |           if (node.id === edge.target) {
- 451 |             const currentDeps = (node.data as any).dependencies || [];
- 452 |             return {
- 453 |               ...node,
- 454 |               data: { ...node.data, dependencies: currentDeps.filter((d: string) => d !== edge.source) }
- 455 |             };
- 456 |           }
- 457 |           return node;
- 458 |         });
- 459 |       }
- 460 | 
- 461 |       return {
- 462 |         edges: state.edges.filter(e => e.id !== edgeId),
- 463 |         nodes: updatedNodes
- 464 |       };
- 465 |     });
+ 109 |   backupApiKeys: Record<string, string[]>;
+ 110 |   availableProviders: Record<string, any>;
+ 111 |   setProvider: (provider: string) => void | Promise<void>;
+ 112 |   setModel: (model: string) => void | Promise<void>;
+ 113 |   setProviderApiKey: (provider: string, key: string) => Promise<void>;
+ 114 |   setBackupApiKey: (provider: string, index: number, key: string) => Promise<void>;
+ 115 |   loadBackupKeys: () => Promise<void>;
+ 116 |   loadPersistedKeys: () => Promise<void>;
+ 117 |   loadPersistedState: () => Promise<void>;
+ 118 |   fetchAvailableProviders: () => Promise<void>;
+ 119 |   fallbackProvider: string;
+ 120 |   setFallbackProvider: (provider: string) => void;
+ 121 |   providerBaseUrls: Record<string, string>;
+ 122 |   setProviderBaseUrl: (provider: string, url: string) => void;
+ 123 |   providerModels: Record<string, any[]>;
+ 124 |   fetchProviderModels: (providerId: string) => Promise<void>;
+ 125 |   followUpSuggestions: string[];
+ 126 |   liveThoughts: string;
+ 127 |   abortController: AbortController | null;
+ 128 |   cancelOrchestration: () => void;
+ 129 | 
+ 130 |   // Actions
+ 131 |   setNodes: (nodes: Node[] | ((nds: Node[]) => Node[])) => void;
+ 132 |   setEdges: (edges: Edge[] | ((eds: Edge[]) => Edge[])) => void;
+ 133 |   onNodesChange: OnNodesChange<Node>;
+ 134 |   onEdgesChange: OnEdgesChange;
+ 135 |   onConnect: OnConnect;
+ 136 |   setSelectedNodeId: (id: string | null) => void;
+ 137 |   updateNodeField: (nodeId: string, updates: Partial<CanvasNodeData>) => void;
+ 138 |   addNode: (node: Node) => void;
+ 139 |   deleteNode: (nodeId: string) => void;
+ 140 |   deleteEdge: (edgeId: string) => void;
+ 141 |   addRule: (nodeId: string, rule: string) => void;
+ 142 |   deleteRule: (nodeId: string, ruleIndex: number) => void;
+ 143 |   simulateToolExecution?: never;
+ 144 |   setExecutionState: (state: 'setup' | 'running' | 'paused') => void;
+ 145 |   setIsOrchestrating: (val: boolean) => void;
+ 146 |   setIsThinking: (val: boolean) => void;
+ 147 |   setStatusMessage: (msg: string) => void;
+ 148 |   setChatMessages: (msgs: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
+ 149 |   setAgentTalkLogs: (logs: AgentTalkLog[] | ((prev: AgentTalkLog[]) => AgentTalkLog[])) => void;
+ 150 |   setPendingApproval: (val: PendingApproval | null) => void;
+ 151 | 
+ 152 |   createSession: (prompt: string, mode: 'auto' | 'custom' | 'echohouse') => string;
+ 153 |   forkSession: (sessionId: string) => Promise<string | null>;
+ 154 |   switchSession: (sessionId: string) => void;
+ 155 |   saveCurrentSession: () => void;
+ 156 |   fetchSessions: () => Promise<void>;
+ 157 |   loadSessionFromDb: (sessionId: string) => Promise<void>;
+ 158 |   deleteSessionFromDb: (sessionId: string) => Promise<void>;
+ 159 | 
+ 160 |   triggerSteerOrchestration: (promptText: string, execute?: boolean, mode?: string) => void;
+ 161 |   triggerCustomExecution: () => Promise<void>;
+ 162 |   triggerEchoHouseSimulation: (rounds?: number, tone?: string) => Promise<void>;
+ 163 | }
+ 164 | 
+ 165 | let saveTimeout: any = null;
+ 166 | const debounceSave = (currentSessionId: string, get: any, set: any) => {
+ 167 |   if (saveTimeout) clearTimeout(saveTimeout);
+ 168 |   saveTimeout = setTimeout(async () => {
+ 169 |     // Re-verify the session is still active before saving to prevent stale writes
+ 170 |     const activeId = get().activeSessionId;
+ 171 |     if (activeId !== currentSessionId) return;
+ 172 | 
+ 173 |     let updatedSession: any = null;
+ 174 | 
+ 175 |     set((state: any) => {
+ 176 |       // Only save if the session still exists
+ 177 |       if (!state.sessions[currentSessionId]) return state;
+ 178 | 
+ 179 |       const currentSession = {
+ 180 |         id: currentSessionId,
+ 181 |         title: state.sessions[currentSessionId]?.title || "Chat",
+ 182 |         prompt: state.sessions[currentSessionId]?.prompt || "",
+ 183 |         mode: state.sessions[currentSessionId]?.mode || "auto",
+ 184 |         nodes: state.nodes,
+ 185 |         edges: state.edges,
+ 186 |         chatMessages: state.chatMessages,
+ 187 |         agentTalkLogs: state.agentTalkLogs,
+ 188 |         executionState: state.executionState,
+ 189 |         statusMessage: state.statusMessage,
+ 190 |         followUpSuggestions: state.followUpSuggestions
+ 191 |       };
+ 192 |       updatedSession = currentSession;
+ 193 |       return { sessions: { ...state.sessions, [currentSessionId]: currentSession } };
+ 194 |     });
+ 195 | 
+ 196 |     if (updatedSession) {
+ 197 |       try {
+ 198 |         await fetch("/api/gemini/sessions/save", {
+ 199 |           method: "POST",
+ 200 |           headers: {
+ 201 |             "Content-Type": "application/json",
+ 202 |           },
+ 203 |           body: JSON.stringify({
+ 204 |             session_id: updatedSession.id,
+ 205 |             title: updatedSession.title,
+ 206 |             prompt: updatedSession.prompt,
+ 207 |             mode: updatedSession.mode,
+ 208 |             nodes: updatedSession.nodes,
+ 209 |             edges: updatedSession.edges,
+ 210 |             chat_messages: updatedSession.chatMessages,
+ 211 |             agent_talk_logs: updatedSession.agentTalkLogs,
+ 212 |             execution_state: updatedSession.executionState,
+ 213 |             status_message: updatedSession.statusMessage,
+ 214 |             follow_up_suggestions: updatedSession.followUpSuggestions || [],
+ 215 |           }),
+ 216 |         });
+ 217 |       } catch (e) {
+ 218 |         console.error("Failed to save session to SQLite DB:", e);
+ 219 |       }
+ 220 |     }
+ 221 |   }, 500);
+ 222 | };
+ 223 | 
+ 224 | export const useWorkflowStore = create<WorkflowState>((set, get) => ({
+ 225 |   sessions: {},
+ 226 |   activeSessionId: null,
+ 227 |   nodes: [],
+ 228 |   edges: [],
+ 229 |   selectedNodeId: null,
+ 230 |   executionState: 'setup',
+ 231 |   isOrchestrating: false,
+ 232 |   isThinking: false,
+ 233 |   statusMessage: '',
+ 234 |   chatMessages: [],
+ 235 |   agentTalkLogs: [],
+ 236 |   pendingApproval: null,
+ 237 |   apiKey: null,
+ 238 |   setApiKey: (key) => set({ apiKey: key }),
+ 239 |   provider: "gemini",
+ 240 |   model: "gemini-2.5-flash",
+ 241 |   apiKeys: {},
+ 242 |   backupApiKeys: {},
+ 243 |   availableProviders: {},
+ 244 |   setProvider: async (provider) => {
+ 245 |     set({ provider });
+ 246 |     await idbSet('solospace_active_provider', provider);
+ 247 |   },
+ 248 |   setModel: async (model) => {
+ 249 |     set({ model });
+ 250 |     await idbSet('solospace_active_model', model);
+ 251 |   },
+ 252 |   setProviderApiKey: async (provider, key) => {
+ 253 |     set((state) => ({ apiKeys: { ...state.apiKeys, [provider]: key } }));
+ 254 |     try {
+ 255 |       if (key) {
+ 256 |         const encrypted = await encryptKey(key);
+ 257 |         await idbSet(`apikey_${provider}`, encrypted);
+ 258 |       } else {
+ 259 |         await idbDel(`apikey_${provider}`);
+ 260 |       }
+ 261 |       await idbSet('solospace_active_provider', get().provider);
+ 262 |       await idbSet('solospace_active_model', get().model);
+ 263 |     } catch (e) {
+ 264 |       console.error(`Failed to encrypt/persist key for provider ${provider}:`, e);
+ 265 |     }
+ 266 |   },
+ 267 |   setBackupApiKey: async (provider, index, key) => {
+ 268 |     set((state) => {
+ 269 |       const keys = [...(state.backupApiKeys[provider] || [])];
+ 270 |       keys[index] = key;
+ 271 |       return {
+ 272 |         backupApiKeys: {
+ 273 |           ...state.backupApiKeys,
+ 274 |           [provider]: keys
+ 275 |         }
+ 276 |       };
+ 277 |     });
+ 278 |     try {
+ 279 |       if (key) {
+ 280 |         const encrypted = await encryptKey(key);
+ 281 |         await idbSet(`apikey_backup_${index + 1}_${provider}`, encrypted);
+ 282 |       } else {
+ 283 |         await idbDel(`apikey_backup_${index + 1}_${provider}`);
+ 284 |       }
+ 285 |     } catch (e) {
+ 286 |       console.error(`Failed to encrypt/persist backup key ${index + 1} for provider ${provider}:`, e);
+ 287 |     }
+ 288 |   },
+ 289 |   loadBackupKeys: async () => {
+ 290 |     try {
+ 291 |       const providers = ['gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia', 'glm', 'z.ai', 'mistral', 'cerebras', 'xai', 'together', 'fireworks', 'perplexity', 'cohere', 'lmstudio', 'custom', 'bedrock', 'azure_openai'];
+ 292 |       const loadedBackup: Record<string, string[]> = {};
+ 293 |       for (const p of providers) {
+ 294 |         const keys: string[] = [];
+ 295 |         const encrypted1 = await idbGet<string>(`apikey_backup_1_${p}`);
+ 296 |         if (encrypted1) {
+ 297 |           try {
+ 298 |             keys[0] = await decryptKey(encrypted1);
+ 299 |           } catch (err) {
+ 300 |             console.error(`Failed to decrypt backup key 1 for provider ${p}:`, err);
+ 301 |           }
+ 302 |         }
+ 303 |         const encrypted2 = await idbGet<string>(`apikey_backup_2_${p}`);
+ 304 |         if (encrypted2) {
+ 305 |           try {
+ 306 |             keys[1] = await decryptKey(encrypted2);
+ 307 |           } catch (err) {
+ 308 |             console.error(`Failed to decrypt backup key 2 for provider ${p}:`, err);
+ 309 |           }
+ 310 |         }
+ 311 |         if (keys.length > 0) {
+ 312 |           loadedBackup[p] = keys;
+ 313 |         }
+ 314 |       }
+ 315 |       set((state) => ({ backupApiKeys: { ...state.backupApiKeys, ...loadedBackup } }));
+ 316 |     } catch (e) {
+ 317 |       console.error("Failed to load persisted backup API keys:", e);
+ 318 |     }
+ 319 |   },
+ 320 |   loadPersistedKeys: async () => {
+ 321 |     try {
+ 322 |       const state = get();
+ 323 |       const providers = ['gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia', 'glm', 'z.ai', 'mistral', 'cerebras', 'xai', 'together', 'fireworks', 'perplexity', 'cohere', 'lmstudio', 'custom', 'bedrock', 'azure_openai'];
+ 324 |       const loadedKeys: Record<string, string> = {};
+ 325 |       for (const p of providers) {
+ 326 |         const encrypted = await idbGet<string>(`apikey_${p}`);
+ 327 |         if (encrypted) {
+ 328 |           try {
+ 329 |             const decrypted = await decryptKey(encrypted);
+ 330 |             loadedKeys[p] = decrypted;
+ 331 |           } catch (err) {
+ 332 |             console.error(`Failed to decrypt key for provider ${p}:`, err);
+ 333 |           }
+ 334 |         }
+ 335 |       }
+ 336 |       set({ apiKeys: { ...state.apiKeys, ...loadedKeys } });
+ 337 |       await state.loadBackupKeys();
+ 338 |     } catch (e) {
+ 339 |       console.error("Failed to load persisted API keys:", e);
+ 340 |     }
+ 341 |   },
+ 342 |   loadPersistedState: async () => {
+ 343 |     try {
+ 344 |       const raw = await idbGet<string>('solospace_workflow_state');
+ 345 |       if (raw) {
+ 346 |         const parsed = JSON.parse(raw);
+ 347 |         set({
+ 348 |           activeSessionId: parsed.activeSessionId ?? null,
+ 349 |           sessions: parsed.sessions ?? {},
+ 350 |           nodes: parsed.nodes ?? [],
+ 351 |           edges: parsed.edges ?? [],
+ 352 |           provider: parsed.provider ?? "gemini",
+ 353 |           model: parsed.model ?? "gemini-2.5-flash",
+ 354 |           fallbackProvider: parsed.fallbackProvider ?? "",
+ 355 |           providerBaseUrls: parsed.providerBaseUrls ?? {},
+ 356 |         });
+ 357 |       }
+ 358 | 
+ 359 |       const persistedProvider = await idbGet<string>('solospace_active_provider');
+ 360 |       const persistedModel = await idbGet<string>('solospace_active_model');
+ 361 |       if (persistedProvider) {
+ 362 |         set({ provider: persistedProvider });
+ 363 |       }
+ 364 |       if (persistedModel) {
+ 365 |         set({ model: persistedModel });
+ 366 |       }
+ 367 | 
+ 368 |       // Load custom models per-provider
+ 369 |       const providers = ['gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia', 'glm', 'z.ai', 'mistral', 'cerebras', 'xai', 'together', 'fireworks', 'perplexity', 'cohere', 'lmstudio', 'custom', 'bedrock', 'azure_openai'];
+ 370 |       const customModels: Record<string, any[]> = {};
+ 371 |       for (const p of providers) {
+ 372 |         const customModel = await idbGet<string>(`solospace_custom_model_${p}`);
+ 373 |         if (customModel) {
+ 374 |           customModels[p] = [{ id: customModel, name: `${customModel} (Custom)`, tier: 'custom' }];
+ 375 |         }
+ 376 |       }
+ 377 |       set((state) => ({
+ 378 |         providerModels: {
+ 379 |           ...state.providerModels,
+ 380 |           ...customModels
+ 381 |         }
+ 382 |       }));
+ 383 |     } catch (e) {
+ 384 |       console.error("Failed to load persisted state from IndexedDB:", e);
+ 385 |     }
+ 386 |   },
+ 387 |   fetchAvailableProviders: async () => {
+ 388 |     try {
+ 389 |       const resp = await fetch("/api/gemini/providers");
+ 390 |       if (resp.ok) {
+ 391 |         const data = await resp.json();
+ 392 |         set({ availableProviders: data });
+ 393 |       }
+ 394 |     } catch (e) {
+ 395 |       console.error("Failed to fetch available providers", e);
+ 396 |     }
+ 397 |   },
+ 398 |   fallbackProvider: "",
+ 399 |   setFallbackProvider: (provider) => set({ fallbackProvider: provider }),
+ 400 |   providerBaseUrls: {},
+ 401 |   setProviderBaseUrl: (provider, url) => set((state) => ({ providerBaseUrls: { ...state.providerBaseUrls, [provider]: url } })),
+ 402 |   providerModels: {},
+ 403 |   fetchProviderModels: async (providerId: string) => {
+ 404 |     try {
+ 405 |       const state = get();
+ 406 |       const apiKey = state.apiKeys[providerId] || state.apiKey || "";
+ 407 |       const baseUrl = state.providerBaseUrls[providerId] || "";
+ 408 |       const isOllama = providerId === "ollama";
+ 409 |       
+ 410 |       const endpoint = isOllama ? "/api/gemini/ollama" : "/api/gemini/models";
+ 411 |       const method = isOllama ? "GET" : "POST";
+ 412 |       const body = isOllama ? undefined : JSON.stringify({
+ 413 |         provider: providerId,
+ 414 |         api_key: apiKey,
+ 415 |         api_keys: state.apiKeys,
+ 416 |         base_url: baseUrl
+ 417 |       });
+ 418 | 
+ 419 |       const resp = await fetch(endpoint, {
+ 420 |         method,
+ 421 |         headers: { "Content-Type": "application/json" },
+ 422 |         body
+ 423 |       });
+ 424 |       if (resp.ok) {
+ 425 |         const data = await resp.json();
+ 426 |         set((state) => ({
+ 427 |           providerModels: {
+ 428 |             ...state.providerModels,
+ 429 |             [providerId]: data.models || []
+ 430 |           }
+ 431 |         }));
+ 432 |       }
+ 433 |     } catch (e) {
+ 434 |       console.error(`Failed to fetch models for provider ${providerId}`, e);
+ 435 |     }
+ 436 |   },
+ 437 |   followUpSuggestions: [],
+ 438 |   liveThoughts: '',
+ 439 |   abortController: null,
+ 440 |   cancelOrchestration: () => {
+ 441 |     const controller = get().abortController;
+ 442 |     if (controller) {
+ 443 |       controller.abort();
+ 444 |       set({ abortController: null, isOrchestrating: false, isThinking: false });
+ 445 |     }
+ 446 |   },
+ 447 | 
+ 448 |   setNodes: (newNodes) => {
+ 449 |     set((state) => ({
+ 450 |       nodes: typeof newNodes === 'function' ? newNodes(state.nodes) : newNodes
+ 451 |     }));
+ 452 |     get().saveCurrentSession();
+ 453 |   },
+ 454 | 
+ 455 |   setEdges: (newEdges) => {
+ 456 |     set((state) => ({
+ 457 |       edges: typeof newEdges === 'function' ? newEdges(state.edges) : newEdges
+ 458 |     }));
+ 459 |     get().saveCurrentSession();
+ 460 |   },
+ 461 | 
+ 462 |   onNodesChange: (changes) => {
+ 463 |     set((state) => ({
+ 464 |       nodes: applyNodeChanges(changes, state.nodes)
+ 465 |     }));
  466 |     get().saveCurrentSession();
  467 |   },
  468 | 
- 469 |   addRule: (nodeId, rule) => {
+ 469 |   onEdgesChange: (changes) => {
  470 |     set((state) => ({
- 471 |       nodes: state.nodes.map((node) => {
- 472 |         if (node.id === nodeId) {
- 473 |           return {
- 474 |             ...node,
- 475 |             data: { ...node.data, rules: [...((node.data as any).rules || []), rule] }
- 476 |           };
- 477 |         }
- 478 |         return node;
- 479 |       })
- 480 |     }));
- 481 |     get().saveCurrentSession();
- 482 |   },
- 483 | 
- 484 |   deleteRule: (nodeId, ruleIndex) => {
- 485 |     set((state) => ({
- 486 |       nodes: state.nodes.map((node) => {
- 487 |         if (node.id === nodeId) {
- 488 |           return {
- 489 |             ...node,
- 490 |             data: {
- 491 |               ...node.data,
- 492 |               rules: ((node.data as any).rules || []).filter((_: any, idx: number) => idx !== ruleIndex)
- 493 |             }
- 494 |           };
- 495 |         }
- 496 |         return node;
- 497 |       })
- 498 |     }));
- 499 |     get().saveCurrentSession();
- 500 |   },
- 501 | 
- 502 |   // (simulateToolExecution removed — backend runs real tools)
- 503 | 
- 504 |   // State modifiers
- 505 |   setExecutionState: (state) => {
- 506 |     set({ executionState: state });
- 507 |     get().saveCurrentSession();
- 508 |   },
- 509 |   setIsOrchestrating: (val) => set({ isOrchestrating: val }),
- 510 |   setIsThinking: (val) => set({ isThinking: val }),
- 511 |   setStatusMessage: (msg) => {
- 512 |     set({ statusMessage: msg });
- 513 |     get().saveCurrentSession();
- 514 |   },
- 515 |   setChatMessages: (msgs) => {
- 516 |     set((state) => ({
- 517 |       chatMessages: typeof msgs === 'function' ? msgs(state.chatMessages) : msgs
- 518 |     }));
- 519 |     get().saveCurrentSession();
- 520 |   },
- 521 |   setAgentTalkLogs: (logs) => {
- 522 |     set((state) => ({
- 523 |       agentTalkLogs: typeof logs === 'function' ? logs(state.agentTalkLogs) : logs
- 524 |     }));
- 525 |     get().saveCurrentSession();
- 526 |   },
- 527 |   setPendingApproval: (val) => set({ pendingApproval: val }),
- 528 | 
- 529 |   createSession: (prompt, mode) => {
- 530 |     const ctrl = get().abortController;
- 531 |     if (ctrl) ctrl.abort();
+ 471 |       edges: applyEdgeChanges(changes, state.edges)
+ 472 |     }));
+ 473 |     get().saveCurrentSession();
+ 474 |   },
+ 475 | 
+ 476 |   onConnect: (connection) => {
+ 477 |     set((state) => {
+ 478 |       const edge: Edge = {
+ 479 |         ...connection,
+ 480 |         id: `e-${connection.source}-${connection.target}`,
+ 481 |         animated: true,
+ 482 |         type: 'custom',
+ 483 |         style: { stroke: '#06b6d4', strokeWidth: 2 }
+ 484 |       };
+ 485 | 
+ 486 |       // Sync dependency: target node depends on source node
+ 487 |       const updatedNodes = state.nodes.map(node => {
+ 488 |         if (node.id === connection.target) {
+ 489 |           const currentDeps = (node.data as any).dependencies || [];
+ 490 |           if (!currentDeps.includes(connection.source)) {
+ 491 |             return {
+ 492 |               ...node,
+ 493 |               data: { ...node.data, dependencies: [...currentDeps, connection.source] }
+ 494 |             };
+ 495 |           }
+ 496 |         }
+ 497 |         return node;
+ 498 |       });
+ 499 | 
+ 500 |       return { edges: addEdge(edge, state.edges), nodes: updatedNodes };
+ 501 |     });
+ 502 |     get().saveCurrentSession();
+ 503 |   },
+ 504 | 
+ 505 |   setSelectedNodeId: (id) => set({ selectedNodeId: id }),
+ 506 | 
+ 507 |   updateNodeField: (nodeId, updates) => {
+ 508 |     set((state) => ({
+ 509 |       nodes: state.nodes.map((node) => {
+ 510 |         if (node.id === nodeId) {
+ 511 |           return { ...node, data: { ...node.data, ...updates } };
+ 512 |         }
+ 513 |         return node;
+ 514 |       })
+ 515 |     }));
+ 516 |     get().saveCurrentSession();
+ 517 |   },
+ 518 | 
+ 519 |   addNode: (node) => {
+ 520 |     set((state) => ({ nodes: [...state.nodes, node] }));
+ 521 |     get().saveCurrentSession();
+ 522 |   },
+ 523 | 
+ 524 |   deleteNode: (nodeId) => {
+ 525 |     set((state) => ({
+ 526 |       nodes: state.nodes.filter((node) => node.id !== nodeId),
+ 527 |       edges: state.edges.filter((edge) => edge.source !== nodeId && edge.target !== nodeId),
+ 528 |       selectedNodeId: state.selectedNodeId === nodeId ? null : state.selectedNodeId
+ 529 |     }));
+ 530 |     get().saveCurrentSession();
+ 531 |   },
  532 | 
- 533 |     const sessionId = Date.now().toString();
- 534 |     const newSession: ChatSession = {
- 535 |       id: sessionId,
- 536 |       title: prompt.length > 40 ? prompt.substring(0, 40) + "..." : prompt,
- 537 |       prompt: prompt,
- 538 |       mode: mode,
- 539 |       nodes: [],
- 540 |       edges: [],
- 541 |       chatMessages: [],
- 542 |       agentTalkLogs: [],
- 543 |       executionState: "setup",
- 544 |       statusMessage: "",
- 545 |       followUpSuggestions: []
- 546 |     };
- 547 | 
- 548 |     set((state) => ({
- 549 |       sessions: { ...state.sessions, [sessionId]: newSession },
- 550 |       activeSessionId: sessionId,
- 551 |       nodes: [],
- 552 |       edges: [],
- 553 |       chatMessages: [],
- 554 |       agentTalkLogs: [],
- 555 |       executionState: "setup",
- 556 |       statusMessage: "",
- 557 |       followUpSuggestions: [],
- 558 |       isOrchestrating: false,
- 559 |       isThinking: false,
- 560 |       liveThoughts: "",
- 561 |       pendingApproval: null,
- 562 |       selectedNodeId: null,
- 563 |       abortController: null
- 564 |     }));
- 565 | 
- 566 |     return sessionId;
- 567 |   },
- 568 | 
- 569 |   forkSession: async (sessionId) => {
- 570 |     const sourceSession = get().sessions[sessionId];
- 571 |     if (!sourceSession) return null;
- 572 | 
- 573 |     const newSessionId = `forked-${Date.now()}`;
- 574 |     const newTitle = `${sourceSession.title} (Fork)`;
- 575 |     
- 576 |     const newSession: ChatSession = {
- 577 |       id: newSessionId,
- 578 |       title: newTitle,
- 579 |       prompt: sourceSession.prompt,
- 580 |       mode: sourceSession.mode,
- 581 |       nodes: JSON.parse(JSON.stringify(sourceSession.nodes || [])),
- 582 |       edges: JSON.parse(JSON.stringify(sourceSession.edges || [])),
- 583 |       chatMessages: JSON.parse(JSON.stringify(sourceSession.chatMessages || [])),
- 584 |       agentTalkLogs: JSON.parse(JSON.stringify(sourceSession.agentTalkLogs || [])),
- 585 |       executionState: sourceSession.executionState || "setup",
- 586 |       statusMessage: sourceSession.statusMessage || "",
- 587 |       followUpSuggestions: sourceSession.followUpSuggestions || []
- 588 |     };
- 589 | 
- 590 |     set((state) => ({
- 591 |       sessions: { ...state.sessions, [newSessionId]: newSession },
- 592 |       activeSessionId: newSessionId,
- 593 |       nodes: newSession.nodes,
- 594 |       edges: newSession.edges,
- 595 |       chatMessages: newSession.chatMessages,
- 596 |       agentTalkLogs: newSession.agentTalkLogs,
- 597 |       executionState: newSession.executionState,
- 598 |       statusMessage: newSession.statusMessage,
- 599 |       followUpSuggestions: newSession.followUpSuggestions,
- 600 |       selectedNodeId: null
- 601 |     }));
- 602 | 
- 603 |     try {
- 604 |       await fetch("/api/gemini/sessions/save", {
- 605 |         method: "POST",
- 606 |         headers: { "Content-Type": "application/json" },
- 607 |         body: JSON.stringify({
- 608 |           session_id: newSession.id,
- 609 |           title: newSession.title,
- 610 |           prompt: newSession.prompt,
- 611 |           mode: newSession.mode,
- 612 |           nodes: newSession.nodes,
- 613 |           edges: newSession.edges,
- 614 |           chat_messages: newSession.chatMessages,
- 615 |           agent_talk_logs: newSession.agentTalkLogs,
- 616 |           execution_state: newSession.executionState,
- 617 |           status_message: newSession.statusMessage,
- 618 |           follow_up_suggestions: newSession.followUpSuggestions,
- 619 |         }),
- 620 |       });
- 621 |     } catch (e) {
- 622 |       console.error("Failed to save forked session to DB", e);
- 623 |     }
- 624 | 
- 625 |     return newSessionId;
- 626 |   },
- 627 | 
- 628 |   switchSession: (sessionId) => {
- 629 |     const ctrl = get().abortController;
- 630 |     if (ctrl) ctrl.abort();
- 631 | 
- 632 |     const currentSessionId = get().activeSessionId;
- 633 |     if (currentSessionId) {
- 634 |       const currentSession: ChatSession = {
- 635 |         id: currentSessionId,
- 636 |         title: get().sessions[currentSessionId]?.title || "Chat",
- 637 |         prompt: get().sessions[currentSessionId]?.prompt || "",
- 638 |         mode: get().sessions[currentSessionId]?.mode || "auto",
- 639 |         nodes: get().nodes,
- 640 |         edges: get().edges,
- 641 |         chatMessages: get().chatMessages,
- 642 |         agentTalkLogs: get().agentTalkLogs,
- 643 |         executionState: get().executionState,
- 644 |         statusMessage: get().statusMessage,
- 645 |         followUpSuggestions: get().followUpSuggestions
- 646 |       };
- 647 |       set((state) => ({
- 648 |         sessions: { ...state.sessions, [currentSessionId]: currentSession }
- 649 |       }));
- 650 |     }
- 651 | 
- 652 |     const newSession = get().sessions[sessionId];
- 653 |     if (newSession) {
- 654 |       set({
- 655 |         activeSessionId: sessionId,
- 656 |         nodes: newSession.nodes,
- 657 |         edges: newSession.edges,
- 658 |         chatMessages: newSession.chatMessages,
- 659 |         agentTalkLogs: newSession.agentTalkLogs,
- 660 |         executionState: newSession.executionState,
- 661 |         statusMessage: "",
- 662 |         followUpSuggestions: [],
- 663 |         selectedNodeId: null,
- 664 |         isOrchestrating: false,
- 665 |         isThinking: false,
- 666 |         liveThoughts: "",
- 667 |         pendingApproval: null,
- 668 |         abortController: null
- 669 |       });
- 670 |     }
- 671 |   },
- 672 | 
- 673 |   saveCurrentSession: () => {
- 674 |     const currentSessionId = get().activeSessionId;
- 675 |     if (!currentSessionId) return;
- 676 |     debounceSave(currentSessionId, get, set);
- 677 |   },
- 678 | 
- 679 |   fetchSessions: async () => {
- 680 |     try {
- 681 |       const response = await fetch("/api/gemini/sessions");
- 682 |       if (response.ok) {
- 683 |         const list = await response.json();
- 684 |         const updatedSessions: Record<string, ChatSession> = { ...get().sessions };
- 685 |         for (const s of list) {
- 686 |           if (!updatedSessions[s.session_id]) {
- 687 |             updatedSessions[s.session_id] = {
- 688 |               id: s.session_id,
- 689 |               title: s.title,
- 690 |               prompt: s.prompt,
- 691 |               mode: s.mode,
- 692 |               nodes: [],
- 693 |               edges: [],
- 694 |               chatMessages: [],
- 695 |               agentTalkLogs: [],
- 696 |               executionState: s.execution_state,
- 697 |               statusMessage: s.status_message,
- 698 |               followUpSuggestions: []
- 699 |             };
- 700 |           }
- 701 |         }
- 702 |         set({ sessions: updatedSessions });
- 703 |       }
- 704 |     } catch (e) {
- 705 |       console.error("Failed to fetch sessions from DB", e);
- 706 |     }
- 707 |   },
- 708 | 
- 709 |   loadSessionFromDb: async (sessionId: string) => {
- 710 |     const ctrl = get().abortController;
- 711 |     if (ctrl) ctrl.abort();
- 712 | 
- 713 |     try {
- 714 |       const response = await fetch(`/api/gemini/sessions/${sessionId}`);
- 715 |       if (response.ok) {
- 716 |         const fullSession = await response.json();
- 717 |         const session: ChatSession = {
- 718 |           id: fullSession.id,
- 719 |           title: fullSession.title,
- 720 |           prompt: fullSession.prompt,
- 721 |           mode: fullSession.mode,
- 722 |           nodes: fullSession.nodes,
- 723 |           edges: fullSession.edges,
- 724 |           chatMessages: fullSession.chatMessages,
- 725 |           agentTalkLogs: fullSession.agentTalkLogs,
- 726 |           executionState: fullSession.executionState,
- 727 |           statusMessage: fullSession.statusMessage,
- 728 |           followUpSuggestions: fullSession.followUpSuggestions
- 729 |         };
- 730 |         
- 731 |         set((state) => ({
- 732 |           sessions: { ...state.sessions, [sessionId]: session },
- 733 |           activeSessionId: sessionId,
- 734 |           nodes: session.nodes,
- 735 |           edges: session.edges,
- 736 |           chatMessages: session.chatMessages,
- 737 |           agentTalkLogs: session.agentTalkLogs,
- 738 |           executionState: session.executionState,
- 739 |           statusMessage: "",
- 740 |           followUpSuggestions: [],
- 741 |           selectedNodeId: null,
- 742 |           isOrchestrating: false,
- 743 |           isThinking: false,
- 744 |           liveThoughts: "",
- 745 |           pendingApproval: null,
- 746 |           abortController: null
- 747 |         }));
- 748 |       }
- 749 |     } catch (e) {
- 750 |       console.error("Failed to load session from DB", e);
- 751 |     }
- 752 |   },
- 753 | 
- 754 |   deleteSessionFromDb: async (sessionId: string) => {
- 755 |     // Abort orchestration if deleting the currently active session
- 756 |     if (get().activeSessionId === sessionId) {
- 757 |       const ctrl = get().abortController;
- 758 |       if (ctrl) ctrl.abort();
- 759 |     }
- 760 | 
- 761 |     try {
- 762 |       const response = await fetch(`/api/gemini/sessions/${sessionId}`, {
- 763 |         method: "DELETE"
- 764 |       });
- 765 |       if (response.ok) {
- 766 |         set((state) => {
- 767 |           const updated = { ...state.sessions };
- 768 |           delete updated[sessionId];
- 769 |           const newActiveId = state.activeSessionId === sessionId ? null : state.activeSessionId;
- 770 |           return {
- 771 |             sessions: updated,
- 772 |             activeSessionId: newActiveId,
- 773 |             abortController: state.activeSessionId === sessionId ? null : state.abortController,
- 774 |             isOrchestrating: state.activeSessionId === sessionId ? false : state.isOrchestrating,
- 775 |             isThinking: state.activeSessionId === sessionId ? false : state.isThinking,
- 776 |             ...(newActiveId ? {} : {
- 777 |               nodes: [],
- 778 |               edges: [],
- 779 |               chatMessages: [],
- 780 |               agentTalkLogs: [],
- 781 |               executionState: "setup",
- 782 |               statusMessage: "",
- 783 |               followUpSuggestions: []
- 784 |             })
- 785 |           };
- 786 |         });
- 787 |       }
- 788 |     } catch (e) {
- 789 |       console.error("Failed to delete session", e);
- 790 |     }
- 791 |   },
- 792 | 
- 793 |   triggerSteerOrchestration: async (promptText, execute = true, mode) => {
- 794 |     if (!promptText.trim()) return;
- 795 | 
- 796 |     // Abort any active orchestration
- 797 |     const currentController = get().abortController;
- 798 |     if (currentController) {
- 799 |       currentController.abort();
- 800 |     }
- 801 | 
- 802 |     const controller = new AbortController();
+ 533 |   deleteEdge: (edgeId) => {
+ 534 |     set((state) => {
+ 535 |       const edge = state.edges.find(e => e.id === edgeId);
+ 536 |       let updatedNodes = state.nodes;
+ 537 | 
+ 538 |       // Sync dependency: remove source from target's dependencies when edge deleted
+ 539 |       if (edge) {
+ 540 |         updatedNodes = state.nodes.map(node => {
+ 541 |           if (node.id === edge.target) {
+ 542 |             const currentDeps = (node.data as any).dependencies || [];
+ 543 |             return {
+ 544 |               ...node,
+ 545 |               data: { ...node.data, dependencies: currentDeps.filter((d: string) => d !== edge.source) }
+ 546 |             };
+ 547 |           }
+ 548 |           return node;
+ 549 |         });
+ 550 |       }
+ 551 | 
+ 552 |       return {
+ 553 |         edges: state.edges.filter(e => e.id !== edgeId),
+ 554 |         nodes: updatedNodes
+ 555 |       };
+ 556 |     });
+ 557 |     get().saveCurrentSession();
+ 558 |   },
+ 559 | 
+ 560 |   addRule: (nodeId, rule) => {
+ 561 |     set((state) => ({
+ 562 |       nodes: state.nodes.map((node) => {
+ 563 |         if (node.id === nodeId) {
+ 564 |           return {
+ 565 |             ...node,
+ 566 |             data: { ...node.data, rules: [...((node.data as any).rules || []), rule] }
+ 567 |           };
+ 568 |         }
+ 569 |         return node;
+ 570 |       })
+ 571 |     }));
+ 572 |     get().saveCurrentSession();
+ 573 |   },
+ 574 | 
+ 575 |   deleteRule: (nodeId, ruleIndex) => {
+ 576 |     set((state) => ({
+ 577 |       nodes: state.nodes.map((node) => {
+ 578 |         if (node.id === nodeId) {
+ 579 |           return {
+ 580 |             ...node,
+ 581 |             data: {
+ 582 |               ...node.data,
+ 583 |               rules: ((node.data as any).rules || []).filter((_: any, idx: number) => idx !== ruleIndex)
+ 584 |             }
+ 585 |           };
+ 586 |         }
+ 587 |         return node;
+ 588 |       })
+ 589 |     }));
+ 590 |     get().saveCurrentSession();
+ 591 |   },
+ 592 | 
+ 593 |   // (simulateToolExecution removed — backend runs real tools)
+ 594 | 
+ 595 |   // State modifiers
+ 596 |   setExecutionState: (state) => {
+ 597 |     set({ executionState: state });
+ 598 |     get().saveCurrentSession();
+ 599 |   },
+ 600 |   setIsOrchestrating: (val) => set({ isOrchestrating: val }),
+ 601 |   setIsThinking: (val) => set({ isThinking: val }),
+ 602 |   setStatusMessage: (msg) => {
+ 603 |     set({ statusMessage: msg });
+ 604 |     get().saveCurrentSession();
+ 605 |   },
+ 606 |   setChatMessages: (msgs) => {
+ 607 |     set((state) => ({
+ 608 |       chatMessages: typeof msgs === 'function' ? msgs(state.chatMessages) : msgs
+ 609 |     }));
+ 610 |     get().saveCurrentSession();
+ 611 |   },
+ 612 |   setAgentTalkLogs: (logs) => {
+ 613 |     set((state) => ({
+ 614 |       agentTalkLogs: typeof logs === 'function' ? logs(state.agentTalkLogs) : logs
+ 615 |     }));
+ 616 |     get().saveCurrentSession();
+ 617 |   },
+ 618 |   setPendingApproval: (val) => set({ pendingApproval: val }),
+ 619 | 
+ 620 |   createSession: (prompt, mode) => {
+ 621 |     const ctrl = get().abortController;
+ 622 |     if (ctrl) ctrl.abort();
+ 623 | 
+ 624 |     const sessionId = Date.now().toString();
+ 625 |     const newSession: ChatSession = {
+ 626 |       id: sessionId,
+ 627 |       title: prompt.length > 40 ? prompt.substring(0, 40) + "..." : prompt,
+ 628 |       prompt: prompt,
+ 629 |       mode: mode,
+ 630 |       nodes: [],
+ 631 |       edges: [],
+ 632 |       chatMessages: [],
+ 633 |       agentTalkLogs: [],
+ 634 |       executionState: "setup",
+ 635 |       statusMessage: "",
+ 636 |       followUpSuggestions: []
+ 637 |     };
+ 638 | 
+ 639 |     set((state) => ({
+ 640 |       sessions: { ...state.sessions, [sessionId]: newSession },
+ 641 |       activeSessionId: sessionId,
+ 642 |       nodes: [],
+ 643 |       edges: [],
+ 644 |       chatMessages: [],
+ 645 |       agentTalkLogs: [],
+ 646 |       executionState: "setup",
+ 647 |       statusMessage: "",
+ 648 |       followUpSuggestions: [],
+ 649 |       isOrchestrating: false,
+ 650 |       isThinking: false,
+ 651 |       liveThoughts: "",
+ 652 |       pendingApproval: null,
+ 653 |       selectedNodeId: null,
+ 654 |       abortController: null
+ 655 |     }));
+ 656 | 
+ 657 |     return sessionId;
+ 658 |   },
+ 659 | 
+ 660 |   forkSession: async (sessionId) => {
+ 661 |     const sourceSession = get().sessions[sessionId];
+ 662 |     if (!sourceSession) return null;
+ 663 | 
+ 664 |     const newSessionId = `forked-${Date.now()}`;
+ 665 |     const newTitle = `${sourceSession.title} (Fork)`;
+ 666 |     
+ 667 |     const newSession: ChatSession = {
+ 668 |       id: newSessionId,
+ 669 |       title: newTitle,
+ 670 |       prompt: sourceSession.prompt,
+ 671 |       mode: sourceSession.mode,
+ 672 |       nodes: JSON.parse(JSON.stringify(sourceSession.nodes || [])),
+ 673 |       edges: JSON.parse(JSON.stringify(sourceSession.edges || [])),
+ 674 |       chatMessages: JSON.parse(JSON.stringify(sourceSession.chatMessages || [])),
+ 675 |       agentTalkLogs: JSON.parse(JSON.stringify(sourceSession.agentTalkLogs || [])),
+ 676 |       executionState: sourceSession.executionState || "setup",
+ 677 |       statusMessage: sourceSession.statusMessage || "",
+ 678 |       followUpSuggestions: sourceSession.followUpSuggestions || []
+ 679 |     };
+ 680 | 
+ 681 |     set((state) => ({
+ 682 |       sessions: { ...state.sessions, [newSessionId]: newSession },
+ 683 |       activeSessionId: newSessionId,
+ 684 |       nodes: newSession.nodes,
+ 685 |       edges: newSession.edges,
+ 686 |       chatMessages: newSession.chatMessages,
+ 687 |       agentTalkLogs: newSession.agentTalkLogs,
+ 688 |       executionState: newSession.executionState,
+ 689 |       statusMessage: newSession.statusMessage,
+ 690 |       followUpSuggestions: newSession.followUpSuggestions,
+ 691 |       selectedNodeId: null
+ 692 |     }));
+ 693 | 
+ 694 |     try {
+ 695 |       await fetch("/api/gemini/sessions/save", {
+ 696 |         method: "POST",
+ 697 |         headers: { "Content-Type": "application/json" },
+ 698 |         body: JSON.stringify({
+ 699 |           session_id: newSession.id,
+ 700 |           title: newSession.title,
+ 701 |           prompt: newSession.prompt,
+ 702 |           mode: newSession.mode,
+ 703 |           nodes: newSession.nodes,
+ 704 |           edges: newSession.edges,
+ 705 |           chat_messages: newSession.chatMessages,
+ 706 |           agent_talk_logs: newSession.agentTalkLogs,
+ 707 |           execution_state: newSession.executionState,
+ 708 |           status_message: newSession.statusMessage,
+ 709 |           follow_up_suggestions: newSession.followUpSuggestions,
+ 710 |         }),
+ 711 |       });
+ 712 |     } catch (e) {
+ 713 |       console.error("Failed to save forked session to DB", e);
+ 714 |     }
+ 715 | 
+ 716 |     return newSessionId;
+ 717 |   },
+ 718 | 
+ 719 |   switchSession: (sessionId) => {
+ 720 |     const ctrl = get().abortController;
+ 721 |     if (ctrl) ctrl.abort();
+ 722 | 
+ 723 |     const currentSessionId = get().activeSessionId;
+ 724 |     if (currentSessionId) {
+ 725 |       const currentSession: ChatSession = {
+ 726 |         id: currentSessionId,
+ 727 |         title: get().sessions[currentSessionId]?.title || "Chat",
+ 728 |         prompt: get().sessions[currentSessionId]?.prompt || "",
+ 729 |         mode: get().sessions[currentSessionId]?.mode || "auto",
+ 730 |         nodes: get().nodes,
+ 731 |         edges: get().edges,
+ 732 |         chatMessages: get().chatMessages,
+ 733 |         agentTalkLogs: get().agentTalkLogs,
+ 734 |         executionState: get().executionState,
+ 735 |         statusMessage: get().statusMessage,
+ 736 |         followUpSuggestions: get().followUpSuggestions
+ 737 |       };
+ 738 |       set((state) => ({
+ 739 |         sessions: { ...state.sessions, [currentSessionId]: currentSession }
+ 740 |       }));
+ 741 |     }
+ 742 | 
+ 743 |     const newSession = get().sessions[sessionId];
+ 744 |     if (newSession) {
+ 745 |       set({
+ 746 |         activeSessionId: sessionId,
+ 747 |         nodes: newSession.nodes,
+ 748 |         edges: newSession.edges,
+ 749 |         chatMessages: newSession.chatMessages,
+ 750 |         agentTalkLogs: newSession.agentTalkLogs,
+ 751 |         executionState: newSession.executionState,
+ 752 |         statusMessage: "",
+ 753 |         followUpSuggestions: [],
+ 754 |         selectedNodeId: null,
+ 755 |         isOrchestrating: false,
+ 756 |         isThinking: false,
+ 757 |         liveThoughts: "",
+ 758 |         pendingApproval: null,
+ 759 |         abortController: null
+ 760 |       });
+ 761 |     }
+ 762 |   },
+ 763 | 
+ 764 |   saveCurrentSession: () => {
+ 765 |     const currentSessionId = get().activeSessionId;
+ 766 |     if (!currentSessionId) return;
+ 767 |     debounceSave(currentSessionId, get, set);
+ 768 |   },
+ 769 | 
+ 770 |   fetchSessions: async () => {
+ 771 |     try {
+ 772 |       const response = await fetch("/api/gemini/sessions");
+ 773 |       if (response.ok) {
+ 774 |         const list = await response.json();
+ 775 |         const updatedSessions: Record<string, ChatSession> = { ...get().sessions };
+ 776 |         for (const s of list) {
+ 777 |           if (!updatedSessions[s.session_id]) {
+ 778 |             updatedSessions[s.session_id] = {
+ 779 |               id: s.session_id,
+ 780 |               title: s.title,
+ 781 |               prompt: s.prompt,
+ 782 |               mode: s.mode,
+ 783 |               nodes: [],
+ 784 |               edges: [],
+ 785 |               chatMessages: [],
+ 786 |               agentTalkLogs: [],
+ 787 |               executionState: s.execution_state,
+ 788 |               statusMessage: s.status_message,
+ 789 |               followUpSuggestions: []
+ 790 |             };
+ 791 |           }
+ 792 |         }
+ 793 |         set({ sessions: updatedSessions });
+ 794 |       }
+ 795 |     } catch (e) {
+ 796 |       console.error("Failed to fetch sessions from DB", e);
+ 797 |     }
+ 798 |   },
+ 799 | 
+ 800 |   loadSessionFromDb: async (sessionId: string) => {
+ 801 |     const ctrl = get().abortController;
+ 802 |     if (ctrl) ctrl.abort();
  803 | 
- 804 |     const preExistingNodes = [...get().nodes];
- 805 |     const preExistingEdges = [...get().edges];
- 806 | 
- 807 |     const chatMsgs = get().chatMessages;
- 808 |     const lastMsg = chatMsgs[chatMsgs.length - 1];
- 809 |     const isDuplicate = lastMsg && lastMsg.sender === "user" && lastMsg.text === promptText;
- 810 | 
- 811 |     const userMsg: ChatMessage = {
- 812 |       id: Date.now().toString(),
- 813 |       sender: "user",
- 814 |       text: promptText,
- 815 |       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
- 816 |     };
- 817 | 
- 818 |     set((state) => ({
- 819 |       chatMessages: isDuplicate ? state.chatMessages : [...state.chatMessages, userMsg],
- 820 |       isOrchestrating: true,
- 821 |       isThinking: true,
- 822 |       statusMessage: "",
- 823 |       liveThoughts: "",
- 824 |       agentTalkLogs: [],
- 825 |       followUpSuggestions: [],
- 826 |       abortController: controller
- 827 |     }));
- 828 |     get().saveCurrentSession();
- 829 | 
- 830 |     // Create target AI message placeholder
- 831 |     const aiMsgId = (Date.now() + 1).toString();
- 832 |     set((state) => ({
- 833 |       chatMessages: [
- 834 |         ...state.chatMessages,
- 835 |         {
- 836 |           id: aiMsgId,
- 837 |           sender: "ai",
- 838 |           text: "",
- 839 |           thinkingSummary: "",
- 840 |           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
- 841 |         }
- 842 |       ]
- 843 |     }));
- 844 |     get().saveCurrentSession();
- 845 | 
- 846 |     try {
- 847 |       const response = await fetch("/api/gemini/orchestrate", {
- 848 |         method: "POST",
- 849 |         headers: { "Content-Type": "application/json" },
- 850 |         body: JSON.stringify({
- 851 |           prompt: promptText,
- 852 |           history: get().chatMessages
- 853 |             .filter(m => m.id !== aiMsgId) // Exclude current empty prompt placeholder
- 854 |             .map(m => ({ sender: m.sender, text: m.text })),
- 855 |           api_key: get().apiKeys[get().provider] || get().apiKey || "",
- 856 |           api_keys: get().apiKeys,
- 857 |           session_id: get().activeSessionId || "",
- 858 |           execute_agents: execute,
- 859 |           provider: get().provider,
- 860 |           model: get().model,
- 861 |           fallback_provider: get().fallbackProvider || null,
- 862 |           base_url: get().providerBaseUrls[get().provider] || null,
- 863 |           existing_nodes: preExistingNodes,
- 864 |           existing_edges: preExistingEdges,
- 865 |           mode: mode || (execute ? "auto" : "custom")
- 866 |         }),
- 867 |         signal: controller.signal
- 868 |       });
- 869 | 
- 870 |       if (!response.ok) {
- 871 |         const errData = await response.json().catch(() => ({ detail: "Orchestration failed." }));
- 872 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
- 873 |       }
- 874 | 
- 875 |       let assistantResponse = "";
- 876 |       let thinkingSummary = "";
- 877 | 
- 878 |       const handlers = {
- 879 |         onText: (token: string) => {
- 880 |           assistantResponse += token;
- 881 |           set((state) => ({
- 882 |             isThinking: false,
- 883 |             chatMessages: state.chatMessages.map(m =>
- 884 |               m.id === aiMsgId ? { ...m, text: assistantResponse } : m
- 885 |             )
- 886 |           }));
- 887 |         },
- 888 |         onThinking: (thought: string) => {
- 889 |           thinkingSummary += thought;
- 890 |           set((state) => ({
- 891 |             liveThoughts: thinkingSummary,
- 892 |             chatMessages: state.chatMessages.map(m =>
- 893 |               m.id === aiMsgId ? { ...m, thinkingSummary } : m
- 894 |             )
- 895 |           }));
- 896 |         },
- 897 |         onStatus: (msg: string) => set({ statusMessage: msg }),
- 898 |         onMetadata: (meta: Record<string, any>) => {
- 899 |           const { nodes: mergedNodes, edges: mergedEdges } = mergeCanvasState(
- 900 |             preExistingNodes, preExistingEdges,
- 901 |             meta.nodes || [], meta.edges || []
- 902 |           );
- 903 |           set({ nodes: mergedNodes, edges: mergedEdges, agentTalkLogs: meta.agent_talk || [], followUpSuggestions: meta.follow_up_suggestions || [] });
- 904 |           // If plan-only mode (execute=false), mark as paused so Proceed button appears
- 905 |           if (!execute && (meta.nodes || []).length > 0) {
- 906 |             set({ executionState: 'paused' });
- 907 |           }
- 908 |           const talk = meta.agent_talk || [];
- 909 |           if (talk.length > 0) {
- 910 |             const latest = talk[talk.length - 1];
- 911 |             set({ statusMessage: `⚙️ **${latest.senderName}** completed — ${latest.text?.substring(0, 80) ?? ''}${(latest.text?.length ?? 0) > 80 ? '...' : ''}` });
- 912 |           }
- 913 |         },
- 914 |         onToolApproval: (approval: Record<string, any>) => set({ pendingApproval: approval as any }),
- 915 |         onDone: () => {},
- 916 |         onError: (err: Error) => { throw err; },
- 917 |       };
- 918 | 
- 919 |       await parseSSEStream(response, handlers, controller.signal);
+ 804 |     try {
+ 805 |       const response = await fetch(`/api/gemini/sessions/${sessionId}`);
+ 806 |       if (response.ok) {
+ 807 |         const fullSession = await response.json();
+ 808 |         const session: ChatSession = {
+ 809 |           id: fullSession.id,
+ 810 |           title: fullSession.title,
+ 811 |           prompt: fullSession.prompt,
+ 812 |           mode: fullSession.mode,
+ 813 |           nodes: fullSession.nodes,
+ 814 |           edges: fullSession.edges,
+ 815 |           chatMessages: fullSession.chatMessages,
+ 816 |           agentTalkLogs: fullSession.agentTalkLogs,
+ 817 |           executionState: fullSession.executionState,
+ 818 |           statusMessage: fullSession.statusMessage,
+ 819 |           followUpSuggestions: fullSession.followUpSuggestions
+ 820 |         };
+ 821 |         
+ 822 |         set((state) => ({
+ 823 |           sessions: { ...state.sessions, [sessionId]: session },
+ 824 |           activeSessionId: sessionId,
+ 825 |           nodes: session.nodes,
+ 826 |           edges: session.edges,
+ 827 |           chatMessages: session.chatMessages,
+ 828 |           agentTalkLogs: session.agentTalkLogs,
+ 829 |           executionState: session.executionState,
+ 830 |           statusMessage: "",
+ 831 |           followUpSuggestions: [],
+ 832 |           selectedNodeId: null,
+ 833 |           isOrchestrating: false,
+ 834 |           isThinking: false,
+ 835 |           liveThoughts: "",
+ 836 |           pendingApproval: null,
+ 837 |           abortController: null
+ 838 |         }));
+ 839 |       }
+ 840 |     } catch (e) {
+ 841 |       console.error("Failed to load session from DB", e);
+ 842 |     }
+ 843 |   },
+ 844 | 
+ 845 |   deleteSessionFromDb: async (sessionId: string) => {
+ 846 |     // Abort orchestration if deleting the currently active session
+ 847 |     if (get().activeSessionId === sessionId) {
+ 848 |       const ctrl = get().abortController;
+ 849 |       if (ctrl) ctrl.abort();
+ 850 |     }
+ 851 | 
+ 852 |     try {
+ 853 |       const response = await fetch(`/api/gemini/sessions/${sessionId}`, {
+ 854 |         method: "DELETE"
+ 855 |       });
+ 856 |       if (response.ok) {
+ 857 |         set((state) => {
+ 858 |           const updated = { ...state.sessions };
+ 859 |           delete updated[sessionId];
+ 860 |           const newActiveId = state.activeSessionId === sessionId ? null : state.activeSessionId;
+ 861 |           return {
+ 862 |             sessions: updated,
+ 863 |             activeSessionId: newActiveId,
+ 864 |             abortController: state.activeSessionId === sessionId ? null : state.abortController,
+ 865 |             isOrchestrating: state.activeSessionId === sessionId ? false : state.isOrchestrating,
+ 866 |             isThinking: state.activeSessionId === sessionId ? false : state.isThinking,
+ 867 |             ...(newActiveId ? {} : {
+ 868 |               nodes: [],
+ 869 |               edges: [],
+ 870 |               chatMessages: [],
+ 871 |               agentTalkLogs: [],
+ 872 |               executionState: "setup",
+ 873 |               statusMessage: "",
+ 874 |               followUpSuggestions: []
+ 875 |             })
+ 876 |           };
+ 877 |         });
+ 878 |       }
+ 879 |     } catch (e) {
+ 880 |       console.error("Failed to delete session", e);
+ 881 |     }
+ 882 |   },
+ 883 | 
+ 884 |   triggerSteerOrchestration: async (promptText, execute = true, mode) => {
+ 885 |     if (!promptText.trim()) return;
+ 886 | 
+ 887 |     // Abort any active orchestration
+ 888 |     const currentController = get().abortController;
+ 889 |     if (currentController) {
+ 890 |       currentController.abort();
+ 891 |     }
+ 892 | 
+ 893 |     const controller = new AbortController();
+ 894 | 
+ 895 |     const preExistingNodes = [...get().nodes];
+ 896 |     const preExistingEdges = [...get().edges];
+ 897 | 
+ 898 |     const chatMsgs = get().chatMessages;
+ 899 |     const lastMsg = chatMsgs[chatMsgs.length - 1];
+ 900 |     const isDuplicate = lastMsg && lastMsg.sender === "user" && lastMsg.text === promptText;
+ 901 | 
+ 902 |     const userMsg: ChatMessage = {
+ 903 |       id: Date.now().toString(),
+ 904 |       sender: "user",
+ 905 |       text: promptText,
+ 906 |       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+ 907 |     };
+ 908 | 
+ 909 |     set((state) => ({
+ 910 |       chatMessages: isDuplicate ? state.chatMessages : [...state.chatMessages, userMsg],
+ 911 |       isOrchestrating: true,
+ 912 |       isThinking: true,
+ 913 |       statusMessage: "",
+ 914 |       liveThoughts: "",
+ 915 |       agentTalkLogs: [],
+ 916 |       followUpSuggestions: [],
+ 917 |       abortController: controller
+ 918 |     }));
+ 919 |     get().saveCurrentSession();
  920 | 
- 921 |       if (!assistantResponse) {
- 922 |         const fallbackMsg = "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again.";
- 923 |         set((state) => ({
- 924 |           chatMessages: state.chatMessages.map(m =>
- 925 |             m.id === aiMsgId ? { ...m, text: fallbackMsg } : m
- 926 |           )
- 927 |         }));
- 928 |       }
- 929 | 
- 930 |       set({ abortController: null });
- 931 |       get().saveCurrentSession();
- 932 |     } catch (err: any) {
- 933 |       if (err.name === 'AbortError') {
- 934 |         console.log("Steer Orchestration manually aborted.");
- 935 |         set((state) => ({
- 936 |           chatMessages: state.chatMessages.map(m =>
- 937 |             m.id === aiMsgId && !m.text ? { ...m, text: "*Generation stopped by user.*" } : m
- 938 |           )
- 939 |         }));
- 940 |       } else {
- 941 |         console.error("Steer Orchestration stream error:", err);
- 942 |         const errorMsg = `**Connection Error.**\n\n${err.message || "Failed to parse stream event source. Check backend logs."}`;
- 943 |         set((state) => ({
- 944 |           chatMessages: state.chatMessages.map(m =>
- 945 |             m.id === aiMsgId ? { ...m, text: errorMsg } : m
- 946 |           ),
- 947 |           nodes: [],
- 948 |           edges: [],
- 949 |           followUpSuggestions: []
- 950 |         }));
- 951 |       }
- 952 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
- 953 |       get().saveCurrentSession();
- 954 |     } finally {
- 955 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
- 956 |       get().saveCurrentSession();
- 957 |     }
- 958 |   },
- 959 | 
- 960 |   triggerCustomExecution: async () => {
- 961 |     const currentController = get().abortController;
- 962 |     if (currentController) {
- 963 |       currentController.abort();
- 964 |     }
- 965 | 
- 966 |     const controller = new AbortController();
- 967 | 
- 968 |     const preExistingNodes = [...get().nodes];
- 969 |     const preExistingEdges = [...get().edges];
- 970 | 
- 971 |     const sessionId = get().activeSessionId;
- 972 |     if (!sessionId) return;
- 973 | 
- 974 |     const prompt = get().chatMessages.findLast(m => m.sender === 'user')?.text || "";
- 975 | 
- 976 |     set((state) => ({
- 977 |       isOrchestrating: true,
- 978 |       isThinking: true,
- 979 |       statusMessage: "Running custom orchestration loop...",
- 980 |       liveThoughts: "",
- 981 |       agentTalkLogs: [],
- 982 |       followUpSuggestions: [],
- 983 |       abortController: controller
- 984 |     }));
- 985 |     get().saveCurrentSession();
- 986 | 
- 987 |     const aiMsgId = Date.now().toString();
- 988 |     set((state) => ({
- 989 |       chatMessages: [
- 990 |         ...state.chatMessages,
- 991 |         {
- 992 |           id: aiMsgId,
- 993 |           sender: "ai",
- 994 |           text: "",
- 995 |           thinkingSummary: "",
- 996 |           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
- 997 |         }
- 998 |       ]
- 999 |     }));
-1000 |     get().saveCurrentSession();
+ 921 |     // Create target AI message placeholder
+ 922 |     const aiMsgId = (Date.now() + 1).toString();
+ 923 |     set((state) => ({
+ 924 |       chatMessages: [
+ 925 |         ...state.chatMessages,
+ 926 |         {
+ 927 |           id: aiMsgId,
+ 928 |           sender: "ai",
+ 929 |           text: "",
+ 930 |           thinkingSummary: "",
+ 931 |           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+ 932 |         }
+ 933 |       ]
+ 934 |     }));
+ 935 |     get().saveCurrentSession();
+ 936 | 
+ 937 |     try {
+ 938 |       const response = await fetch("/api/gemini/orchestrate", {
+ 939 |         method: "POST",
+ 940 |         headers: { "Content-Type": "application/json" },
+ 941 |         body: JSON.stringify({
+ 942 |           prompt: promptText,
+ 943 |           history: get().chatMessages
+ 944 |             .filter(m => m.id !== aiMsgId) // Exclude current empty prompt placeholder
+ 945 |             .map(m => ({ sender: m.sender, text: m.text })),
+ 946 |           api_key: get().apiKeys[get().provider] || get().apiKey || "",
+ 947 |           api_keys: get().apiKeys,
+ 948 |           session_id: get().activeSessionId || "",
+ 949 |           execute_agents: execute,
+ 950 |           provider: get().provider,
+ 951 |           model: get().model,
+ 952 |           fallback_provider: get().fallbackProvider || null,
+ 953 |           base_url: get().providerBaseUrls[get().provider] || null,
+ 954 |           existing_nodes: preExistingNodes,
+ 955 |           existing_edges: preExistingEdges,
+ 956 |           mode: mode || (execute ? "auto" : "custom"),
+ 957 |           backup_api_keys: get().backupApiKeys[get().provider] || []
+ 958 |         }),
+ 959 |         signal: controller.signal
+ 960 |       });
+ 961 | 
+ 962 |       if (!response.ok) {
+ 963 |         const errData = await response.json().catch(() => ({ detail: "Orchestration failed." }));
+ 964 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
+ 965 |       }
+ 966 | 
+ 967 |       let assistantResponse = "";
+ 968 |       let thinkingSummary = "";
+ 969 | 
+ 970 |       const handlers = {
+ 971 |         onText: (token: string) => {
+ 972 |           assistantResponse += token;
+ 973 |           set((state) => ({
+ 974 |             isThinking: false,
+ 975 |             chatMessages: state.chatMessages.map(m =>
+ 976 |               m.id === aiMsgId ? { ...m, text: assistantResponse } : m
+ 977 |             )
+ 978 |           }));
+ 979 |         },
+ 980 |         onThinking: (thought: string) => {
+ 981 |           thinkingSummary += thought;
+ 982 |           set((state) => ({
+ 983 |             liveThoughts: thinkingSummary,
+ 984 |             chatMessages: state.chatMessages.map(m =>
+ 985 |               m.id === aiMsgId ? { ...m, thinkingSummary } : m
+ 986 |             )
+ 987 |           }));
+ 988 |         },
+ 989 |         onStatus: (msg: string) => set({ statusMessage: msg }),
+ 990 |         onMetadata: (meta: Record<string, any>) => {
+ 991 |           const activeSession = get().sessions[get().activeSessionId || ''];
+ 992 |           const currentMode = activeSession?.mode || 'auto';
+ 993 | 
+ 994 |           if (currentMode === 'auto' || (currentMode === 'custom' && !execute)) {
+ 995 |             const { nodes: mergedNodes, edges: mergedEdges } = mergeCanvasState(
+ 996 |               preExistingNodes, preExistingEdges,
+ 997 |               meta.nodes || [], meta.edges || []
+ 998 |             );
+ 999 |             set({ nodes: mergedNodes, edges: mergedEdges });
+1000 |           }
 1001 | 
-1002 |     try {
-1003 |       const response = await fetch("/api/gemini/execute_custom", {
-1004 |         method: "POST",
-1005 |         headers: { "Content-Type": "application/json" },
-1006 |         body: JSON.stringify({
-1007 |           session_id: sessionId,
-1008 |           prompt: prompt,
-1009 |           history: get().chatMessages
-1010 |             .filter(m => m.id !== aiMsgId)
-1011 |             .map(m => ({ sender: m.sender, text: m.text })),
-1012 |           api_key: get().apiKeys[get().provider] || get().apiKey || "",
-1013 |           api_keys: get().apiKeys,
-1014 |           nodes: get().nodes,
-1015 |           edges: get().edges,
-1016 |           provider: get().provider,
-1017 |           model: get().model,
-1018 |           fallback_provider: get().fallbackProvider || null,
-1019 |           base_url: get().providerBaseUrls[get().provider] || null
-1020 |         }),
-1021 |         signal: controller.signal
-1022 |       });
-1023 | 
-1024 |       if (!response.ok) {
-1025 |         const errData = await response.json().catch(() => ({ detail: "Execution failed." }));
-1026 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
+1002 |           set({ agentTalkLogs: meta.agent_talk || [], followUpSuggestions: meta.follow_up_suggestions || [] });
+1003 |           // If plan-only mode (execute=false), mark as paused so Proceed button appears
+1004 |           if (!execute && (meta.nodes || []).length > 0) {
+1005 |             set({ executionState: 'paused' });
+1006 |           }
+1007 |           const talk = meta.agent_talk || [];
+1008 |           if (talk.length > 0) {
+1009 |             const latest = talk[talk.length - 1];
+1010 |             set({ statusMessage: `⚙️ **${latest.senderName}** completed — ${latest.text?.substring(0, 80) ?? ''}${(latest.text?.length ?? 0) > 80 ? '...' : ''}` });
+1011 |           }
+1012 |         },
+1013 |         onToolApproval: (approval: Record<string, any>) => set({ pendingApproval: approval as any }),
+1014 |         onDone: () => {},
+1015 |         onError: (err: Error) => { throw err; },
+1016 |       };
+1017 | 
+1018 |       await parseSSEStream(response, handlers, controller.signal);
+1019 | 
+1020 |       if (!assistantResponse) {
+1021 |         const fallbackMsg = "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again.";
+1022 |         set((state) => ({
+1023 |           chatMessages: state.chatMessages.map(m =>
+1024 |             m.id === aiMsgId ? { ...m, text: fallbackMsg } : m
+1025 |           )
+1026 |         }));
 1027 |       }
 1028 | 
-1029 |       const reader = response.body?.getReader();
-1030 |       const decoder = new TextDecoder();
-1031 |       if (!reader) throw new Error("No response stream body reader.");
-1032 | 
-1033 |       let assistantResponse = "";
-1034 |       let thinkingSummary = "";
-1035 | 
-1036 |       const customHandlers = {
-1037 |         onText: (token: string) => {
-1038 |           assistantResponse += token;
-1039 |           set((state) => ({
-1040 |             isThinking: false,
-1041 |             chatMessages: state.chatMessages.map(m =>
-1042 |               m.id === aiMsgId ? { ...m, text: assistantResponse } : m
-1043 |             )
-1044 |           }));
-1045 |         },
-1046 |         onThinking: (thought: string) => {
-1047 |           thinkingSummary += thought;
-1048 |           set((state) => ({
-1049 |             liveThoughts: thinkingSummary,
-1050 |             chatMessages: state.chatMessages.map(m =>
-1051 |               m.id === aiMsgId ? { ...m, thinkingSummary } : m
-1052 |             )
-1053 |           }));
-1054 |         },
-1055 |         onStatus: (msg: string) => set({ statusMessage: msg }),
-1056 |         onMetadata: (meta: Record<string, any>) => {
-1057 |           const { nodes: mergedNodes, edges: mergedEdges } = mergeCanvasState(
-1058 |             preExistingNodes, preExistingEdges,
-1059 |             meta.nodes || [], meta.edges || []
-1060 |           );
-1061 |           set({ nodes: mergedNodes, edges: mergedEdges, agentTalkLogs: meta.agent_talk || [], followUpSuggestions: meta.follow_up_suggestions || [] });
-1062 |           const talk = meta.agent_talk || [];
-1063 |           if (talk.length > 0) {
-1064 |             const latest = talk[talk.length - 1];
-1065 |             set({ statusMessage: `⚙️ **${latest.senderName}** completed — ${latest.text?.substring(0, 80) ?? ''}${(latest.text?.length ?? 0) > 80 ? '...' : ''}` });
-1066 |           }
-1067 |         },
-1068 |         onToolApproval: (approval: Record<string, any>) => set({ pendingApproval: approval as any }),
-1069 |         onDone: () => {},
-1070 |         onError: (err: Error) => { throw err; },
-1071 |       };
+1029 |       set({ abortController: null });
+1030 |       get().saveCurrentSession();
+1031 |     } catch (err: any) {
+1032 |       if (err.name === 'AbortError') {
+1033 |         console.log("Steer Orchestration manually aborted.");
+1034 |         set((state) => ({
+1035 |           chatMessages: state.chatMessages.map(m =>
+1036 |             m.id === aiMsgId && !m.text ? { ...m, text: "*Generation stopped by user.*" } : m
+1037 |           )
+1038 |         }));
+1039 |       } else {
+1040 |         console.error("Steer Orchestration stream error:", err);
+1041 |         const errorMsg = `**Connection Error.**\n\n${err.message || "Failed to parse stream event source. Check backend logs."}`;
+1042 |         set((state) => ({
+1043 |           chatMessages: state.chatMessages.map(m =>
+1044 |             m.id === aiMsgId ? { ...m, text: errorMsg } : m
+1045 |           ),
+1046 |           nodes: [],
+1047 |           edges: [],
+1048 |           followUpSuggestions: []
+1049 |         }));
+1050 |       }
+1051 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
+1052 |       get().saveCurrentSession();
+1053 |     } finally {
+1054 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
+1055 |       get().saveCurrentSession();
+1056 |     }
+1057 |   },
+1058 | 
+1059 |   triggerCustomExecution: async () => {
+1060 |     const currentController = get().abortController;
+1061 |     if (currentController) {
+1062 |       currentController.abort();
+1063 |     }
+1064 | 
+1065 |     const controller = new AbortController();
+1066 | 
+1067 |     const preExistingNodes = [...get().nodes];
+1068 |     const preExistingEdges = [...get().edges];
+1069 | 
+1070 |     const sessionId = get().activeSessionId;
+1071 |     if (!sessionId) return;
 1072 | 
-1073 |       await parseSSEStream(response, customHandlers, controller.signal);
+1073 |     const prompt = get().chatMessages.findLast(m => m.sender === 'user')?.text || "";
 1074 | 
-1075 |       if (!assistantResponse) {
-1076 |         const fallbackMsg = "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again.";
-1077 |         set((state) => ({
-1078 |           chatMessages: state.chatMessages.map(m =>
-1079 |             m.id === aiMsgId ? { ...m, text: fallbackMsg } : m
-1080 |           )
-1081 |         }));
-1082 |       }
-1083 | 
-1084 |       set({ abortController: null });
-1085 |       get().saveCurrentSession();
-1086 |     } catch (err: any) {
-1087 |       if (err.name === 'AbortError') {
-1088 |         console.log("Steer Orchestration manually aborted.");
-1089 |         set((state) => ({
-1090 |           chatMessages: state.chatMessages.map(m =>
-1091 |             m.id === aiMsgId && !m.text ? { ...m, text: "*Generation stopped by user.*" } : m
-1092 |           )
-1093 |         }));
-1094 |       } else {
-1095 |         console.error("Steer Orchestration stream error:", err);
-1096 |         const errorMsg = `**Connection Error.**\n\n${err.message || "Failed to parse stream event source. Check backend logs."}`;
-1097 |         set((state) => ({
-1098 |           chatMessages: state.chatMessages.map(m =>
-1099 |             m.id === aiMsgId ? { ...m, text: errorMsg } : m
-1100 |           ),
-1101 |           nodes: [],
-1102 |           edges: [],
-1103 |           followUpSuggestions: []
-1104 |         }));
-1105 |       }
-1106 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
-1107 |       get().saveCurrentSession();
-1108 |     } finally {
-1109 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
-1110 |       get().saveCurrentSession();
-1111 |     }
-1112 |   },
-1113 | 
-1114 |   triggerEchoHouseSimulation: async (rounds = 3, tone = "realistic") => {
-1115 |     const activeSessionId = get().activeSessionId;
-1116 |     if (!activeSessionId) return;
-1117 | 
-1118 |     const selfNode = get().nodes.find(n => (n.data as any).echohouseRole === "self");
-1119 |     if (!selfNode) return;
-1120 |     const problemText = (selfNode.data as any).echohouseProblem || "";
-1121 | 
-1122 |     const cast = get().nodes
-1123 |       .filter(n => (n.data as any).isEchoHouseAgent === true)
-1124 |       .map(n => ({
-1125 |         inferred_name: n.data.name,
-1126 |         role: (n.data as any).echohouseRole || "",
-1127 |         inferred_problem: (n.data as any).echohouseProblem || "",
-1128 |         is_self: (n.data as any).echohouseRole === "self"
-1129 |       }));
-1130 | 
-1131 |     // Abort any active orchestration
-1132 |     const currentController = get().abortController;
-1133 |     if (currentController) {
-1134 |       currentController.abort();
-1135 |     }
-1136 | 
-1137 |     const controller = new AbortController();
-1138 | 
-1139 |     set({
-1140 |       isOrchestrating: true,
-1141 |       isThinking: true,
-1142 |       statusMessage: "Initializing social simulation...",
-1143 |       liveThoughts: "",
-1144 |       agentTalkLogs: [],
-1145 |       followUpSuggestions: [],
-1146 |       abortController: controller
-1147 |     });
-1148 |     get().saveCurrentSession();
-1149 | 
-1150 |     try {
-1151 |       const activeProv = get().provider;
-1152 |       const apiKey = get().apiKeys[activeProv] || get().apiKey || "";
-1153 |       const response = await fetch("/api/gemini/echohouse/simulate", {
-1154 |         method: "POST",
-1155 |         headers: { "Content-Type": "application/json" },
-1156 |         body: JSON.stringify({
-1157 |           session_id: activeSessionId,
-1158 |           problem_text: problemText,
-1159 |           cast: cast,
-1160 |           provider: activeProv,
-1161 |           model: get().model,
-1162 |           api_key: apiKey,
-1163 |           api_keys: get().apiKeys,
-1164 |           base_url: get().providerBaseUrls[activeProv] || null,
-1165 |           rounds: rounds,
-1166 |           tone: tone
-1167 |         }),
-1168 |         signal: controller.signal
-1169 |       });
-1170 | 
-1171 |       if (!response.ok) {
-1172 |         const errData = await response.json().catch(() => ({ detail: "Simulation failed." }));
-1173 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
-1174 |       }
-1175 | 
-1176 |       let currentStreamingMsgId = "";
-1177 |       let currentText = "";
-1178 |       let simulationTextAccum = "";
-1179 | 
-1180 |       const handlers = {
-1181 |         onText: (token: string) => {
-1182 |           if (!currentStreamingMsgId) return;
-1183 |           currentText += token;
-1184 |           simulationTextAccum += token;
-1185 |           set((state) => ({
-1186 |             isThinking: false,
-1187 |             chatMessages: state.chatMessages.map(m =>
-1188 |               m.id === currentStreamingMsgId ? { ...m, text: currentText } : m
-1189 |             )
-1190 |           }));
-1191 |         },
-1192 |         onThinking: () => {},
-1193 |         onStatus: (msg: string) => {
-1194 |           set({ statusMessage: msg });
-1195 |           // Detect round start and inject a divider message
-1196 |           const roundMatch = msg.match(/Orchestrating Round (\d+) of social simulation/);
-1197 |           if (roundMatch) {
-1198 |             const roundNum = roundMatch[1];
-1199 |             const dividerId = `divider-round-${roundNum}-${Date.now()}`;
-1200 |             const dividerMsg: ChatMessage = {
-1201 |               id: dividerId,
-1202 |               sender: 'divider',
-1203 |               text: `Round ${roundNum}`,
-1204 |               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-1205 |             };
-1206 |             set((state) => ({ chatMessages: [...state.chatMessages, dividerMsg] }));
-1207 |             currentStreamingMsgId = "";
-1208 |             currentText = "";
-1209 |           }
-1210 |         },
-1211 |         onMetadata: (meta: Record<string, any>) => {
-1212 |           if (meta.active_speaker) {
-1213 |             // Inject insight divider before the insight speaker
-1214 |             if (meta.active_speaker === "insight") {
-1215 |               const insightDividerId = `divider-insight-${Date.now()}`;
-1216 |               const insightDivider: ChatMessage = {
-1217 |                 id: insightDividerId,
-1218 |                 sender: 'divider',
-1219 |                 text: 'Therapeutic Insight',
-1220 |                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-1221 |               };
-1222 |               set((state) => ({ chatMessages: [...state.chatMessages, insightDivider] }));
-1223 |             }
-1224 | 
-1225 |             const isSelf = meta.active_speaker === "You (Self)" || (meta.active_speaker || "").toLowerCase() === "self";
-1226 |             const newMsgId = `echo-msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+1075 |     set((state) => ({
+1076 |       isOrchestrating: true,
+1077 |       isThinking: true,
+1078 |       statusMessage: "Running custom orchestration loop...",
+1079 |       liveThoughts: "",
+1080 |       agentTalkLogs: [],
+1081 |       followUpSuggestions: [],
+1082 |       abortController: controller,
+1083 |       executionState: "running"
+1084 |     }));
+1085 |     get().saveCurrentSession();
+1086 | 
+1087 |     const aiMsgId = Date.now().toString();
+1088 |     set((state) => ({
+1089 |       chatMessages: [
+1090 |         ...state.chatMessages,
+1091 |         {
+1092 |           id: aiMsgId,
+1093 |           sender: "ai",
+1094 |           text: "",
+1095 |           thinkingSummary: "",
+1096 |           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+1097 |         }
+1098 |       ]
+1099 |     }));
+1100 |     get().saveCurrentSession();
+1101 | 
+1102 |     try {
+1103 |       const response = await fetch("/api/gemini/execute_custom", {
+1104 |         method: "POST",
+1105 |         headers: { "Content-Type": "application/json" },
+1106 |         body: JSON.stringify({
+1107 |           session_id: sessionId,
+1108 |           prompt: prompt,
+1109 |           history: get().chatMessages
+1110 |             .filter(m => m.id !== aiMsgId)
+1111 |             .map(m => ({ sender: m.sender, text: m.text })),
+1112 |           api_key: get().apiKeys[get().provider] || get().apiKey || "",
+1113 |           api_keys: get().apiKeys,
+1114 |           nodes: get().nodes,
+1115 |           edges: get().edges,
+1116 |           provider: get().provider,
+1117 |           model: get().model,
+1118 |           fallback_provider: get().fallbackProvider || null,
+1119 |           base_url: get().providerBaseUrls[get().provider] || null,
+1120 |           backup_api_keys: get().backupApiKeys[get().provider] || []
+1121 |         }),
+1122 |         signal: controller.signal
+1123 |       });
+1124 | 
+1125 |       if (!response.ok) {
+1126 |         const errData = await response.json().catch(() => ({ detail: "Execution failed." }));
+1127 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
+1128 |       }
+1129 | 
+1130 |       let assistantResponse = "";
+1131 |       let thinkingSummary = "";
+1132 | 
+1133 |       const customHandlers = {
+1134 |         onText: (token: string) => {
+1135 |           assistantResponse += token;
+1136 |           set((state) => ({
+1137 |             isThinking: false,
+1138 |             chatMessages: state.chatMessages.map(m =>
+1139 |               m.id === aiMsgId ? { ...m, text: assistantResponse } : m
+1140 |             )
+1141 |           }));
+1142 |         },
+1143 |         onThinking: (thought: string) => {
+1144 |           thinkingSummary += thought;
+1145 |           set((state) => ({
+1146 |             liveThoughts: thinkingSummary,
+1147 |             chatMessages: state.chatMessages.map(m =>
+1148 |               m.id === aiMsgId ? { ...m, thinkingSummary } : m
+1149 |             )
+1150 |           }));
+1151 |         },
+1152 |         onStatus: (msg: string) => set({ statusMessage: msg }),
+1153 |         onMetadata: (meta: Record<string, any>) => {
+1154 |           const { nodes: mergedNodes, edges: mergedEdges } = mergeCanvasState(
+1155 |             preExistingNodes, preExistingEdges,
+1156 |             meta.nodes || [], meta.edges || []
+1157 |           );
+1158 |           set({ nodes: mergedNodes, edges: mergedEdges, agentTalkLogs: meta.agent_talk || [], followUpSuggestions: meta.follow_up_suggestions || [] });
+1159 |           const talk = meta.agent_talk || [];
+1160 |           if (talk.length > 0) {
+1161 |             const latest = talk[talk.length - 1];
+1162 |             set({ statusMessage: `⚙️ **${latest.senderName}** completed — ${latest.text?.substring(0, 80) ?? ''}${(latest.text?.length ?? 0) > 80 ? '...' : ''}` });
+1163 |           }
+1164 |         },
+1165 |         onToolApproval: (approval: Record<string, any>) => set({ pendingApproval: approval as any }),
+1166 |         onDone: () => {},
+1167 |         onError: (err: Error) => { throw err; },
+1168 |       };
+1169 | 
+1170 |       await parseSSEStream(response, customHandlers, controller.signal);
+1171 | 
+1172 |       if (!assistantResponse) {
+1173 |         const fallbackMsg = "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again.";
+1174 |         set((state) => ({
+1175 |           chatMessages: state.chatMessages.map(m =>
+1176 |             m.id === aiMsgId ? { ...m, text: fallbackMsg } : m
+1177 |           )
+1178 |         }));
+1179 |       }
+1180 | 
+1181 |       set({ abortController: null });
+1182 |       get().saveCurrentSession();
+1183 |     } catch (err: any) {
+1184 |       if (err.name === 'AbortError') {
+1185 |         console.log("Steer Orchestration manually aborted.");
+1186 |         set((state) => ({
+1187 |           chatMessages: state.chatMessages.map(m =>
+1188 |             m.id === aiMsgId && !m.text ? { ...m, text: "*Generation stopped by user.*" } : m
+1189 |           )
+1190 |         }));
+1191 |       } else {
+1192 |         console.error("Steer Orchestration stream error:", err);
+1193 |         const errorMsg = `**Connection Error.**\n\n${err.message || "Failed to parse stream event source. Check backend logs."}`;
+1194 |         set((state) => ({
+1195 |           chatMessages: state.chatMessages.map(m =>
+1196 |             m.id === aiMsgId ? { ...m, text: errorMsg } : m
+1197 |           ),
+1198 |           nodes: [],
+1199 |           edges: [],
+1200 |           followUpSuggestions: []
+1201 |         }));
+1202 |       }
+1203 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
+1204 |       get().saveCurrentSession();
+1205 |     } finally {
+1206 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '', executionState: 'setup' });
+1207 |       get().saveCurrentSession();
+1208 |     }
+1209 |   },
+1210 | 
+1211 |   triggerEchoHouseSimulation: async (rounds = 3, tone = "realistic") => {
+1212 |     const activeSessionId = get().activeSessionId;
+1213 |     if (!activeSessionId) return;
+1214 | 
+1215 |     const selfNode = get().nodes.find(n => (n.data as any).echohouseRole === "self");
+1216 |     if (!selfNode) return;
+1217 |     const problemText = (selfNode.data as any).echohouseProblem || "";
+1218 | 
+1219 |     const cast = get().nodes
+1220 |       .filter(n => (n.data as any).isEchoHouseAgent === true)
+1221 |       .map(n => ({
+1222 |         inferred_name: n.data.name,
+1223 |         role: (n.data as any).echohouseRole || "",
+1224 |         inferred_problem: (n.data as any).echohouseProblem || "",
+1225 |         is_self: (n.data as any).echohouseRole === "self"
+1226 |       }));
 1227 | 
-1228 |             const newMsg: ChatMessage = {
-1229 |               id: newMsgId,
-1230 |               sender: meta.active_speaker === "insight" ? 'ai' : (isSelf ? 'user' : 'ai'),
-1231 |               text: "",
-1232 |               speakerName: meta.active_speaker,
-1233 |               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-1234 |             };
+1228 |     // Abort any active orchestration
+1229 |     const currentController = get().abortController;
+1230 |     if (currentController) {
+1231 |       currentController.abort();
+1232 |     }
+1233 | 
+1234 |     const controller = new AbortController();
 1235 | 
-1236 |             set((state) => ({
-1237 |               chatMessages: [...state.chatMessages, newMsg]
-1238 |             }));
-1239 | 
-1240 |             currentStreamingMsgId = newMsgId;
-1241 |             currentText = "";
-1242 |           }
-1243 |         },
-1244 |         onToolApproval: () => {},
-1245 |         onDone: () => {},
-1246 |         onError: (err: Error) => { throw err; },
-1247 |       };
-1248 | 
-1249 |       await parseSSEStream(response, handlers, controller.signal);
-1250 |       set({ abortController: null });
-1251 |       get().saveCurrentSession();
-1252 | 
-1253 |       // Fetch actionable takeaways after simulation completes
-1254 |       try {
-1255 |         const takeawaysResp = await fetch("/api/gemini/echohouse/takeaways", {
-1256 |           method: "POST",
-1257 |           headers: { "Content-Type": "application/json" },
-1258 |           body: JSON.stringify({
-1259 |             simulation_text: simulationTextAccum,
-1260 |             problem_text: problemText,
-1261 |             provider: activeProv,
-1262 |             model: get().model,
-1263 |             api_key: apiKey,
-1264 |             api_keys: get().apiKeys,
-1265 |             base_url: get().providerBaseUrls[activeProv] || null
-1266 |           })
-1267 |         });
-1268 |         if (takeawaysResp.ok) {
-1269 |           const { takeaways } = await takeawaysResp.json();
-1270 |           if (Array.isArray(takeaways) && takeaways.length > 0) {
-1271 |             const takeawaysMsgId = `echo-takeaways-${Date.now()}`;
-1272 |             const takeawaysMsg: ChatMessage = {
-1273 |               id: takeawaysMsgId,
-1274 |               sender: 'ai',
-1275 |               text: '',
-1276 |               speakerName: 'takeaways',
-1277 |               takeaways: takeaways,
-1278 |               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-1279 |             };
-1280 |             set((state) => ({ chatMessages: [...state.chatMessages, takeawaysMsg] }));
-1281 |             get().saveCurrentSession();
-1282 |           }
-1283 |         }
-1284 |       } catch (e) {
-1285 |         console.error("Failed to fetch EchoHouse takeaways:", e);
-1286 |       }
-1287 |     } catch (err: any) {
-1288 |       if (err.name === 'AbortError') {
-1289 |         console.log("EchoHouse simulation manually aborted.");
-1290 |       } else {
-1291 |         console.error("EchoHouse simulation stream error:", err);
-1292 |       }
-1293 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
-1294 |       get().saveCurrentSession();
-1295 |     } finally {
-1296 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
-1297 |       get().saveCurrentSession();
-1298 |     }
-1299 |   }
-1300 | }));
-1301 | 
-1302 | let persistTimeout: any = null;
-1303 | useWorkflowStore.subscribe((state) => {
-1304 |   if (typeof window === 'undefined') return;
-1305 |   if (persistTimeout) clearTimeout(persistTimeout);
-1306 |   persistTimeout = setTimeout(async () => {
-1307 |     try {
-1308 |       const stateToPersist = {
-1309 |         activeSessionId: state.activeSessionId,
-1310 |         sessions: state.sessions,
-1311 |         nodes: state.nodes,
-1312 |         edges: state.edges,
-1313 |         provider: state.provider,
-1314 |         model: state.model,
-1315 |         fallbackProvider: state.fallbackProvider,
-1316 |         providerBaseUrls: state.providerBaseUrls,
-1317 |       };
-1318 |       await idbSet('solospace_workflow_state', JSON.stringify(stateToPersist));
-1319 |     } catch (e) {
-1320 |       console.error("Failed to persist state to IndexedDB:", e);
-1321 |     }
-1322 |   }, 500);
-1323 | });
-1324 |
+1236 |     set({
+1237 |       isOrchestrating: true,
+1238 |       isThinking: true,
+1239 |       statusMessage: "Initializing social simulation...",
+1240 |       liveThoughts: "",
+1241 |       agentTalkLogs: [],
+1242 |       followUpSuggestions: [],
+1243 |       abortController: controller
+1244 |     });
+1245 |     get().saveCurrentSession();
+1246 | 
+1247 |     try {
+1248 |       const activeProv = get().provider;
+1249 |       const apiKey = get().apiKeys[activeProv] || get().apiKey || "";
+1250 |       const response = await fetch("/api/gemini/echohouse/simulate", {
+1251 |         method: "POST",
+1252 |         headers: { "Content-Type": "application/json" },
+1253 |         body: JSON.stringify({
+1254 |           session_id: activeSessionId,
+1255 |           problem_text: problemText,
+1256 |           cast: cast,
+1257 |           provider: activeProv,
+1258 |           model: get().model,
+1259 |           api_key: apiKey,
+1260 |           api_keys: get().apiKeys,
+1261 |           base_url: get().providerBaseUrls[activeProv] || null,
+1262 |           rounds: rounds,
+1263 |           tone: tone,
+1264 |           backup_api_keys: get().backupApiKeys[activeProv] || [],
+1265 |         }),
+1266 |         signal: controller.signal
+1267 |       });
+1268 | 
+1269 |       if (!response.ok) {
+1270 |         const errData = await response.json().catch(() => ({ detail: "Simulation failed." }));
+1271 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
+1272 |       }
+1273 | 
+1274 |       let currentStreamingMsgId = "";
+1275 |       let currentText = "";
+1276 |       let simulationTextAccum = "";
+1277 | 
+1278 |       const handlers = {
+1279 |         onText: (token: string) => {
+1280 |           if (!currentStreamingMsgId) return;
+1281 |           currentText += token;
+1282 |           simulationTextAccum += token;
+1283 |           set((state) => ({
+1284 |             isThinking: false,
+1285 |             chatMessages: state.chatMessages.map(m =>
+1286 |               m.id === currentStreamingMsgId ? { ...m, text: currentText } : m
+1287 |             )
+1288 |           }));
+1289 |         },
+1290 |         onThinking: () => {},
+1291 |         onStatus: (msg: string) => {
+1292 |           set({ statusMessage: msg });
+1293 |           // Detect round start and inject a divider message
+1294 |           const roundMatch = msg.match(/Orchestrating Round (\d+) of social simulation/);
+1295 |           if (roundMatch) {
+1296 |             const roundNum = roundMatch[1];
+1297 |             const dividerId = `divider-round-${roundNum}-${Date.now()}`;
+1298 |             const dividerMsg: ChatMessage = {
+1299 |               id: dividerId,
+1300 |               sender: 'divider',
+1301 |               text: `Round ${roundNum}`,
+1302 |               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+1303 |             };
+1304 |             set((state) => ({ chatMessages: [...state.chatMessages, dividerMsg] }));
+1305 |             currentStreamingMsgId = "";
+1306 |             currentText = "";
+1307 |           }
+1308 |         },
+1309 |         onMetadata: (meta: Record<string, any>) => {
+1310 |           if (meta.active_speaker) {
+1311 |             // Inject insight divider before the insight speaker
+1312 |             if (meta.active_speaker === "insight") {
+1313 |               const insightDividerId = `divider-insight-${Date.now()}`;
+1314 |               const insightDivider: ChatMessage = {
+1315 |                 id: insightDividerId,
+1316 |                 sender: 'divider',
+1317 |                 text: 'Therapeutic Insight',
+1318 |                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+1319 |               };
+1320 |               set((state) => ({ chatMessages: [...state.chatMessages, insightDivider] }));
+1321 |             }
+1322 | 
+1323 |             const isSelf = meta.active_speaker === "You (Self)" || (meta.active_speaker || "").toLowerCase() === "self";
+1324 |             const newMsgId = `echo-msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+1325 | 
+1326 |             const newMsg: ChatMessage = {
+1327 |               id: newMsgId,
+1328 |               sender: meta.active_speaker === "insight" ? 'ai' : (isSelf ? 'user' : 'ai'),
+1329 |               text: "",
+1330 |               speakerName: meta.active_speaker,
+1331 |               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+1332 |             };
+1333 | 
+1334 |             set((state) => ({
+1335 |               chatMessages: [...state.chatMessages, newMsg]
+1336 |             }));
+1337 | 
+1338 |             currentStreamingMsgId = newMsgId;
+1339 |             currentText = "";
+1340 |           }
+1341 |         },
+1342 |         onToolApproval: () => {},
+1343 |         onDone: () => {},
+1344 |         onError: (err: Error) => { throw err; },
+1345 |       };
+1346 | 
+1347 |       await parseSSEStream(response, handlers, controller.signal);
+1348 |       set({ abortController: null });
+1349 |       get().saveCurrentSession();
+1350 | 
+1351 |       // Fetch actionable takeaways after simulation completes
+1352 |       try {
+1353 |         const takeawaysResp = await fetch("/api/gemini/echohouse/takeaways", {
+1354 |           method: "POST",
+1355 |           headers: { "Content-Type": "application/json" },
+1356 |           body: JSON.stringify({
+1357 |             simulation_text: simulationTextAccum,
+1358 |             problem_text: problemText,
+1359 |             provider: activeProv,
+1360 |             model: get().model,
+1361 |             api_key: apiKey,
+1362 |             api_keys: get().apiKeys,
+1363 |             base_url: get().providerBaseUrls[activeProv] || null,
+1364 |             backup_api_keys: get().backupApiKeys[activeProv] || [],
+1365 |           })
+1366 |         });
+1367 |         if (takeawaysResp.ok) {
+1368 |           const { takeaways } = await takeawaysResp.json();
+1369 |           if (Array.isArray(takeaways) && takeaways.length > 0) {
+1370 |             const takeawaysMsgId = `echo-takeaways-${Date.now()}`;
+1371 |             const takeawaysMsg: ChatMessage = {
+1372 |               id: takeawaysMsgId,
+1373 |               sender: 'ai',
+1374 |               text: '',
+1375 |               speakerName: 'takeaways',
+1376 |               takeaways: takeaways,
+1377 |               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+1378 |             };
+1379 |             set((state) => ({ chatMessages: [...state.chatMessages, takeawaysMsg] }));
+1380 |             get().saveCurrentSession();
+1381 |           }
+1382 |         }
+1383 |       } catch (e) {
+1384 |         console.error("Failed to fetch EchoHouse takeaways:", e);
+1385 |       }
+1386 |     } catch (err: any) {
+1387 |       if (err.name === 'AbortError') {
+1388 |         console.log("EchoHouse simulation manually aborted.");
+1389 |       } else {
+1390 |         console.error("EchoHouse simulation stream error:", err);
+1391 |       }
+1392 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
+1393 |       get().saveCurrentSession();
+1394 |     } finally {
+1395 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
+1396 |       get().saveCurrentSession();
+1397 |     }
+1398 |   }
+1399 | }));
+1400 | 
+1401 | let persistTimeout: any = null;
+1402 | useWorkflowStore.subscribe((state) => {
+1403 |   if (typeof window === 'undefined') return;
+1404 |   if (persistTimeout) clearTimeout(persistTimeout);
+1405 |   persistTimeout = setTimeout(async () => {
+1406 |     try {
+1407 |       const stateToPersist = {
+1408 |         activeSessionId: state.activeSessionId,
+1409 |         sessions: state.sessions,
+1410 |         nodes: state.nodes,
+1411 |         edges: state.edges,
+1412 |         provider: state.provider,
+1413 |         model: state.model,
+1414 |         fallbackProvider: state.fallbackProvider,
+1415 |         providerBaseUrls: state.providerBaseUrls,
+1416 |       };
+1417 |       await idbSet('solospace_workflow_state', JSON.stringify(stateToPersist));
+1418 |     } catch (e) {
+1419 |       console.error("Failed to persist state to IndexedDB:", e);
+1420 |     }
+1421 |   }, 500);
+1422 | });
+1423 |
 ```
 
 ### File: `Frontend/tests/crypto.test.ts`

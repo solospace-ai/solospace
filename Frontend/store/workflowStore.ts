@@ -106,10 +106,13 @@ export interface WorkflowState {
   provider: string;
   model: string;
   apiKeys: Record<string, string>;
+  backupApiKeys: Record<string, string[]>;
   availableProviders: Record<string, any>;
-  setProvider: (provider: string) => void;
-  setModel: (model: string) => void;
+  setProvider: (provider: string) => void | Promise<void>;
+  setModel: (model: string) => void | Promise<void>;
   setProviderApiKey: (provider: string, key: string) => Promise<void>;
+  setBackupApiKey: (provider: string, index: number, key: string) => Promise<void>;
+  loadBackupKeys: () => Promise<void>;
   loadPersistedKeys: () => Promise<void>;
   loadPersistedState: () => Promise<void>;
   fetchAvailableProviders: () => Promise<void>;
@@ -236,9 +239,16 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   provider: "gemini",
   model: "gemini-2.5-flash",
   apiKeys: {},
+  backupApiKeys: {},
   availableProviders: {},
-  setProvider: (provider) => set({ provider }),
-  setModel: (model) => set({ model }),
+  setProvider: async (provider) => {
+    set({ provider });
+    await idbSet('solospace_active_provider', provider);
+  },
+  setModel: async (model) => {
+    set({ model });
+    await idbSet('solospace_active_model', model);
+  },
   setProviderApiKey: async (provider, key) => {
     set((state) => ({ apiKeys: { ...state.apiKeys, [provider]: key } }));
     try {
@@ -248,14 +258,69 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       } else {
         await idbDel(`apikey_${provider}`);
       }
+      await idbSet('solospace_active_provider', get().provider);
+      await idbSet('solospace_active_model', get().model);
     } catch (e) {
       console.error(`Failed to encrypt/persist key for provider ${provider}:`, e);
+    }
+  },
+  setBackupApiKey: async (provider, index, key) => {
+    set((state) => {
+      const keys = [...(state.backupApiKeys[provider] || [])];
+      keys[index] = key;
+      return {
+        backupApiKeys: {
+          ...state.backupApiKeys,
+          [provider]: keys
+        }
+      };
+    });
+    try {
+      if (key) {
+        const encrypted = await encryptKey(key);
+        await idbSet(`apikey_backup_${index + 1}_${provider}`, encrypted);
+      } else {
+        await idbDel(`apikey_backup_${index + 1}_${provider}`);
+      }
+    } catch (e) {
+      console.error(`Failed to encrypt/persist backup key ${index + 1} for provider ${provider}:`, e);
+    }
+  },
+  loadBackupKeys: async () => {
+    try {
+      const providers = ['gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia', 'glm', 'z.ai', 'mistral', 'cerebras', 'xai', 'together', 'fireworks', 'perplexity', 'cohere', 'lmstudio', 'custom', 'bedrock', 'azure_openai'];
+      const loadedBackup: Record<string, string[]> = {};
+      for (const p of providers) {
+        const keys: string[] = [];
+        const encrypted1 = await idbGet<string>(`apikey_backup_1_${p}`);
+        if (encrypted1) {
+          try {
+            keys[0] = await decryptKey(encrypted1);
+          } catch (err) {
+            console.error(`Failed to decrypt backup key 1 for provider ${p}:`, err);
+          }
+        }
+        const encrypted2 = await idbGet<string>(`apikey_backup_2_${p}`);
+        if (encrypted2) {
+          try {
+            keys[1] = await decryptKey(encrypted2);
+          } catch (err) {
+            console.error(`Failed to decrypt backup key 2 for provider ${p}:`, err);
+          }
+        }
+        if (keys.length > 0) {
+          loadedBackup[p] = keys;
+        }
+      }
+      set((state) => ({ backupApiKeys: { ...state.backupApiKeys, ...loadedBackup } }));
+    } catch (e) {
+      console.error("Failed to load persisted backup API keys:", e);
     }
   },
   loadPersistedKeys: async () => {
     try {
       const state = get();
-      const providers = ['gemini', 'openai', 'anthropic', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia'];
+      const providers = ['gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia', 'glm', 'z.ai', 'mistral', 'cerebras', 'xai', 'together', 'fireworks', 'perplexity', 'cohere', 'lmstudio', 'custom', 'bedrock', 'azure_openai'];
       const loadedKeys: Record<string, string> = {};
       for (const p of providers) {
         const encrypted = await idbGet<string>(`apikey_${p}`);
@@ -269,6 +334,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
         }
       }
       set({ apiKeys: { ...state.apiKeys, ...loadedKeys } });
+      await state.loadBackupKeys();
     } catch (e) {
       console.error("Failed to load persisted API keys:", e);
     }
@@ -289,6 +355,31 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           providerBaseUrls: parsed.providerBaseUrls ?? {},
         });
       }
+
+      const persistedProvider = await idbGet<string>('solospace_active_provider');
+      const persistedModel = await idbGet<string>('solospace_active_model');
+      if (persistedProvider) {
+        set({ provider: persistedProvider });
+      }
+      if (persistedModel) {
+        set({ model: persistedModel });
+      }
+
+      // Load custom models per-provider
+      const providers = ['gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia', 'glm', 'z.ai', 'mistral', 'cerebras', 'xai', 'together', 'fireworks', 'perplexity', 'cohere', 'lmstudio', 'custom', 'bedrock', 'azure_openai'];
+      const customModels: Record<string, any[]> = {};
+      for (const p of providers) {
+        const customModel = await idbGet<string>(`solospace_custom_model_${p}`);
+        if (customModel) {
+          customModels[p] = [{ id: customModel, name: `${customModel} (Custom)`, tier: 'custom' }];
+        }
+      }
+      set((state) => ({
+        providerModels: {
+          ...state.providerModels,
+          ...customModels
+        }
+      }));
     } catch (e) {
       console.error("Failed to load persisted state from IndexedDB:", e);
     }
@@ -862,7 +953,8 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           base_url: get().providerBaseUrls[get().provider] || null,
           existing_nodes: preExistingNodes,
           existing_edges: preExistingEdges,
-          mode: mode || (execute ? "auto" : "custom")
+          mode: mode || (execute ? "auto" : "custom"),
+          backup_api_keys: get().backupApiKeys[get().provider] || []
         }),
         signal: controller.signal
       });
@@ -896,11 +988,18 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
         },
         onStatus: (msg: string) => set({ statusMessage: msg }),
         onMetadata: (meta: Record<string, any>) => {
-          const { nodes: mergedNodes, edges: mergedEdges } = mergeCanvasState(
-            preExistingNodes, preExistingEdges,
-            meta.nodes || [], meta.edges || []
-          );
-          set({ nodes: mergedNodes, edges: mergedEdges, agentTalkLogs: meta.agent_talk || [], followUpSuggestions: meta.follow_up_suggestions || [] });
+          const activeSession = get().sessions[get().activeSessionId || ''];
+          const currentMode = activeSession?.mode || 'auto';
+
+          if (currentMode === 'auto' || (currentMode === 'custom' && !execute)) {
+            const { nodes: mergedNodes, edges: mergedEdges } = mergeCanvasState(
+              preExistingNodes, preExistingEdges,
+              meta.nodes || [], meta.edges || []
+            );
+            set({ nodes: mergedNodes, edges: mergedEdges });
+          }
+
+          set({ agentTalkLogs: meta.agent_talk || [], followUpSuggestions: meta.follow_up_suggestions || [] });
           // If plan-only mode (execute=false), mark as paused so Proceed button appears
           if (!execute && (meta.nodes || []).length > 0) {
             set({ executionState: 'paused' });
@@ -980,7 +1079,8 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       liveThoughts: "",
       agentTalkLogs: [],
       followUpSuggestions: [],
-      abortController: controller
+      abortController: controller,
+      executionState: "running"
     }));
     get().saveCurrentSession();
 
@@ -1016,7 +1116,8 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           provider: get().provider,
           model: get().model,
           fallback_provider: get().fallbackProvider || null,
-          base_url: get().providerBaseUrls[get().provider] || null
+          base_url: get().providerBaseUrls[get().provider] || null,
+          backup_api_keys: get().backupApiKeys[get().provider] || []
         }),
         signal: controller.signal
       });
@@ -1025,10 +1126,6 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
         const errData = await response.json().catch(() => ({ detail: "Execution failed." }));
         throw new Error(errData.detail || `Server status error: ${response.status}`);
       }
-
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      if (!reader) throw new Error("No response stream body reader.");
 
       let assistantResponse = "";
       let thinkingSummary = "";
@@ -1106,7 +1203,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       set({ abortController: null, isThinking: false, isOrchestrating: false });
       get().saveCurrentSession();
     } finally {
-      set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
+      set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '', executionState: 'setup' });
       get().saveCurrentSession();
     }
   },
@@ -1163,7 +1260,8 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           api_keys: get().apiKeys,
           base_url: get().providerBaseUrls[activeProv] || null,
           rounds: rounds,
-          tone: tone
+          tone: tone,
+          backup_api_keys: get().backupApiKeys[activeProv] || [],
         }),
         signal: controller.signal
       });
@@ -1262,7 +1360,8 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
             model: get().model,
             api_key: apiKey,
             api_keys: get().apiKeys,
-            base_url: get().providerBaseUrls[activeProv] || null
+            base_url: get().providerBaseUrls[activeProv] || null,
+            backup_api_keys: get().backupApiKeys[activeProv] || [],
           })
         });
         if (takeawaysResp.ok) {

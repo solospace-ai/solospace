@@ -473,10 +473,10 @@ export default function FlowArena({ onProceed }: { onProceed?: () => void }) {
           </Panel>
         )}
 
-        {/* Top-center Proceed Buttons */}
+        {/* Bottom-center Proceed Buttons */}
         {isEchoHouseMode ? (
           nodes.filter(n => (n.data as any).isEchoHouseAgent && (n.data as any).echohouseRole !== "self").length > 0 && (
-            <Panel position="top-center" className="!top-4 z-20">
+            <Panel position="bottom-center" className="!bottom-14 z-20">
               <button
                 onClick={handleEchoHouseProceed}
                 disabled={isOrchestrating}
@@ -495,7 +495,7 @@ export default function FlowArena({ onProceed }: { onProceed?: () => void }) {
           )
         ) : (
           nodes.length > 0 && executionState !== "running" && !isOrchestrating && (
-            <Panel position="top-center" className="!top-4 z-20">
+            <Panel position="bottom-center" className="!bottom-14 z-20">
               <button
                 onClick={handleNormalProceed}
                 disabled={isOrchestrating}

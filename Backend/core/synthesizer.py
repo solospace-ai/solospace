@@ -37,6 +37,7 @@ async def run_agent_execution_loop(
     api_keys: Optional[Dict[str, str]] = None,
     base_url: Optional[str] = None,
     resume_from_checkpoint: bool = False,
+    backup_api_keys: Optional[List[str]] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Full multi-agent execution loop with parallel level execution and streaming.
@@ -112,6 +113,7 @@ async def run_agent_execution_loop(
                     base_url=base_url,
                     resume_from_checkpoint=resume_from_checkpoint,
                     event_queue=event_queue,
+                    backup_api_keys=backup_api_keys,
                 )
             )
             for agent_node in level_nodes
@@ -173,7 +175,7 @@ async def run_agent_execution_loop(
 
     from core.planner import summarize_history
     aggregator_history = await summarize_history(
-        aggregator_history, provider, api_key, api_keys, base_url
+        aggregator_history, provider, api_key, api_keys, base_url, backup_api_keys=backup_api_keys
     )
 
     aggregator_contents = []
@@ -196,6 +198,7 @@ async def run_agent_execution_loop(
             fallback_provider=fallback_provider,
             api_keys=api_keys,
             base_url=base_url,
+            backup_api_keys=backup_api_keys,
         ):
             final_synthesis_text += token
             yield f"event: text\ndata: {json.dumps(token)}\n\n"

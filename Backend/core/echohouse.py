@@ -13,7 +13,8 @@ async def run_echohouse_simulation(
     api_keys: Optional[Dict[str, str]] = None,
     base_url: Optional[str] = None,
     rounds: int = 3,
-    tone: str = "realistic"
+    tone: str = "realistic",
+    backup_api_keys: Optional[List[str]] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Orchestrates a multi-turn social simulation where agents act as real-life people.
@@ -83,7 +84,8 @@ STRICT GUIDELINES:
                     system_prompt=system_prompt,
                     temperature=0.8,
                     api_keys=api_keys,
-                    base_url=base_url
+                    base_url=base_url,
+                    backup_api_keys=backup_api_keys,
                 ):
                     agent_speech += token
                     yield f"event: text\ndata: {json.dumps(token)}\n\n"
@@ -135,7 +137,8 @@ Keep it structured, clear, and highly insightful.
             system_prompt=insight_system_prompt,
             temperature=0.5,
             api_keys=api_keys,
-            base_url=base_url
+            base_url=base_url,
+            backup_api_keys=backup_api_keys,
         ):
             yield f"event: text\ndata: {json.dumps(token)}\n\n"
     except Exception as e:

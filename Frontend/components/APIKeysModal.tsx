@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { set as idbSet, del as idbDel } from 'idb-keyval';
 
 interface APIKeysModalProps {
   isOpen: boolean;
@@ -129,12 +130,40 @@ const FALLBACK_PROVIDERS = {
       { id: "google/gemma-2-9b-it", name: "Gemma 2 9B IT", tier: "fast" },
       { id: "nvidia/llama3-chatqa-1.5-70b", name: "ChatQA 1.5 70B", tier: "advanced" }
     ]
+  },
+  glm: {
+    name: "Zhipu GLM",
+    description: "GLM models from Zhipu AI (via z.ai)",
+    key_url: "https://api.z.ai/",
+    key_hint: "",
+    default_model: "glm-4-flash",
+    models: [
+      { id: "glm-4-flash", name: "GLM 4 Flash", tier: "fast" },
+      { id: "glm-4-plus", name: "GLM 4 Plus", tier: "advanced" },
+      { id: "glm-4-air", name: "GLM 4 Air", tier: "fast" },
+      { id: "glm-4", name: "GLM 4", tier: "advanced" }
+    ]
+  },
+  "z.ai": {
+    name: "z.ai",
+    description: "GLM models from z.ai",
+    key_url: "https://api.z.ai/",
+    key_hint: "",
+    default_model: "glm-4-flash",
+    models: [
+      { id: "glm-4-flash", name: "GLM 4 Flash", tier: "fast" },
+      { id: "glm-4-plus", name: "GLM 4 Plus", tier: "advanced" },
+      { id: "glm-4-air", name: "GLM 4 Air", tier: "fast" },
+      { id: "glm-4", name: "GLM 4", tier: "advanced" }
+    ]
   }
 };
 
 export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
   const apiKeys = useWorkflowStore((s) => s.apiKeys);
   const setProviderApiKey = useWorkflowStore((s) => s.setProviderApiKey);
+  const backupApiKeys = useWorkflowStore((s) => s.backupApiKeys);
+  const setBackupApiKey = useWorkflowStore((s) => s.setBackupApiKey);
   const activeProvider = useWorkflowStore((s) => s.provider);
   const setProvider = useWorkflowStore((s) => s.setProvider);
   const activeModel = useWorkflowStore((s) => s.model);
@@ -153,6 +182,12 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
   const [isCustomModelInput, setIsCustomModelInput] = useState<boolean>(false);
   const [customModelText, setCustomModelText] = useState<string>("");
   const [apiKeyInput, setApiKeyInput] = useState<string>("");
+  const [backupKey1Input, setBackupKey1Input] = useState<string>("");
+  const [backupKey2Input, setBackupKey2Input] = useState<string>("");
+  const [showBackupKey1, setShowBackupKey1] = useState<boolean>(false);
+  const [showBackupKey2, setShowBackupKey2] = useState<boolean>(false);
+  const [showBackupExpander, setShowBackupExpander] = useState<boolean>(false);
+  const [showSecondBackup, setShowSecondBackup] = useState<boolean>(false);
   const [baseUrlInput, setUrlInput] = useState<string>("");
   const [fallbackProv, setFallbackProv] = useState<string>("");
   const [showKey, setShowKey] = useState<boolean>(false);
@@ -197,6 +232,12 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
       setFallbackProv(fallbackProvider || "");
       setApiKeyInput(apiKeys[currentProv] || "");
       
+      const backupKeys = backupApiKeys[currentProv] || [];
+      setBackupKey1Input(backupKeys[0] || "");
+      setBackupKey2Input(backupKeys[1] || "");
+      setShowBackupExpander(!!(backupKeys[0] || backupKeys[1]));
+      setShowSecondBackup(!!backupKeys[1]);
+
       const defaultUrl = currentProv === 'ollama' ? "http://localhost:11434/v1" : "";
       setUrlInput(providerBaseUrls[currentProv] || defaultUrl);
       setShowKey(false);
@@ -224,6 +265,12 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
   const handleProviderChange = (newProvider: string) => {
     setSelectedProvider(newProvider);
     setApiKeyInput(apiKeys[newProvider] || "");
+    
+    const backupKeys = backupApiKeys[newProvider] || [];
+    setBackupKey1Input(backupKeys[0] || "");
+    setBackupKey2Input(backupKeys[1] || "");
+    setShowBackupExpander(!!(backupKeys[0] || backupKeys[1]));
+    setShowSecondBackup(!!backupKeys[1]);
     
     const defaultUrl = newProvider === 'ollama' ? "http://localhost:11434/v1" : "";
     setUrlInput(providerBaseUrls[newProvider] || defaultUrl);
@@ -293,10 +340,20 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
   const handleSaveSettings = async () => {
     // Save to Zustand store & IndexedDB
     await setProviderApiKey(selectedProvider, apiKeyInput.trim());
+    await setBackupApiKey(selectedProvider, 0, backupKey1Input.trim());
+    await setBackupApiKey(selectedProvider, 1, backupKey2Input.trim());
     setProviderBaseUrl(selectedProvider, baseUrlInput.trim());
-    setProvider(selectedProvider);
-    setModel(selectedModel);
+    await setProvider(selectedProvider);
+    await setModel(selectedModel);
     setFallbackProvider(fallbackProv);
+
+    // Save custom model custom string if user selected custom
+    if (isCustomModelInput && customModelText.trim()) {
+      await idbSet(`solospace_custom_model_${selectedProvider}`, customModelText.trim());
+    } else {
+      await idbDel(`solospace_custom_model_${selectedProvider}`);
+    }
+
     onClose();
   };
 
@@ -515,6 +572,103 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
                   {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* Backup API Keys Expandable Section */}
+          {selectedProvider !== "ollama" && (
+            <div className="space-y-2 mt-2">
+              {!showBackupExpander ? (
+                <button
+                  type="button"
+                  onClick={() => setShowBackupExpander(true)}
+                  className="text-[10px] text-cyan-400 hover:underline font-mono cursor-pointer flex items-center gap-1"
+                >
+                  + Add backup key
+                </button>
+              ) : (
+                <div className="border border-[#1f1f1f] bg-black/40 rounded-xl p-3 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Backup Keys</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowBackupExpander(false);
+                        setBackupKey1Input("");
+                        setBackupKey2Input("");
+                        setShowSecondBackup(false);
+                      }}
+                      className="text-[9px] text-rose-400 hover:underline font-mono cursor-pointer"
+                    >
+                      Remove all
+                    </button>
+                  </div>
+                  
+                  {/* Backup Key 1 */}
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-mono uppercase text-neutral-500">Backup Key 1</label>
+                    <div className="relative">
+                      <input
+                        type={showBackupKey1 ? "text" : "password"}
+                        placeholder="Enter backup key 1"
+                        value={backupKey1Input}
+                        onChange={(e) => setBackupKey1Input(e.target.value)}
+                        className="w-full bg-black border border-[#1f1f1f] rounded-lg pl-3 pr-10 py-2 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowBackupKey1(!showBackupKey1)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
+                      >
+                        {showBackupKey1 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Backup Key 2 */}
+                  {!showSecondBackup ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowSecondBackup(true)}
+                      className="text-[10px] text-cyan-400 hover:underline font-mono cursor-pointer flex items-center gap-1"
+                    >
+                      + Add another backup key
+                    </button>
+                  ) : (
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[9px] font-mono uppercase text-neutral-500">Backup Key 2</label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowSecondBackup(false);
+                            setBackupKey2Input("");
+                          }}
+                          className="text-[9px] text-neutral-500 hover:text-neutral-300 font-mono cursor-pointer"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <input
+                          type={showBackupKey2 ? "text" : "password"}
+                          placeholder="Enter backup key 2"
+                          value={backupKey2Input}
+                          onChange={(e) => setBackupKey2Input(e.target.value)}
+                          className="w-full bg-black border border-[#1f1f1f] rounded-lg pl-3 pr-10 py-2 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowBackupKey2(!showBackupKey2)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
+                        >
+                          {showBackupKey2 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

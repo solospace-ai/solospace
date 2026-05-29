@@ -58,6 +58,7 @@ async def execute_single_agent(
     base_url: Optional[str],
     resume_from_checkpoint: bool,
     event_queue: asyncio.Queue,
+    backup_api_keys: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Execute one agent's ReAct loop. Pushes SSE events to event_queue.
@@ -155,6 +156,7 @@ async def execute_single_agent(
                     fallback_provider=fallback_provider,
                     api_keys=api_keys,
                     base_url=base_url,
+                    backup_api_keys=backup_api_keys,
                 )
                 thought = turn_data.get("thought", "")
                 action = turn_data.get("action", "none")
@@ -285,6 +287,7 @@ async def execute_single_agent(
                     system_prompt=agent_data["systemPrompt"],
                     temperature=0.3, timeout=10.0,
                     fallback_provider=fallback_provider, api_keys=api_keys, base_url=base_url,
+                    backup_api_keys=backup_api_keys,
                 )
                 if synth_text:
                     agent_final_answer = synth_text

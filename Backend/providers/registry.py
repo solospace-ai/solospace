@@ -219,6 +219,7 @@ async def call_provider(
     fallback_provider: Optional[str] = None,
     api_keys: Optional[Dict[str, str]] = None,
     base_url: Optional[str] = None,
+    backup_api_keys: Optional[List[str]] = None,
 ) -> str:
     """Unified non-streaming call to any provider with retry and fallback routing."""
     config = get_provider_config(provider)
@@ -232,8 +233,12 @@ async def call_provider(
     if resolved_base_url:
         cloned_config["base_url"] = resolved_base_url
 
-    resolved_key = resolve_api_key(provider, api_key, api_keys)
-    if not resolved_key and not cloned_config.get("is_local", False):
+    resolved_key = resolve_api_key(provider, api_key, api_keys, backup_keys=backup_api_keys)
+    
+    other_keys = [k for k in (backup_api_keys or []) if k.strip() and k.strip() != resolved_key]
+    keys_to_try = [resolved_key] + other_keys
+    keys_to_try = [k for k in keys_to_try if k]
+    if not keys_to_try and not cloned_config.get("is_local", False):
         raise Exception(f"API key missing for provider {provider}")
 
     adapter = cloned_config.get("adapter", "openai")
@@ -242,54 +247,61 @@ async def call_provider(
     if cloned_config.get("is_local", False):
         timeout = max(timeout, 120.0)
 
-    async def _call():
-        if adapter == "gemini":
-            return await _call_gemini(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-                                       temperature=temperature, json_schema=json_schema, timeout=timeout)
-        elif adapter == "claude":
-            return await _call_claude(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-                                       temperature=temperature, json_mode=wants_json,
-                                       json_schema_hint=json_schema_hint, timeout=timeout)
-        elif adapter == "cohere":
-            return await _call_cohere(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-                                       temperature=temperature, json_mode=wants_json,
-                                       json_schema_hint=json_schema_hint, timeout=timeout)
-        elif adapter == "bedrock":
-            return await _call_bedrock(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-                                       temperature=temperature, json_mode=wants_json,
-                                       json_schema_hint=json_schema_hint, timeout=timeout)
-        else:  # openai-compatible
-            return await _call_openai_compatible(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-                                                 temperature=temperature, json_mode=wants_json,
-                                                 json_schema_hint=json_schema_hint, timeout=timeout)
+    last_error = None
+    for current_key in (keys_to_try or [None]):
+        async def _call():
+            if adapter == "gemini":
+                return await _call_gemini(cloned_config, resolved_model, current_key, messages, system_prompt,
+                                           temperature=temperature, json_schema=json_schema, timeout=timeout)
+            elif adapter == "claude":
+                return await _call_claude(cloned_config, resolved_model, current_key, messages, system_prompt,
+                                           temperature=temperature, json_mode=wants_json,
+                                           json_schema_hint=json_schema_hint, timeout=timeout)
+            elif adapter == "cohere":
+                return await _call_cohere(cloned_config, resolved_model, current_key, messages, system_prompt,
+                                           temperature=temperature, json_mode=wants_json,
+                                           json_schema_hint=json_schema_hint, timeout=timeout)
+            elif adapter == "bedrock":
+                return await _call_bedrock(cloned_config, resolved_model, current_key, messages, system_prompt,
+                                           temperature=temperature, json_mode=wants_json,
+                                           json_schema_hint=json_schema_hint, timeout=timeout)
+            else:  # openai-compatible
+                return await _call_openai_compatible(cloned_config, resolved_model, current_key, messages, system_prompt,
+                                                     temperature=temperature, json_mode=wants_json,
+                                                     json_schema_hint=json_schema_hint, timeout=timeout)
 
-    try:
-        return await call_with_retry(_call)
-    except Exception as e:
-        if fallback_provider and fallback_provider.lower() != provider.lower():
-            print(f"[FALLBACK] Primary provider {provider} failed: {e}. Routing to fallback {fallback_provider}...")
-            fallback_config = get_provider_config(fallback_provider)
-            fallback_model = fallback_config.get("default_model", "")
-            fallback_key = resolve_api_key(fallback_provider, None, api_keys)
-            
-            fallback_base_url = None
-            
-            return await call_provider(
-                provider=fallback_provider,
-                model=fallback_model,
-                api_key=fallback_key,
-                messages=messages,
-                system_prompt=system_prompt,
-                temperature=temperature,
-                json_schema=json_schema,
-                json_schema_hint=json_schema_hint,
-                timeout=timeout,
-                fallback_provider=None,
-                api_keys=api_keys,
-                base_url=fallback_base_url
-            )
-        else:
-            raise
+        try:
+            return await call_with_retry(_call)
+        except Exception as e:
+            last_error = e
+            print(f"[KEY ROTATION] Key failed for {provider}, trying next... ({e})")
+            continue
+
+    if fallback_provider and fallback_provider.lower() != provider.lower():
+        print(f"[FALLBACK] Primary provider {provider} failed all keys: {last_error}. Routing to fallback {fallback_provider}...")
+        fallback_config = get_provider_config(fallback_provider)
+        fallback_model = fallback_config.get("default_model", "")
+        fallback_key = resolve_api_key(fallback_provider, None, api_keys)
+        
+        fallback_base_url = None
+        
+        return await call_provider(
+            provider=fallback_provider,
+            model=fallback_model,
+            api_key=fallback_key,
+            messages=messages,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            json_schema=json_schema,
+            json_schema_hint=json_schema_hint,
+            timeout=timeout,
+            fallback_provider=None,
+            api_keys=api_keys,
+            base_url=fallback_base_url,
+            backup_api_keys=None
+        )
+    else:
+        raise last_error
 
 
 async def stream_provider(
@@ -303,6 +315,7 @@ async def stream_provider(
     fallback_provider: Optional[str] = None,
     api_keys: Optional[Dict[str, str]] = None,
     base_url: Optional[str] = None,
+    backup_api_keys: Optional[List[str]] = None,
 ) -> AsyncGenerator[str, None]:
     """Unified streaming call to any provider with retry and fallback routing."""
     config = get_provider_config(provider)
@@ -316,8 +329,12 @@ async def stream_provider(
     if resolved_base_url:
         cloned_config["base_url"] = resolved_base_url
 
-    resolved_key = resolve_api_key(provider, api_key, api_keys)
-    if not resolved_key and not cloned_config.get("is_local", False):
+    resolved_key = resolve_api_key(provider, api_key, api_keys, backup_keys=backup_api_keys)
+    
+    other_keys = [k for k in (backup_api_keys or []) if k.strip() and k.strip() != resolved_key]
+    keys_to_try = [resolved_key] + other_keys
+    keys_to_try = [k for k in keys_to_try if k]
+    if not keys_to_try and not cloned_config.get("is_local", False):
         raise Exception(f"API key missing for provider {provider}")
 
     adapter = cloned_config.get("adapter", "openai")
@@ -325,62 +342,76 @@ async def stream_provider(
     if cloned_config.get("is_local", False):
         timeout = max(timeout, 120.0)
 
-    async def _stream():
-        if adapter == "gemini":
-            async for chunk in _stream_gemini(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-                                               temperature=temperature, timeout=timeout):
-                yield chunk
-        elif adapter == "claude":
-            async for chunk in _stream_claude(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-                                               temperature=temperature, timeout=timeout):
-                yield chunk
-        elif adapter == "cohere":
-            async for chunk in _stream_cohere(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-                                               temperature=temperature, timeout=timeout):
-                yield chunk
-        elif adapter == "bedrock":
-            async for chunk in _stream_bedrock(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-                                               temperature=temperature, timeout=timeout):
-                yield chunk
-        else:  # openai-compatible
-            async for chunk in _stream_openai_compatible(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-                                                         temperature=temperature, timeout=timeout):
-                yield chunk
+    last_error = None
+    success = False
+    
+    for current_key in (keys_to_try or [None]):
+        async def _stream():
+            if adapter == "gemini":
+                async for chunk in _stream_gemini(cloned_config, resolved_model, current_key, messages, system_prompt,
+                                                   temperature=temperature, timeout=timeout):
+                    yield chunk
+            elif adapter == "claude":
+                async for chunk in _stream_claude(cloned_config, resolved_model, current_key, messages, system_prompt,
+                                                   temperature=temperature, timeout=timeout):
+                    yield chunk
+            elif adapter == "cohere":
+                async for chunk in _stream_cohere(cloned_config, resolved_model, current_key, messages, system_prompt,
+                                                   temperature=temperature, timeout=timeout):
+                    yield chunk
+            elif adapter == "bedrock":
+                async for chunk in _stream_bedrock(cloned_config, resolved_model, current_key, messages, system_prompt,
+                                                   temperature=temperature, timeout=timeout):
+                    yield chunk
+            else:  # openai-compatible
+                async for chunk in _stream_openai_compatible(cloned_config, resolved_model, current_key, messages, system_prompt,
+                                                             temperature=temperature, timeout=timeout):
+                    yield chunk
 
-    retries = 0
-    while retries <= MAX_RETRIES:
+        retries = 0
         try:
-            async for chunk in _stream():
+            while retries <= MAX_RETRIES:
+                try:
+                    async for chunk in _stream():
+                        yield chunk
+                    success = True
+                    return
+                except Exception as e:
+                    retries += 1
+                    if retries > MAX_RETRIES:
+                        raise e
+                    delay = min(MAX_DELAY, BASE_DELAY * (2 ** retries))
+                    delay += random.uniform(-JITTER_FACTOR * delay, JITTER_FACTOR * delay)
+                    await asyncio.sleep(delay)
+        except Exception as e:
+            last_error = e
+            print(f"[KEY ROTATION STREAM] Key failed for {provider}, trying next... ({e})")
+            continue
+
+    if not success:
+        if fallback_provider and fallback_provider.lower() != provider.lower():
+            print(f"[FALLBACK STREAM] Primary {provider} failed all keys: {last_error}. Switching to fallback {fallback_provider}...")
+            fallback_config = get_provider_config(fallback_provider)
+            fallback_model = fallback_config.get("default_model", "")
+            fallback_key = resolve_api_key(fallback_provider, None, api_keys)
+            
+            async for chunk in stream_provider(
+                provider=fallback_provider,
+                model=fallback_model,
+                api_key=fallback_key,
+                messages=messages,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                timeout=timeout,
+                fallback_provider=None,
+                api_keys=api_keys,
+                base_url=None,
+                backup_api_keys=None
+            ):
                 yield chunk
             return
-        except Exception as e:
-            retries += 1
-            if retries > MAX_RETRIES:
-                if fallback_provider and fallback_provider.lower() != provider.lower():
-                    print(f"[FALLBACK STREAM] Primary {provider} failed: {e}. Switching to fallback {fallback_provider}...")
-                    fallback_config = get_provider_config(fallback_provider)
-                    fallback_model = fallback_config.get("default_model", "")
-                    fallback_key = resolve_api_key(fallback_provider, None, api_keys)
-                    
-                    async for chunk in stream_provider(
-                        provider=fallback_provider,
-                        model=fallback_model,
-                        api_key=fallback_key,
-                        messages=messages,
-                        system_prompt=system_prompt,
-                        temperature=temperature,
-                        timeout=timeout,
-                        fallback_provider=None,
-                        api_keys=api_keys,
-                        base_url=None
-                    ):
-                        yield chunk
-                    return
-                else:
-                    raise
-            delay = min(MAX_DELAY, BASE_DELAY * (2 ** retries))
-            delay += random.uniform(-JITTER_FACTOR * delay, JITTER_FACTOR * delay)
-            await asyncio.sleep(delay)
+        else:
+            raise last_error
 
 
 async def call_provider_json(
@@ -395,6 +426,7 @@ async def call_provider_json(
     fallback_provider: Optional[str] = None,
     api_keys: Optional[Dict[str, str]] = None,
     base_url: Optional[str] = None,
+    backup_api_keys: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Unified JSON completions call with fallback validation."""
     schema_hint = None
@@ -413,7 +445,8 @@ async def call_provider_json(
         timeout=timeout,
         fallback_provider=fallback_provider,
         api_keys=api_keys,
-        base_url=base_url
+        base_url=base_url,
+        backup_api_keys=backup_api_keys
     )
     
     parsed = extract_json_from_text(response_text)
