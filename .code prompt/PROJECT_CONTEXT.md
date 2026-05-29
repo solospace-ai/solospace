@@ -1,11 +1,11 @@
 # Full Project Context
 
-> Generated: 2026-05-28T19:28:02.354Z
+> Generated: 2026-05-29T07:39:38.782Z
 > Mode: Full Project
-> Files: 65
-> Total Lines: 9,884
-> Total Size: 379.0 KB
-> Directories: 32
+> Files: 66
+> Total Lines: 10,449
+> Total Size: 408.0 KB
+> Directories: 33
 
 ---
 
@@ -57,7 +57,9 @@ SoloSpace/
 │   │   │       ├── echohouse/
 │   │   │       │   ├── init/
 │   │   │       │   │   └── route.ts
-│   │   │       │   └── simulate/
+│   │   │       │   ├── simulate/
+│   │   │       │   │   └── route.ts
+│   │   │       │   └── takeaways/
 │   │   │       │       └── route.ts
 │   │   │       ├── execute_custom/
 │   │   │       │   └── route.ts
@@ -473,7 +475,7 @@ SoloSpace/
 
 ### File: `Backend/core/echohouse.py`
 
-> 139 lines | 5.7 KB
+> 146 lines | 6.1 KB
 
 ```python
   1 | import json
@@ -489,132 +491,139 @@ SoloSpace/
  11 |     model: Optional[str] = None,
  12 |     api_key: Optional[str] = None,
  13 |     api_keys: Optional[Dict[str, str]] = None,
- 14 |     base_url: Optional[str] = None
- 15 | ) -> AsyncGenerator[str, None]:
- 16 |     """
- 17 |     Orchestrates a multi-turn social simulation where agents act as real-life people.
- 18 |     Produces 3 rounds of conversation and a final Insight synthesis turn.
- 19 |     """
- 20 |     history: List[Dict[str, str]] = []
- 21 |     
- 22 |     rounds = 3
- 23 |     for r in range(rounds):
- 24 |         yield f"event: status\ndata: {json.dumps(f'Orchestrating Round {r + 1} of social simulation...')}\n\n"
- 25 |         
- 26 |         for agent in cast:
- 27 |             name = agent.get("inferred_name", "Unknown")
- 28 |             role = agent.get("role", "Unknown")
- 29 |             problem = agent.get("inferred_problem", "")
- 30 |             is_self = agent.get("is_self", False)
- 31 |             
- 32 |             # Embody specific character via system prompt
- 33 |             system_prompt = f"""You are {name}, whose role in the user's life is: {role}.
- 34 | The user has described their core problem: "{problem_text}".
- 35 | From your perspective, the situation is: "{problem}".
- 36 | 
- 37 | You are participating in a social dynamics simulation. Respond authentically as this person would.
- 38 | STRICT GUIDELINES:
- 39 | - Embody this person completely. Do NOT speak as an AI, and do NOT be polite, helpful, or constructive unless it is authentic to this character's emotions, defense mechanisms, desires, or flaws.
- 40 | - Express defensiveness, anger, sadness, love, or blind spots if they fit the situation.
- 41 | - Read and react directly to what the other characters have said in the conversation history.
- 42 | - Reference the user (Self) and other people by name.
- 43 | - Keep your turn relatively short and punchy (around 2-4 sentences), as in a real conversation.
- 44 | - Output ONLY the raw conversational speech of {name}. Do NOT prefix with your name or role in the response (e.g., do NOT write "{name}: ..."). Just output the speech itself.
- 45 | """
- 46 | 
- 47 |             messages = []
- 48 |             for item in history:
- 49 |                 messages.append({
- 50 |                     "role": "user",
- 51 |                     "content": item["content"]
- 52 |                 })
- 53 |             
- 54 |             if is_self:
- 55 |                 messages.append({
- 56 |                     "role": "user",
- 57 |                     "content": f"[SYSTEM: You are {name} (Self). It is your turn to speak. React to the conversation so far.]"
- 58 |                 })
- 59 |             else:
- 60 |                 messages.append({
- 61 |                     "role": "user",
- 62 |                     "content": f"[SYSTEM: You are {name} ({role}). It is your turn to speak. React to the conversation so far.]"
- 63 |                 })
- 64 | 
- 65 |             # Send metadata for active speaker
- 66 |             yield f"event: metadata\ndata: {json.dumps({'active_speaker': name})}\n\n"
- 67 |             await asyncio.sleep(0.1)
- 68 |             
- 69 |             agent_speech = ""
- 70 |             try:
- 71 |                 async for token in stream_provider(
- 72 |                     provider=provider,
- 73 |                     model=model,
- 74 |                     api_key=api_key or "",
- 75 |                     messages=messages,
- 76 |                     system_prompt=system_prompt,
- 77 |                     temperature=0.8,
- 78 |                     api_keys=api_keys,
- 79 |                     base_url=base_url
- 80 |                 ):
- 81 |                     agent_speech += token
- 82 |                     yield f"event: text\ndata: {json.dumps(token)}\n\n"
- 83 |             except Exception as e:
- 84 |                 err_msg = f"[Simulation Error for {name}: {str(e)}]"
- 85 |                 agent_speech += err_msg
- 86 |                 yield f"event: text\ndata: {json.dumps(err_msg)}\n\n"
- 87 |             
- 88 |             history.append({
- 89 |                 "role": "user",
- 90 |                 "content": f"{name} ({role}): {agent_speech}"
- 91 |             })
- 92 |             await asyncio.sleep(0.5)
- 93 | 
- 94 |     # ── Final Insight synthesis ─────────────────────────────────────────
- 95 |     yield f"event: status\ndata: {json.dumps('Generating simulation insight synthesis...')}\n\n"
- 96 |     
- 97 |     insight_system_prompt = """You are an expert system therapist and social analyst.
- 98 | Analyze the preceding simulated conversation and synthesize a deep insight.
- 99 | Your response must speak from a neutral, objective third-person perspective.
-100 | Identify:
-101 | 1. The underlying emotional needs and core fears of each participant.
-102 | 2. Repetitive toxic or unproductive patterns observed in the simulation.
-103 | 3. Actionable, compassionate suggestions for how the user can approach this situation in real life to break the pattern.
-104 | 
-105 | Keep it structured, clear, and highly insightful.
-106 | """
-107 | 
-108 |     messages = []
-109 |     for item in history:
-110 |         messages.append({
-111 |             "role": "user",
-112 |             "content": item["content"]
-113 |         })
-114 |     messages.append({
-115 |         "role": "user",
-116 |         "content": "[SYSTEM: Provide the final therapeutic insight and analysis of this simulated family/social dynamic.]"
-117 |     })
-118 |     
-119 |     yield f"event: metadata\ndata: {json.dumps({'active_speaker': 'insight'})}\n\n"
-120 |     await asyncio.sleep(0.1)
-121 | 
-122 |     try:
-123 |         async for token in stream_provider(
-124 |             provider=provider,
-125 |             model=model,
-126 |             api_key=api_key or "",
-127 |             messages=messages,
-128 |             system_prompt=insight_system_prompt,
-129 |             temperature=0.5,
-130 |             api_keys=api_keys,
-131 |             base_url=base_url
-132 |         ):
-133 |             yield f"event: text\ndata: {json.dumps(token)}\n\n"
-134 |     except Exception as e:
-135 |         err_msg = f"[Insight generation failed: {str(e)}]"
-136 |         yield f"event: text\ndata: {json.dumps(err_msg)}\n\n"
-137 | 
-138 |     yield "event: done\ndata: {}\n\n"
-139 |
+ 14 |     base_url: Optional[str] = None,
+ 15 |     rounds: int = 3,
+ 16 |     tone: str = "realistic"
+ 17 | ) -> AsyncGenerator[str, None]:
+ 18 |     """
+ 19 |     Orchestrates a multi-turn social simulation where agents act as real-life people.
+ 20 |     Produces 3 rounds of conversation and a final Insight synthesis turn.
+ 21 |     """
+ 22 |     history: List[Dict[str, str]] = []
+ 23 |     
+ 24 |     rounds = max(1, min(5, rounds))
+ 25 |     tone_label = tone.lower().strip() if tone else "realistic"
+ 26 |     for r in range(rounds):
+ 27 |         yield f"event: status\ndata: {json.dumps(f'Orchestrating Round {r + 1} of social simulation...')}\n\n"
+ 28 |         
+ 29 |         for agent in cast:
+ 30 |             name = agent.get("inferred_name", "Unknown")
+ 31 |             role = agent.get("role", "Unknown")
+ 32 |             problem = agent.get("inferred_problem", "")
+ 33 |             is_self = agent.get("is_self", False)
+ 34 |             
+ 35 |             # Embody specific character via system prompt
+ 36 |             emotional_core = agent.get("emotional_core", "")
+ 37 |             emotional_core_line = f"\nYour deepest emotional driver in this situation is: \"{emotional_core}\"." if emotional_core else ""
+ 38 |             system_prompt = f"""You are {name}, whose role in the user's life is: {role}.
+ 39 | The user has described their core problem: "{problem_text}".
+ 40 | From your perspective, the situation is: "{problem}".
+ 41 | {emotional_core_line}
+ 42 | 
+ 43 | You are participating in a social dynamics simulation. Respond authentically as this person would.
+ 44 | STRICT GUIDELINES:
+ 45 | - Embody this person completely. Do NOT speak as an AI, and do NOT be polite, helpful, or constructive unless it is authentic to this character's emotions, defense mechanisms, desires, or flaws.
+ 46 | - Express defensiveness, anger, sadness, love, or blind spots if they fit the situation.
+ 47 | - Read and react directly to what the other characters have said in the conversation history.
+ 48 | - Reference the user (Self) and other people by name.
+ 49 | - Keep your turn relatively short and punchy (around 2-4 sentences), as in a real conversation.
+ 50 | - Output ONLY the raw conversational speech of {name}. Do NOT prefix with your name or role in the response (e.g., do NOT write "{name}: ..."). Just output the speech itself.
+ 51 | - Respond in a {tone_label} manner, authentic to who this person is.
+ 52 | """
+ 53 | 
+ 54 |             messages = []
+ 55 |             for item in history:
+ 56 |                 messages.append({
+ 57 |                     "role": "user",
+ 58 |                     "content": item["content"]
+ 59 |                 })
+ 60 |             
+ 61 |             if is_self:
+ 62 |                 messages.append({
+ 63 |                     "role": "user",
+ 64 |                     "content": f"[SYSTEM: You are {name} (Self). It is your turn to speak. React to the conversation so far.]"
+ 65 |                 })
+ 66 |             else:
+ 67 |                 messages.append({
+ 68 |                     "role": "user",
+ 69 |                     "content": f"[SYSTEM: You are {name} ({role}). It is your turn to speak. React to the conversation so far.]"
+ 70 |                 })
+ 71 | 
+ 72 |             # Send metadata for active speaker
+ 73 |             yield f"event: metadata\ndata: {json.dumps({'active_speaker': name})}\n\n"
+ 74 |             await asyncio.sleep(0.1)
+ 75 |             
+ 76 |             agent_speech = ""
+ 77 |             try:
+ 78 |                 async for token in stream_provider(
+ 79 |                     provider=provider,
+ 80 |                     model=model,
+ 81 |                     api_key=api_key or "",
+ 82 |                     messages=messages,
+ 83 |                     system_prompt=system_prompt,
+ 84 |                     temperature=0.8,
+ 85 |                     api_keys=api_keys,
+ 86 |                     base_url=base_url
+ 87 |                 ):
+ 88 |                     agent_speech += token
+ 89 |                     yield f"event: text\ndata: {json.dumps(token)}\n\n"
+ 90 |             except Exception as e:
+ 91 |                 err_msg = f"[Simulation Error for {name}: {str(e)}]"
+ 92 |                 agent_speech += err_msg
+ 93 |                 yield f"event: text\ndata: {json.dumps(err_msg)}\n\n"
+ 94 |             
+ 95 |             history.append({
+ 96 |                 "role": "user",
+ 97 |                 "content": f"{name} ({role}): {agent_speech}"
+ 98 |             })
+ 99 |             await asyncio.sleep(0.5)
+100 | 
+101 |     # ── Final Insight synthesis ─────────────────────────────────────────
+102 |     yield f"event: status\ndata: {json.dumps('Generating simulation insight synthesis...')}\n\n"
+103 |     
+104 |     insight_system_prompt = """You are an expert system therapist and social analyst.
+105 | Analyze the preceding simulated conversation and synthesize a deep insight.
+106 | Your response must speak from a neutral, objective third-person perspective.
+107 | Identify:
+108 | 1. The underlying emotional needs and core fears of each participant.
+109 | 2. Repetitive toxic or unproductive patterns observed in the simulation.
+110 | 3. Actionable, compassionate suggestions for how the user can approach this situation in real life to break the pattern.
+111 | 
+112 | Keep it structured, clear, and highly insightful.
+113 | """
+114 | 
+115 |     messages = []
+116 |     for item in history:
+117 |         messages.append({
+118 |             "role": "user",
+119 |             "content": item["content"]
+120 |         })
+121 |     messages.append({
+122 |         "role": "user",
+123 |         "content": "[SYSTEM: Provide the final therapeutic insight and analysis of this simulated family/social dynamic.]"
+124 |     })
+125 |     
+126 |     yield f"event: metadata\ndata: {json.dumps({'active_speaker': 'insight'})}\n\n"
+127 |     await asyncio.sleep(0.1)
+128 | 
+129 |     try:
+130 |         async for token in stream_provider(
+131 |             provider=provider,
+132 |             model=model,
+133 |             api_key=api_key or "",
+134 |             messages=messages,
+135 |             system_prompt=insight_system_prompt,
+136 |             temperature=0.5,
+137 |             api_keys=api_keys,
+138 |             base_url=base_url
+139 |         ):
+140 |             yield f"event: text\ndata: {json.dumps(token)}\n\n"
+141 |     except Exception as e:
+142 |         err_msg = f"[Insight generation failed: {str(e)}]"
+143 |         yield f"event: text\ndata: {json.dumps(err_msg)}\n\n"
+144 | 
+145 |     yield "event: done\ndata: {}\n\n"
+146 |
 ```
 
 ### File: `Backend/core/orchestrator.py`
@@ -2300,7 +2309,7 @@ SoloSpace/
 
 ### File: `Backend/providers/registry.py`
 
-> 562 lines | 21.4 KB
+> 568 lines | 21.6 KB
 
 ```python
   1 | import json
@@ -2544,327 +2553,333 @@ SoloSpace/
 239 |     adapter = cloned_config.get("adapter", "openai")
 240 |     wants_json = json_schema is not None or json_schema_hint is not None
 241 | 
-242 |     async def _call():
-243 |         if adapter == "gemini":
-244 |             return await _call_gemini(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-245 |                                        temperature=temperature, json_schema=json_schema, timeout=timeout)
-246 |         elif adapter == "claude":
-247 |             return await _call_claude(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-248 |                                        temperature=temperature, json_mode=wants_json,
-249 |                                        json_schema_hint=json_schema_hint, timeout=timeout)
-250 |         elif adapter == "cohere":
-251 |             return await _call_cohere(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-252 |                                        temperature=temperature, json_mode=wants_json,
-253 |                                        json_schema_hint=json_schema_hint, timeout=timeout)
-254 |         elif adapter == "bedrock":
-255 |             return await _call_bedrock(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-256 |                                        temperature=temperature, json_mode=wants_json,
-257 |                                        json_schema_hint=json_schema_hint, timeout=timeout)
-258 |         else:  # openai-compatible
-259 |             return await _call_openai_compatible(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-260 |                                                  temperature=temperature, json_mode=wants_json,
-261 |                                                  json_schema_hint=json_schema_hint, timeout=timeout)
-262 | 
-263 |     try:
-264 |         return await call_with_retry(_call)
-265 |     except Exception as e:
-266 |         if fallback_provider and fallback_provider.lower() != provider.lower():
-267 |             print(f"[FALLBACK] Primary provider {provider} failed: {e}. Routing to fallback {fallback_provider}...")
-268 |             fallback_config = get_provider_config(fallback_provider)
-269 |             fallback_model = fallback_config.get("default_model", "")
-270 |             fallback_key = resolve_api_key(fallback_provider, None, api_keys)
-271 |             
-272 |             fallback_base_url = None
-273 |             
-274 |             return await call_provider(
-275 |                 provider=fallback_provider,
-276 |                 model=fallback_model,
-277 |                 api_key=fallback_key,
-278 |                 messages=messages,
-279 |                 system_prompt=system_prompt,
-280 |                 temperature=temperature,
-281 |                 json_schema=json_schema,
-282 |                 json_schema_hint=json_schema_hint,
-283 |                 timeout=timeout,
-284 |                 fallback_provider=None,
-285 |                 api_keys=api_keys,
-286 |                 base_url=fallback_base_url
-287 |             )
-288 |         else:
-289 |             raise
-290 | 
-291 | 
-292 | async def stream_provider(
-293 |     provider: str,
-294 |     model: Optional[str],
-295 |     api_key: str,
-296 |     messages: List[Dict[str, str]],
-297 |     system_prompt: str = "",
-298 |     temperature: float = 0.7,
-299 |     timeout: float = 90.0,
-300 |     fallback_provider: Optional[str] = None,
-301 |     api_keys: Optional[Dict[str, str]] = None,
-302 |     base_url: Optional[str] = None,
-303 | ) -> AsyncGenerator[str, None]:
-304 |     """Unified streaming call to any provider with retry and fallback routing."""
-305 |     config = get_provider_config(provider)
-306 |     if not config:
-307 |         raise Exception(f"Unknown provider: {provider}")
-308 | 
-309 |     resolved_model = model or config.get("default_model", "")
-310 |     resolved_base_url = base_url or config.get("base_url", "")
-311 |     
-312 |     cloned_config = dict(config)
-313 |     if resolved_base_url:
-314 |         cloned_config["base_url"] = resolved_base_url
-315 | 
-316 |     resolved_key = resolve_api_key(provider, api_key, api_keys)
-317 |     if not resolved_key and not cloned_config.get("is_local", False):
-318 |         raise Exception(f"API key missing for provider {provider}")
-319 | 
-320 |     adapter = cloned_config.get("adapter", "openai")
-321 | 
-322 |     async def _stream():
-323 |         if adapter == "gemini":
-324 |             async for chunk in _stream_gemini(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-325 |                                                temperature=temperature, timeout=timeout):
-326 |                 yield chunk
-327 |         elif adapter == "claude":
-328 |             async for chunk in _stream_claude(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-329 |                                                temperature=temperature, timeout=timeout):
-330 |                 yield chunk
-331 |         elif adapter == "cohere":
-332 |             async for chunk in _stream_cohere(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-333 |                                                temperature=temperature, timeout=timeout):
-334 |                 yield chunk
-335 |         elif adapter == "bedrock":
-336 |             async for chunk in _stream_bedrock(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-337 |                                                temperature=temperature, timeout=timeout):
-338 |                 yield chunk
-339 |         else:  # openai-compatible
-340 |             async for chunk in _stream_openai_compatible(cloned_config, resolved_model, resolved_key, messages, system_prompt,
-341 |                                                          temperature=temperature, timeout=timeout):
-342 |                 yield chunk
-343 | 
-344 |     retries = 0
-345 |     while retries <= MAX_RETRIES:
-346 |         try:
-347 |             async for chunk in _stream():
+242 |     if cloned_config.get("is_local", False):
+243 |         timeout = max(timeout, 120.0)
+244 | 
+245 |     async def _call():
+246 |         if adapter == "gemini":
+247 |             return await _call_gemini(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+248 |                                        temperature=temperature, json_schema=json_schema, timeout=timeout)
+249 |         elif adapter == "claude":
+250 |             return await _call_claude(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+251 |                                        temperature=temperature, json_mode=wants_json,
+252 |                                        json_schema_hint=json_schema_hint, timeout=timeout)
+253 |         elif adapter == "cohere":
+254 |             return await _call_cohere(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+255 |                                        temperature=temperature, json_mode=wants_json,
+256 |                                        json_schema_hint=json_schema_hint, timeout=timeout)
+257 |         elif adapter == "bedrock":
+258 |             return await _call_bedrock(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+259 |                                        temperature=temperature, json_mode=wants_json,
+260 |                                        json_schema_hint=json_schema_hint, timeout=timeout)
+261 |         else:  # openai-compatible
+262 |             return await _call_openai_compatible(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+263 |                                                  temperature=temperature, json_mode=wants_json,
+264 |                                                  json_schema_hint=json_schema_hint, timeout=timeout)
+265 | 
+266 |     try:
+267 |         return await call_with_retry(_call)
+268 |     except Exception as e:
+269 |         if fallback_provider and fallback_provider.lower() != provider.lower():
+270 |             print(f"[FALLBACK] Primary provider {provider} failed: {e}. Routing to fallback {fallback_provider}...")
+271 |             fallback_config = get_provider_config(fallback_provider)
+272 |             fallback_model = fallback_config.get("default_model", "")
+273 |             fallback_key = resolve_api_key(fallback_provider, None, api_keys)
+274 |             
+275 |             fallback_base_url = None
+276 |             
+277 |             return await call_provider(
+278 |                 provider=fallback_provider,
+279 |                 model=fallback_model,
+280 |                 api_key=fallback_key,
+281 |                 messages=messages,
+282 |                 system_prompt=system_prompt,
+283 |                 temperature=temperature,
+284 |                 json_schema=json_schema,
+285 |                 json_schema_hint=json_schema_hint,
+286 |                 timeout=timeout,
+287 |                 fallback_provider=None,
+288 |                 api_keys=api_keys,
+289 |                 base_url=fallback_base_url
+290 |             )
+291 |         else:
+292 |             raise
+293 | 
+294 | 
+295 | async def stream_provider(
+296 |     provider: str,
+297 |     model: Optional[str],
+298 |     api_key: str,
+299 |     messages: List[Dict[str, str]],
+300 |     system_prompt: str = "",
+301 |     temperature: float = 0.7,
+302 |     timeout: float = 90.0,
+303 |     fallback_provider: Optional[str] = None,
+304 |     api_keys: Optional[Dict[str, str]] = None,
+305 |     base_url: Optional[str] = None,
+306 | ) -> AsyncGenerator[str, None]:
+307 |     """Unified streaming call to any provider with retry and fallback routing."""
+308 |     config = get_provider_config(provider)
+309 |     if not config:
+310 |         raise Exception(f"Unknown provider: {provider}")
+311 | 
+312 |     resolved_model = model or config.get("default_model", "")
+313 |     resolved_base_url = base_url or config.get("base_url", "")
+314 |     
+315 |     cloned_config = dict(config)
+316 |     if resolved_base_url:
+317 |         cloned_config["base_url"] = resolved_base_url
+318 | 
+319 |     resolved_key = resolve_api_key(provider, api_key, api_keys)
+320 |     if not resolved_key and not cloned_config.get("is_local", False):
+321 |         raise Exception(f"API key missing for provider {provider}")
+322 | 
+323 |     adapter = cloned_config.get("adapter", "openai")
+324 | 
+325 |     if cloned_config.get("is_local", False):
+326 |         timeout = max(timeout, 120.0)
+327 | 
+328 |     async def _stream():
+329 |         if adapter == "gemini":
+330 |             async for chunk in _stream_gemini(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+331 |                                                temperature=temperature, timeout=timeout):
+332 |                 yield chunk
+333 |         elif adapter == "claude":
+334 |             async for chunk in _stream_claude(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+335 |                                                temperature=temperature, timeout=timeout):
+336 |                 yield chunk
+337 |         elif adapter == "cohere":
+338 |             async for chunk in _stream_cohere(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+339 |                                                temperature=temperature, timeout=timeout):
+340 |                 yield chunk
+341 |         elif adapter == "bedrock":
+342 |             async for chunk in _stream_bedrock(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+343 |                                                temperature=temperature, timeout=timeout):
+344 |                 yield chunk
+345 |         else:  # openai-compatible
+346 |             async for chunk in _stream_openai_compatible(cloned_config, resolved_model, resolved_key, messages, system_prompt,
+347 |                                                          temperature=temperature, timeout=timeout):
 348 |                 yield chunk
-349 |             return
-350 |         except Exception as e:
-351 |             retries += 1
-352 |             if retries > MAX_RETRIES:
-353 |                 if fallback_provider and fallback_provider.lower() != provider.lower():
-354 |                     print(f"[FALLBACK STREAM] Primary {provider} failed: {e}. Switching to fallback {fallback_provider}...")
-355 |                     fallback_config = get_provider_config(fallback_provider)
-356 |                     fallback_model = fallback_config.get("default_model", "")
-357 |                     fallback_key = resolve_api_key(fallback_provider, None, api_keys)
-358 |                     
-359 |                     async for chunk in stream_provider(
-360 |                         provider=fallback_provider,
-361 |                         model=fallback_model,
-362 |                         api_key=fallback_key,
-363 |                         messages=messages,
-364 |                         system_prompt=system_prompt,
-365 |                         temperature=temperature,
-366 |                         timeout=timeout,
-367 |                         fallback_provider=None,
-368 |                         api_keys=api_keys,
-369 |                         base_url=None
-370 |                     ):
-371 |                         yield chunk
-372 |                     return
-373 |                 else:
-374 |                     raise
-375 |             delay = min(MAX_DELAY, BASE_DELAY * (2 ** retries))
-376 |             delay += random.uniform(-JITTER_FACTOR * delay, JITTER_FACTOR * delay)
-377 |             await asyncio.sleep(delay)
-378 | 
-379 | 
-380 | async def call_provider_json(
-381 |     provider: str,
-382 |     model: Optional[str],
-383 |     api_key: str,
-384 |     messages: List[Dict[str, str]],
-385 |     system_prompt: str = "",
-386 |     temperature: float = 0.2,
-387 |     json_schema: Dict[str, Any] = None,
-388 |     timeout: float = 30.0,
-389 |     fallback_provider: Optional[str] = None,
-390 |     api_keys: Optional[Dict[str, str]] = None,
-391 |     base_url: Optional[str] = None,
-392 | ) -> Dict[str, Any]:
-393 |     """Unified JSON completions call with fallback validation."""
-394 |     schema_hint = None
-395 |     if json_schema:
-396 |         schema_hint = json.dumps(json_schema, indent=2)
-397 | 
-398 |     response_text = await call_provider(
-399 |         provider=provider,
-400 |         model=model,
-401 |         api_key=api_key,
-402 |         messages=messages,
-403 |         system_prompt=system_prompt,
-404 |         temperature=temperature,
-405 |         json_schema=json_schema,
-406 |         json_schema_hint=schema_hint,
-407 |         timeout=timeout,
-408 |         fallback_provider=fallback_provider,
-409 |         api_keys=api_keys,
-410 |         base_url=base_url
-411 |     )
-412 |     
-413 |     parsed = extract_json_from_text(response_text)
-414 |     if parsed is None:
-415 |         raise ValueError(f"Failed to extract JSON from response: {response_text[:1000]}")
-416 |     return parsed
-417 | 
-418 | 
-419 | # ─── Embedding Abstraction ───────────────────────────────────────────
-420 | 
-421 | async def get_embedding(provider: str, api_key: str, text: str, api_keys: Optional[Dict[str, str]] = None) -> List[float]:
-422 |     """Unified embedding generator."""
-423 |     resolved_key = resolve_api_key(provider, api_key, api_keys)
-424 |     if not resolved_key:
-425 |         return []
+349 | 
+350 |     retries = 0
+351 |     while retries <= MAX_RETRIES:
+352 |         try:
+353 |             async for chunk in _stream():
+354 |                 yield chunk
+355 |             return
+356 |         except Exception as e:
+357 |             retries += 1
+358 |             if retries > MAX_RETRIES:
+359 |                 if fallback_provider and fallback_provider.lower() != provider.lower():
+360 |                     print(f"[FALLBACK STREAM] Primary {provider} failed: {e}. Switching to fallback {fallback_provider}...")
+361 |                     fallback_config = get_provider_config(fallback_provider)
+362 |                     fallback_model = fallback_config.get("default_model", "")
+363 |                     fallback_key = resolve_api_key(fallback_provider, None, api_keys)
+364 |                     
+365 |                     async for chunk in stream_provider(
+366 |                         provider=fallback_provider,
+367 |                         model=fallback_model,
+368 |                         api_key=fallback_key,
+369 |                         messages=messages,
+370 |                         system_prompt=system_prompt,
+371 |                         temperature=temperature,
+372 |                         timeout=timeout,
+373 |                         fallback_provider=None,
+374 |                         api_keys=api_keys,
+375 |                         base_url=None
+376 |                     ):
+377 |                         yield chunk
+378 |                     return
+379 |                 else:
+380 |                     raise
+381 |             delay = min(MAX_DELAY, BASE_DELAY * (2 ** retries))
+382 |             delay += random.uniform(-JITTER_FACTOR * delay, JITTER_FACTOR * delay)
+383 |             await asyncio.sleep(delay)
+384 | 
+385 | 
+386 | async def call_provider_json(
+387 |     provider: str,
+388 |     model: Optional[str],
+389 |     api_key: str,
+390 |     messages: List[Dict[str, str]],
+391 |     system_prompt: str = "",
+392 |     temperature: float = 0.2,
+393 |     json_schema: Dict[str, Any] = None,
+394 |     timeout: float = 30.0,
+395 |     fallback_provider: Optional[str] = None,
+396 |     api_keys: Optional[Dict[str, str]] = None,
+397 |     base_url: Optional[str] = None,
+398 | ) -> Dict[str, Any]:
+399 |     """Unified JSON completions call with fallback validation."""
+400 |     schema_hint = None
+401 |     if json_schema:
+402 |         schema_hint = json.dumps(json_schema, indent=2)
+403 | 
+404 |     response_text = await call_provider(
+405 |         provider=provider,
+406 |         model=model,
+407 |         api_key=api_key,
+408 |         messages=messages,
+409 |         system_prompt=system_prompt,
+410 |         temperature=temperature,
+411 |         json_schema=json_schema,
+412 |         json_schema_hint=schema_hint,
+413 |         timeout=timeout,
+414 |         fallback_provider=fallback_provider,
+415 |         api_keys=api_keys,
+416 |         base_url=base_url
+417 |     )
+418 |     
+419 |     parsed = extract_json_from_text(response_text)
+420 |     if parsed is None:
+421 |         raise ValueError(f"Failed to extract JSON from response: {response_text[:1000]}")
+422 |     return parsed
+423 | 
+424 | 
+425 | # ─── Embedding Abstraction ───────────────────────────────────────────
 426 | 
-427 |     if provider.lower() == "gemini":
-428 |         url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={resolved_key}"
-429 |         payload = {
-430 |             "model": "models/text-embedding-004",
-431 |             "content": {"parts": [{"text": text}]}
-432 |         }
-433 |         async with httpx.AsyncClient() as client:
-434 |             try:
-435 |                 r = await client.post(url, json=payload, timeout=15.0)
-436 |                 if r.status_code == 200:
-437 |                     return r.json().get("embedding", {}).get("values", [])
-438 |             except Exception as e:
-439 |                 print(f"[EMBEDDING ERROR] Gemini embedding failed: {e}")
-440 |     elif provider.lower() == "openai":
-441 |         url = "https://api.openai.com/v1/embeddings"
-442 |         headers = {
-443 |             "Content-Type": "application/json",
-444 |             "Authorization": f"Bearer {resolved_key}"
-445 |         }
-446 |         payload = {
-447 |             "model": "text-embedding-3-small",
-448 |             "input": text
-449 |         }
-450 |         async with httpx.AsyncClient() as client:
-451 |             try:
-452 |                 r = await client.post(url, json=payload, headers=headers, timeout=15.0)
-453 |                 if r.status_code == 200:
-454 |                     return r.json().get("data", [{}])[0].get("embedding", [])
-455 |             except Exception as e:
-456 |                 print(f"[EMBEDDING ERROR] OpenAI embedding failed: {e}")
-457 |     return []
-458 | 
-459 | 
-460 | # ─── Dynamic Model Fetching ─────────────────────────────────────────
-461 | 
-462 | async def fetch_models_from_provider(
-463 |     provider: str,
-464 |     api_key: str,
-465 |     api_keys: Optional[Dict[str, str]] = None,
-466 |     base_url: Optional[str] = None,
-467 | ) -> List[Dict[str, Any]]:
-468 |     """Fetch available models from the provider's API dynamically."""
-469 |     config = get_provider_config(provider)
-470 |     if not config:
-471 |         return []
-472 |     
-473 |     resolved_key = resolve_api_key(provider, api_key, api_keys)
-474 |     if not resolved_key and not config.get("is_local", False):
-475 |         return []
-476 | 
-477 |     resolved_base_url = base_url or config.get("base_url", "")
-478 |     adapter = config.get("adapter", "openai")
-479 |     base_url_str = resolved_base_url.rstrip("/")
-480 |     
-481 |     if adapter == "gemini":
-482 |         url = f"https://generativelanguage.googleapis.com/v1beta/models?key={resolved_key}"
-483 |         try:
-484 |             async with httpx.AsyncClient(timeout=10.0) as client:
-485 |                 resp = await client.get(url)
-486 |                 if resp.status_code == 200:
-487 |                     data = resp.json()
-488 |                     models = []
-489 |                     for item in data.get("models", []):
-490 |                         supported = item.get("supportedGenerationMethods", [])
-491 |                         if "generateContent" in supported:
-492 |                             model_id = item.get("name", "").replace("models/", "")
-493 |                             if model_id:
-494 |                                 models.append({
-495 |                                     "id": model_id,
-496 |                                     "name": item.get("displayName", model_id),
-497 |                                     "tier": "fast" if "flash" in model_id else "advanced"
-498 |                                 })
-499 |                     if models:
-500 |                         return models
-501 |         except Exception as e:
-502 |             print(f"[FETCH MODELS ERROR] Gemini: {e}")
-503 | 
-504 |     elif adapter == "claude":
-505 |         url = "https://api.anthropic.com/v1/models"
-506 |         headers = {
-507 |             "x-api-key": resolved_key,
-508 |             "anthropic-version": "2024-10-22",
-509 |         }
-510 |         try:
-511 |             async with httpx.AsyncClient(timeout=10.0) as client:
-512 |                 resp = await client.get(url, headers=headers)
-513 |                 if resp.status_code == 200:
-514 |                     data = resp.json()
-515 |                     models = []
-516 |                     for item in data.get("data", []):
-517 |                         model_id = item.get("id", "")
-518 |                         if model_id:
-519 |                             tier = "reasoning" if "opus" in model_id else \
-520 |                                    "fast" if "haiku" in model_id else "advanced"
-521 |                             models.append({
-522 |                                     "id": model_id,
-523 |                                     "name": item.get("display_name", model_id),
-524 |                                     "tier": tier
-525 |                             })
-526 |                     if models:
-527 |                         return models
-528 |         except Exception as e:
-529 |             print(f"[FETCH MODELS ERROR] Claude: {e}")
-530 | 
-531 |     elif adapter in ("openai", "openai-compatible"):
-532 |         if not base_url_str:
-533 |             return config.get("models", [])
-534 |         url = f"{base_url_str}/models"
-535 |         headers = {}
-536 |         if resolved_key:
-537 |             if config.get("requires_deployment"):
-538 |                 headers["api-key"] = resolved_key
-539 |             else:
-540 |                 headers["Authorization"] = f"Bearer {resolved_key}"
-541 | 
-542 |         try:
-543 |             async with httpx.AsyncClient(timeout=10.0) as client:
-544 |                 resp = await client.get(url, headers=headers)
-545 |                 if resp.status_code == 200:
-546 |                     data = resp.json()
-547 |                     models = []
-548 |                     for item in data.get("data", []):
-549 |                         model_id = item.get("id")
-550 |                         if model_id:
-551 |                             models.append({
-552 |                                 "id": model_id,
-553 |                                 "name": model_id,
-554 |                                 "tier": "custom"
-555 |                             })
-556 |                     if models:
-557 |                         return models
-558 |         except Exception as e:
-559 |             print(f"[FETCH MODELS ERROR] Failed to fetch models for {provider}: {e}")
-560 |             
-561 |     return config.get("models", [])
-562 |
+427 | async def get_embedding(provider: str, api_key: str, text: str, api_keys: Optional[Dict[str, str]] = None) -> List[float]:
+428 |     """Unified embedding generator."""
+429 |     resolved_key = resolve_api_key(provider, api_key, api_keys)
+430 |     if not resolved_key:
+431 |         return []
+432 | 
+433 |     if provider.lower() == "gemini":
+434 |         url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={resolved_key}"
+435 |         payload = {
+436 |             "model": "models/text-embedding-004",
+437 |             "content": {"parts": [{"text": text}]}
+438 |         }
+439 |         async with httpx.AsyncClient() as client:
+440 |             try:
+441 |                 r = await client.post(url, json=payload, timeout=15.0)
+442 |                 if r.status_code == 200:
+443 |                     return r.json().get("embedding", {}).get("values", [])
+444 |             except Exception as e:
+445 |                 print(f"[EMBEDDING ERROR] Gemini embedding failed: {e}")
+446 |     elif provider.lower() == "openai":
+447 |         url = "https://api.openai.com/v1/embeddings"
+448 |         headers = {
+449 |             "Content-Type": "application/json",
+450 |             "Authorization": f"Bearer {resolved_key}"
+451 |         }
+452 |         payload = {
+453 |             "model": "text-embedding-3-small",
+454 |             "input": text
+455 |         }
+456 |         async with httpx.AsyncClient() as client:
+457 |             try:
+458 |                 r = await client.post(url, json=payload, headers=headers, timeout=15.0)
+459 |                 if r.status_code == 200:
+460 |                     return r.json().get("data", [{}])[0].get("embedding", [])
+461 |             except Exception as e:
+462 |                 print(f"[EMBEDDING ERROR] OpenAI embedding failed: {e}")
+463 |     return []
+464 | 
+465 | 
+466 | # ─── Dynamic Model Fetching ─────────────────────────────────────────
+467 | 
+468 | async def fetch_models_from_provider(
+469 |     provider: str,
+470 |     api_key: str,
+471 |     api_keys: Optional[Dict[str, str]] = None,
+472 |     base_url: Optional[str] = None,
+473 | ) -> List[Dict[str, Any]]:
+474 |     """Fetch available models from the provider's API dynamically."""
+475 |     config = get_provider_config(provider)
+476 |     if not config:
+477 |         return []
+478 |     
+479 |     resolved_key = resolve_api_key(provider, api_key, api_keys)
+480 |     if not resolved_key and not config.get("is_local", False):
+481 |         return []
+482 | 
+483 |     resolved_base_url = base_url or config.get("base_url", "")
+484 |     adapter = config.get("adapter", "openai")
+485 |     base_url_str = resolved_base_url.rstrip("/")
+486 |     
+487 |     if adapter == "gemini":
+488 |         url = f"https://generativelanguage.googleapis.com/v1beta/models?key={resolved_key}"
+489 |         try:
+490 |             async with httpx.AsyncClient(timeout=10.0) as client:
+491 |                 resp = await client.get(url)
+492 |                 if resp.status_code == 200:
+493 |                     data = resp.json()
+494 |                     models = []
+495 |                     for item in data.get("models", []):
+496 |                         supported = item.get("supportedGenerationMethods", [])
+497 |                         if "generateContent" in supported:
+498 |                             model_id = item.get("name", "").replace("models/", "")
+499 |                             if model_id:
+500 |                                 models.append({
+501 |                                     "id": model_id,
+502 |                                     "name": item.get("displayName", model_id),
+503 |                                     "tier": "fast" if "flash" in model_id else "advanced"
+504 |                                 })
+505 |                     if models:
+506 |                         return models
+507 |         except Exception as e:
+508 |             print(f"[FETCH MODELS ERROR] Gemini: {e}")
+509 | 
+510 |     elif adapter == "claude":
+511 |         url = "https://api.anthropic.com/v1/models"
+512 |         headers = {
+513 |             "x-api-key": resolved_key,
+514 |             "anthropic-version": "2024-10-22",
+515 |         }
+516 |         try:
+517 |             async with httpx.AsyncClient(timeout=10.0) as client:
+518 |                 resp = await client.get(url, headers=headers)
+519 |                 if resp.status_code == 200:
+520 |                     data = resp.json()
+521 |                     models = []
+522 |                     for item in data.get("data", []):
+523 |                         model_id = item.get("id", "")
+524 |                         if model_id:
+525 |                             tier = "reasoning" if "opus" in model_id else \
+526 |                                    "fast" if "haiku" in model_id else "advanced"
+527 |                             models.append({
+528 |                                     "id": model_id,
+529 |                                     "name": item.get("display_name", model_id),
+530 |                                     "tier": tier
+531 |                             })
+532 |                     if models:
+533 |                         return models
+534 |         except Exception as e:
+535 |             print(f"[FETCH MODELS ERROR] Claude: {e}")
+536 | 
+537 |     elif adapter in ("openai", "openai-compatible"):
+538 |         if not base_url_str:
+539 |             return config.get("models", [])
+540 |         url = f"{base_url_str}/models"
+541 |         headers = {}
+542 |         if resolved_key:
+543 |             if config.get("requires_deployment"):
+544 |                 headers["api-key"] = resolved_key
+545 |             else:
+546 |                 headers["Authorization"] = f"Bearer {resolved_key}"
+547 | 
+548 |         try:
+549 |             async with httpx.AsyncClient(timeout=10.0) as client:
+550 |                 resp = await client.get(url, headers=headers)
+551 |                 if resp.status_code == 200:
+552 |                     data = resp.json()
+553 |                     models = []
+554 |                     for item in data.get("data", []):
+555 |                         model_id = item.get("id")
+556 |                         if model_id:
+557 |                             models.append({
+558 |                                 "id": model_id,
+559 |                                 "name": model_id,
+560 |                                 "tier": "custom"
+561 |                             })
+562 |                     if models:
+563 |                         return models
+564 |         except Exception as e:
+565 |             print(f"[FETCH MODELS ERROR] Failed to fetch models for {provider}: {e}")
+566 |             
+567 |     return config.get("models", [])
+568 |
 ```
 
 ### File: `Backend/security/__init__.py`
@@ -3936,7 +3951,7 @@ SoloSpace/
 
 ### File: `Backend/main.py`
 
-> 634 lines | 24.0 KB
+> 707 lines | 27.5 KB
 
 ```python
   1 | """
@@ -4102,477 +4117,550 @@ SoloSpace/
 161 |     api_key: Optional[str] = None
 162 |     api_keys: Optional[Dict[str, str]] = None
 163 |     base_url: Optional[str] = None
-164 | 
-165 | 
-166 | # ─── Health Check ─────────────────────────────────────────────────────
+164 |     rounds: int = 3
+165 |     tone: str = "realistic"
+166 | 
 167 | 
-168 | @app.get("/health")
-169 | async def health():
-170 |     return {"status": "ok", "version": "2.0.0-ai-os"}
-171 | 
-172 | 
-173 | # ─── Providers ────────────────────────────────────────────────────────
-174 | 
-175 | @app.get("/providers")
-176 | async def get_providers():
-177 |     return get_available_providers()
-178 | 
+168 | class EchoHouseTakeawaysRequest(BaseModel):
+169 |     simulation_text: str
+170 |     problem_text: str
+171 |     provider: str = "gemini"
+172 |     model: Optional[str] = None
+173 |     api_key: Optional[str] = None
+174 |     api_keys: Optional[Dict[str, str]] = None
+175 |     base_url: Optional[str] = None
+176 | 
+177 | 
+178 | # ─── Health Check ─────────────────────────────────────────────────────
 179 | 
-180 | @app.get("/{provider}/models")
-181 | async def get_models(
-182 |     provider: str,
-183 |     api_key: Optional[str] = None,
-184 |     base_url: Optional[str] = None,
-185 | ):
-186 |     try:
-187 |         models = await fetch_models_from_provider(provider, api_key or "", base_url or "")
-188 |         return {"models": models}
-189 |     except Exception as e:
-190 |         raise HTTPException(status_code=500, detail=str(e))
+180 | @app.get("/health")
+181 | async def health():
+182 |     return {"status": "ok", "version": "2.0.0-ai-os"}
+183 | 
+184 | 
+185 | # ─── Providers ────────────────────────────────────────────────────────
+186 | 
+187 | @app.get("/providers")
+188 | async def get_providers():
+189 |     return get_available_providers()
+190 | 
 191 | 
-192 | 
-193 | # ─── Main Orchestration (Smart Auto Mode) ─────────────────────────────
-194 | 
-195 | @app.post("/orchestrate")
-196 | async def orchestrate(req: OrchestrateRequest):
-197 |     """
-198 |     Smart orchestration with pre-router:
-199 |     - TRIVIAL → direct streaming response (skip planning entirely)
-200 |     - TOOL_USE → single agent with tools
-201 |     - COMPLEX → full multi-agent DAG planning
-202 |     """
-203 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
-204 |     if not api_key:
-205 |         raise HTTPException(status_code=400, detail="API key required.")
+192 | @app.get("/{provider}/models")
+193 | async def get_models(
+194 |     provider: str,
+195 |     api_key: Optional[str] = None,
+196 |     base_url: Optional[str] = None,
+197 | ):
+198 |     try:
+199 |         models = await fetch_models_from_provider(provider, api_key or "", base_url or "")
+200 |         return {"models": models}
+201 |     except Exception as e:
+202 |         raise HTTPException(status_code=500, detail=str(e))
+203 | 
+204 | 
+205 | # ─── Main Orchestration (Smart Auto Mode) ─────────────────────────────
 206 | 
-207 |     # Jailbreak check
-208 |     jailbreak_alert = check_jailbreak(req.prompt)
-209 |     if jailbreak_alert:
-210 |         async def safety_stream():
-211 |             yield f"event: text\ndata: {json.dumps('⚠ ' + jailbreak_alert)}\n\n"
-212 |             yield "event: done\ndata: {}\n\n"
-213 |         return StreamingResponse(safety_stream(), media_type="text/event-stream")
-214 | 
-215 |     # ── Semantic Pre-Router ────────────────────────────────────────────
-216 |     route = await route_request(
-217 |         prompt=req.prompt,
-218 |         provider=req.provider,
-219 |         api_key=api_key,
-220 |         api_keys=req.api_keys,
-221 |         base_url=req.base_url,
-222 |     )
-223 | 
-224 |     # Build orchestration plan
-225 |     history_msgs = [{"role": "user" if m.sender == "user" else "assistant", "content": m.text}
-226 |                     for m in (req.history or [])]
-227 | 
-228 |     # Smart context windowing
-229 |     from core.planner import summarize_history
-230 |     history_msgs = await summarize_history(
-231 |         history_msgs, req.provider, api_key, req.api_keys, req.base_url
-232 |     )
-233 | 
-234 |     existing_agent_ids = [n["data"]["senderId"] for n in (req.existing_nodes or []) if n.get("data")]
-235 | 
-236 |     messages_for_plan = history_msgs.copy()
-237 |     existing_ctx = f"\n\nExisting agents (do NOT recreate): {existing_agent_ids}" if existing_agent_ids else ""
-238 |     messages_for_plan.append({"role": "user", "content": req.prompt + existing_ctx})
-239 | 
-240 |     if route == "TRIVIAL":
-241 |         # ── Fast path: no planning, no agents, stream directly ─────────
-242 |         from providers import stream_provider
-243 |         from core.planner import RESPONSE_SYSTEM_INSTRUCTION
-244 | 
-245 |         async def trivial_stream():
-246 |             empty_meta = {"complexity": "simple", "capabilities": [], "thinking_summary": "", "nodes": [], "edges": [], "agent_talk": [], "follow_up_suggestions": []}
-247 |             yield f"event: metadata\ndata: {json.dumps(empty_meta)}\n\n"
-248 |             try:
-249 |                 from core.planner import _FAST_ROUTER_MODELS
-250 |                 fast_model = _FAST_ROUTER_MODELS.get(req.provider, req.model)
-251 |                 async for token in stream_provider(
-252 |                     provider=req.provider, model=fast_model, api_key=api_key,
-253 |                     messages=messages_for_plan, system_prompt=RESPONSE_SYSTEM_INSTRUCTION,
-254 |                     temperature=0.7, timeout=20.0, fallback_provider=req.fallback_provider,
-255 |                     api_keys=req.api_keys, base_url=req.base_url,
-256 |                 ):
-257 |                     yield f"event: text\ndata: {json.dumps(token)}\n\n"
-258 |             except Exception as e:
-259 |                 yield f"event: text\ndata: {json.dumps(f'Error: {str(e)}')}\n\n"
-260 |             yield "event: done\ndata: {}\n\n"
-261 | 
-262 |         return StreamingResponse(trivial_stream(), media_type="text/event-stream")
-263 | 
-264 |     # ── Full planning ─────────────────────────────────────────────────
-265 |     plan = await generate_plan(
-266 |         messages=messages_for_plan,
-267 |         provider=req.provider,
-268 |         model=req.model,
-269 |         api_key=api_key,
-270 |         api_keys=req.api_keys,
-271 |         base_url=req.base_url,
-272 |         fallback_provider=req.fallback_provider,
-273 |     )
-274 | 
-275 |     # Merge existing nodes/edges from frontend canvas
-276 |     import uuid
-277 |     nodes = list(req.existing_nodes or [])
-278 |     edges = list(req.existing_edges or [])
-279 |     existing_ids = {n["id"] for n in nodes}
-280 | 
-281 |     for agent in plan.get("agent_talk", []):
-282 |         agent_id = agent["senderId"]
-283 |         if agent_id in existing_ids:
-284 |             continue  # deduplicate
-285 |         custom = agent.get("custom_template", {})
-286 |         col_idx = custom.get("col", len(nodes) % 3)
-287 |         new_node = {
-288 |             "id": agent_id,
-289 |             "type": "custom",
-290 |             "position": {"x": 180 + col_idx * 260, "y": 100 + (len(nodes) // 3) * 200},
-291 |             "data": {
-292 |                 "name": custom.get("name", agent.get("senderName", agent_id)),
-293 |                 "icon": custom.get("icon", "science"),
-294 |                 "tag": custom.get("tag", agent.get("senderIcon", "AGENT").upper()),
-295 |                 "objective": agent.get("objective", ""),
-296 |                 "systemPrompt": agent.get("systemPrompt", ""),
-297 |                 "rules": agent.get("rules", []),
-298 |                 "dependencies": agent.get("dependencies", []),
-299 |                 "tools": agent.get("tools", []),
-300 |                 "toolPermissions": {},
-301 |                 "temp": custom.get("temp", 0.7),
-302 |                 "logic": custom.get("logic", 70),
-303 |                 "empathy": 50,
-304 |                 "priority": 5,
-305 |                 "status": "IDLE",
-306 |                 "enabled": True,
-307 |                 "toolLogs": [],
-308 |                 "personality": "",
-309 |                 "senderId": agent_id,
-310 |             },
-311 |         }
-312 |         nodes.append(new_node)
-313 |         existing_ids.add(agent_id)
-314 | 
-315 |     # Build edges from dependencies
-316 |     for node in nodes:
-317 |         for dep in node["data"].get("dependencies", []):
-318 |             edge_id = f"e-{dep}-{node['id']}"
-319 |             if dep in existing_ids and not any(e["id"] == edge_id for e in edges):
-320 |                 edges.append({"id": edge_id, "source": dep, "target": node["id"], "type": "custom", "animated": True})
-321 | 
-322 |     if not nodes:
-323 |         nodes = [{"id": "general", "type": "custom", "position": {"x": 300, "y": 200}, "data": {**DEFAULT_PLAN["agent_talk"][0], "status": "IDLE", "enabled": True, "toolLogs": [], "empathy": 50, "priority": 5, "personality": ""}}]
-324 | 
-325 |     session_id = req.session_id or str(uuid.uuid4())
-326 | 
-327 |     if not req.execute_agents:
-328 |         # Custom mode: return plan without executing
-329 |         plan_meta = {
-330 |             "complexity": plan.get("complexity", "simple"),
-331 |             "capabilities": plan.get("capabilities", []),
-332 |             "thinking_summary": plan.get("thinking_summary", ""),
-333 |             "nodes": nodes,
-334 |             "edges": edges,
-335 |             "agent_talk": [{"id": f"plan-{a['senderId']}", "senderId": a["senderId"], "senderName": a["senderName"], "senderIcon": a["senderIcon"], "text": a["text"], "timestamp": ""} for a in plan.get("agent_talk", [])],
-336 |             "follow_up_suggestions": plan.get("follow_up_suggestions", []),
-337 |         }
-338 |         async def plan_stream():
-339 |             yield f"event: metadata\ndata: {json.dumps(plan_meta)}\n\n"
-340 |             yield "event: done\ndata: {}\n\n"
-341 |         return StreamingResponse(plan_stream(), media_type="text/event-stream")
-342 | 
-343 |     return StreamingResponse(
-344 |         run_agent_execution_loop(
-345 |             session_id=session_id,
-346 |             prompt=req.prompt,
-347 |             history=req.history,
-348 |             api_key=api_key,
-349 |             nodes=nodes,
-350 |             edges=edges,
-351 |             complexity=plan.get("complexity", "simple"),
-352 |             capabilities=plan.get("capabilities", []),
-353 |             thinking_summary=plan.get("thinking_summary", ""),
-354 |             follow_up_suggestions=plan.get("follow_up_suggestions", []),
-355 |             provider=req.provider,
-356 |             model=req.model,
-357 |             fallback_provider=req.fallback_provider,
-358 |             api_keys=req.api_keys,
-359 |             base_url=req.base_url,
-360 |             resume_from_checkpoint=False,
-361 |         ),
-362 |         media_type="text/event-stream",
-363 |     )
-364 | 
-365 | 
-366 | # ─── Custom Execute (Manual Flow Mode) ───────────────────────────────
-367 | 
-368 | @app.post("/execute_custom")
-369 | async def execute_custom(req: ExecuteCustomRequest):
-370 |     """Execute a user-customized node canvas directly."""
-371 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
-372 |     if not api_key:
-373 |         raise HTTPException(status_code=400, detail="API key required.")
-374 | 
-375 |     return StreamingResponse(
-376 |         run_agent_execution_loop(
-377 |             session_id=req.session_id,
-378 |             prompt=req.prompt,
-379 |             history=req.history,
-380 |             api_key=api_key,
-381 |             nodes=req.nodes,
-382 |             edges=req.edges,
-383 |             complexity="complex",
-384 |             capabilities=[],
-385 |             thinking_summary="",
-386 |             follow_up_suggestions=[],
-387 |             provider=req.provider,
-388 |             model=req.model,
-389 |             fallback_provider=req.fallback_provider,
-390 |             api_keys=req.api_keys,
-391 |             base_url=req.base_url,
-392 |             resume_from_checkpoint=False,
-393 |         ),
-394 |         media_type="text/event-stream",
-395 |     )
-396 | 
-397 | 
-398 | # ─── Tool Approval ────────────────────────────────────────────────────
-399 | 
-400 | @app.post("/approve_tool")
-401 | async def approve_tool(req: ApprovalRequest):
-402 |     status = "approved" if req.action == "approve" else "denied"
-403 |     if req.logId:
-404 |         await update_tool_approval(req.sessionId, req.nodeId, req.toolName, req.logId, status)
-405 |     else:
-406 |         await update_tool_approval_wildcard(req.sessionId, req.nodeId, req.toolName, status)
-407 |     return {"status": "ok", "approval": status}
-408 | 
-409 | 
-410 | # ─── Session Management ───────────────────────────────────────────────
+207 | @app.post("/orchestrate")
+208 | async def orchestrate(req: OrchestrateRequest):
+209 |     """
+210 |     Smart orchestration with pre-router:
+211 |     - TRIVIAL → direct streaming response (skip planning entirely)
+212 |     - TOOL_USE → single agent with tools
+213 |     - COMPLEX → full multi-agent DAG planning
+214 |     """
+215 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
+216 |     from providers import get_provider_config as _get_cfg
+217 |     _is_local = _get_cfg(req.provider).get("is_local", False)
+218 |     if not api_key and not _is_local:
+219 |         raise HTTPException(status_code=400, detail="API key required.")
+220 | 
+221 |     # Jailbreak check
+222 |     jailbreak_alert = check_jailbreak(req.prompt)
+223 |     if jailbreak_alert:
+224 |         async def safety_stream():
+225 |             yield f"event: text\ndata: {json.dumps('⚠ ' + jailbreak_alert)}\n\n"
+226 |             yield "event: done\ndata: {}\n\n"
+227 |         return StreamingResponse(safety_stream(), media_type="text/event-stream")
+228 | 
+229 |     # ── Semantic Pre-Router ────────────────────────────────────────────
+230 |     route = await route_request(
+231 |         prompt=req.prompt,
+232 |         provider=req.provider,
+233 |         api_key=api_key,
+234 |         api_keys=req.api_keys,
+235 |         base_url=req.base_url,
+236 |     )
+237 | 
+238 |     # Build orchestration plan
+239 |     history_msgs = [{"role": "user" if m.sender == "user" else "assistant", "content": m.text}
+240 |                     for m in (req.history or [])]
+241 | 
+242 |     # Smart context windowing
+243 |     from core.planner import summarize_history
+244 |     history_msgs = await summarize_history(
+245 |         history_msgs, req.provider, api_key, req.api_keys, req.base_url
+246 |     )
+247 | 
+248 |     existing_agent_ids = [n["data"]["senderId"] for n in (req.existing_nodes or []) if n.get("data")]
+249 | 
+250 |     messages_for_plan = history_msgs.copy()
+251 |     existing_ctx = f"\n\nExisting agents (do NOT recreate): {existing_agent_ids}" if existing_agent_ids else ""
+252 |     messages_for_plan.append({"role": "user", "content": req.prompt + existing_ctx})
+253 | 
+254 |     if route == "TRIVIAL":
+255 |         # ── Fast path: no planning, no agents, stream directly ─────────
+256 |         from providers import stream_provider
+257 |         from core.planner import RESPONSE_SYSTEM_INSTRUCTION
+258 | 
+259 |         async def trivial_stream():
+260 |             empty_meta = {"complexity": "simple", "capabilities": [], "thinking_summary": "", "nodes": [], "edges": [], "agent_talk": [], "follow_up_suggestions": []}
+261 |             yield f"event: metadata\ndata: {json.dumps(empty_meta)}\n\n"
+262 |             try:
+263 |                 from core.planner import _FAST_ROUTER_MODELS
+264 |                 fast_model = _FAST_ROUTER_MODELS.get(req.provider, req.model)
+265 |                 async for token in stream_provider(
+266 |                     provider=req.provider, model=fast_model, api_key=api_key,
+267 |                     messages=messages_for_plan, system_prompt=RESPONSE_SYSTEM_INSTRUCTION,
+268 |                     temperature=0.7, timeout=20.0, fallback_provider=req.fallback_provider,
+269 |                     api_keys=req.api_keys, base_url=req.base_url,
+270 |                 ):
+271 |                     yield f"event: text\ndata: {json.dumps(token)}\n\n"
+272 |             except Exception as e:
+273 |                 yield f"event: text\ndata: {json.dumps(f'Error: {str(e)}')}\n\n"
+274 |             yield "event: done\ndata: {}\n\n"
+275 | 
+276 |         return StreamingResponse(trivial_stream(), media_type="text/event-stream")
+277 | 
+278 |     # ── Full planning ─────────────────────────────────────────────────
+279 |     plan = await generate_plan(
+280 |         messages=messages_for_plan,
+281 |         provider=req.provider,
+282 |         model=req.model,
+283 |         api_key=api_key,
+284 |         api_keys=req.api_keys,
+285 |         base_url=req.base_url,
+286 |         fallback_provider=req.fallback_provider,
+287 |     )
+288 | 
+289 |     # Merge existing nodes/edges from frontend canvas
+290 |     import uuid
+291 |     nodes = list(req.existing_nodes or [])
+292 |     edges = list(req.existing_edges or [])
+293 |     existing_ids = {n["id"] for n in nodes}
+294 | 
+295 |     for agent in plan.get("agent_talk", []):
+296 |         agent_id = agent["senderId"]
+297 |         if agent_id in existing_ids:
+298 |             continue  # deduplicate
+299 |         custom = agent.get("custom_template", {})
+300 |         col_idx = custom.get("col", len(nodes) % 3)
+301 |         new_node = {
+302 |             "id": agent_id,
+303 |             "type": "custom",
+304 |             "position": {"x": 180 + col_idx * 260, "y": 100 + (len(nodes) // 3) * 200},
+305 |             "data": {
+306 |                 "name": custom.get("name", agent.get("senderName", agent_id)),
+307 |                 "icon": custom.get("icon", "science"),
+308 |                 "tag": custom.get("tag", agent.get("senderIcon", "AGENT").upper()),
+309 |                 "objective": agent.get("objective", ""),
+310 |                 "systemPrompt": agent.get("systemPrompt", ""),
+311 |                 "rules": agent.get("rules", []),
+312 |                 "dependencies": agent.get("dependencies", []),
+313 |                 "tools": agent.get("tools", []),
+314 |                 "toolPermissions": {},
+315 |                 "temp": custom.get("temp", 0.7),
+316 |                 "logic": custom.get("logic", 70),
+317 |                 "empathy": 50,
+318 |                 "priority": 5,
+319 |                 "status": "IDLE",
+320 |                 "enabled": True,
+321 |                 "toolLogs": [],
+322 |                 "personality": "",
+323 |                 "senderId": agent_id,
+324 |             },
+325 |         }
+326 |         nodes.append(new_node)
+327 |         existing_ids.add(agent_id)
+328 | 
+329 |     # Build edges from dependencies
+330 |     for node in nodes:
+331 |         for dep in node["data"].get("dependencies", []):
+332 |             edge_id = f"e-{dep}-{node['id']}"
+333 |             if dep in existing_ids and not any(e["id"] == edge_id for e in edges):
+334 |                 edges.append({"id": edge_id, "source": dep, "target": node["id"], "type": "custom", "animated": True})
+335 | 
+336 |     if not nodes:
+337 |         nodes = [{"id": "general", "type": "custom", "position": {"x": 300, "y": 200}, "data": {**DEFAULT_PLAN["agent_talk"][0], "status": "IDLE", "enabled": True, "toolLogs": [], "empathy": 50, "priority": 5, "personality": ""}}]
+338 | 
+339 |     session_id = req.session_id or str(uuid.uuid4())
+340 | 
+341 |     if not req.execute_agents:
+342 |         # Custom mode: return plan without executing
+343 |         plan_meta = {
+344 |             "complexity": plan.get("complexity", "simple"),
+345 |             "capabilities": plan.get("capabilities", []),
+346 |             "thinking_summary": plan.get("thinking_summary", ""),
+347 |             "nodes": nodes,
+348 |             "edges": edges,
+349 |             "agent_talk": [{"id": f"plan-{a['senderId']}", "senderId": a["senderId"], "senderName": a["senderName"], "senderIcon": a["senderIcon"], "text": a["text"], "timestamp": ""} for a in plan.get("agent_talk", [])],
+350 |             "follow_up_suggestions": plan.get("follow_up_suggestions", []),
+351 |         }
+352 |         async def plan_stream():
+353 |             yield f"event: metadata\ndata: {json.dumps(plan_meta)}\n\n"
+354 |             yield "event: done\ndata: {}\n\n"
+355 |         return StreamingResponse(plan_stream(), media_type="text/event-stream")
+356 | 
+357 |     return StreamingResponse(
+358 |         run_agent_execution_loop(
+359 |             session_id=session_id,
+360 |             prompt=req.prompt,
+361 |             history=req.history,
+362 |             api_key=api_key,
+363 |             nodes=nodes,
+364 |             edges=edges,
+365 |             complexity=plan.get("complexity", "simple"),
+366 |             capabilities=plan.get("capabilities", []),
+367 |             thinking_summary=plan.get("thinking_summary", ""),
+368 |             follow_up_suggestions=plan.get("follow_up_suggestions", []),
+369 |             provider=req.provider,
+370 |             model=req.model,
+371 |             fallback_provider=req.fallback_provider,
+372 |             api_keys=req.api_keys,
+373 |             base_url=req.base_url,
+374 |             resume_from_checkpoint=False,
+375 |         ),
+376 |         media_type="text/event-stream",
+377 |     )
+378 | 
+379 | 
+380 | # ─── Custom Execute (Manual Flow Mode) ───────────────────────────────
+381 | 
+382 | @app.post("/execute_custom")
+383 | async def execute_custom(req: ExecuteCustomRequest):
+384 |     """Execute a user-customized node canvas directly."""
+385 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
+386 |     from providers import get_provider_config as _get_cfg
+387 |     if not api_key and not _get_cfg(req.provider).get("is_local", False):
+388 |         raise HTTPException(status_code=400, detail="API key required.")
+389 | 
+390 |     return StreamingResponse(
+391 |         run_agent_execution_loop(
+392 |             session_id=req.session_id,
+393 |             prompt=req.prompt,
+394 |             history=req.history,
+395 |             api_key=api_key,
+396 |             nodes=req.nodes,
+397 |             edges=req.edges,
+398 |             complexity="complex",
+399 |             capabilities=[],
+400 |             thinking_summary="",
+401 |             follow_up_suggestions=[],
+402 |             provider=req.provider,
+403 |             model=req.model,
+404 |             fallback_provider=req.fallback_provider,
+405 |             api_keys=req.api_keys,
+406 |             base_url=req.base_url,
+407 |             resume_from_checkpoint=False,
+408 |         ),
+409 |         media_type="text/event-stream",
+410 |     )
 411 | 
-412 | @app.get("/sessions")
-413 | async def get_sessions():
-414 |     sessions = await load_sessions()
-415 |     result = []
-416 |     for s in sessions:
-417 |         result.append({
-418 |             "session_id": s["session_id"],
-419 |             "title": s["title"],
-420 |             "prompt": s["prompt"],
-421 |             "mode": s.get("mode", "auto"),
-422 |             "execution_state": s.get("execution_state", "setup"),
-423 |             "status_message": s.get("status_message", ""),
-424 |         })
-425 |     return result
+412 | 
+413 | # ─── Tool Approval ────────────────────────────────────────────────────
+414 | 
+415 | @app.post("/approve_tool")
+416 | async def approve_tool(req: ApprovalRequest):
+417 |     status = "approved" if req.action == "approve" else "denied"
+418 |     if req.logId:
+419 |         await update_tool_approval(req.sessionId, req.nodeId, req.toolName, req.logId, status)
+420 |     else:
+421 |         await update_tool_approval_wildcard(req.sessionId, req.nodeId, req.toolName, status)
+422 |     return {"status": "ok", "approval": status}
+423 | 
+424 | 
+425 | # ─── Session Management ───────────────────────────────────────────────
 426 | 
-427 | 
-428 | @app.get("/sessions/{session_id}")
-429 | async def get_session(session_id: str):
-430 |     session = await load_session(session_id)
-431 |     if not session:
-432 |         raise HTTPException(status_code=404, detail="Session not found")
-433 |     return {
-434 |         "id": session["session_id"],
-435 |         "title": session["title"],
-436 |         "prompt": session["prompt"],
-437 |         "mode": session.get("mode", "auto"),
-438 |         "nodes": session.get("nodes", []),
-439 |         "edges": session.get("edges", []),
-440 |         "chatMessages": session.get("chat_messages", []),
-441 |         "agentTalkLogs": session.get("agent_talk_logs", []),
-442 |         "executionState": session.get("execution_state", "setup"),
-443 |         "statusMessage": session.get("status_message", ""),
-444 |         "followUpSuggestions": session.get("follow_up_suggestions", []),
-445 |     }
-446 | 
-447 | 
-448 | @app.delete("/sessions/{session_id}")
-449 | async def delete_session_route(session_id: str):
-450 |     await delete_session(session_id)
-451 |     return {"status": "deleted"}
-452 | 
-453 | 
-454 | @app.post("/sessions/save")
-455 | async def save_session_route(req: SaveSessionRequest):
-456 |     await save_session(
-457 |         session_id=req.session_id,
-458 |         title=req.title,
-459 |         prompt=req.prompt,
-460 |         mode=req.mode,
-461 |         nodes=req.nodes,
-462 |         edges=req.edges,
-463 |         chat_messages=req.chat_messages,
-464 |         agent_talk_logs=req.agent_talk_logs,
-465 |         execution_state=req.execution_state,
-466 |         status_message=req.status_message,
-467 |         follow_up_suggestions=req.follow_up_suggestions,
-468 |     )
-469 |     return {"status": "saved"}
-470 | 
-471 | 
-472 | class TestAgentRequest(BaseModel):
-473 |     node: Dict[str, Any]
-474 |     provider: str
-475 |     api_key: Optional[str] = None
-476 |     api_keys: Optional[Dict[str, str]] = None
-477 |     base_url: Optional[str] = None
-478 | 
-479 | 
-480 | @app.post("/test_agent")
-481 | async def test_agent_route(req: TestAgentRequest):
-482 |     """
-483 |     Test execution of a single agent node.
-484 |     Runs a simple prompt and verifies the LLM connection and system prompt.
-485 |     """
-486 |     from providers import get_provider_config, call_provider
-487 |     provider_config = get_provider_config(req.provider)
-488 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
-489 |     if not api_key and not provider_config.get("is_local", False):
-490 |         raise HTTPException(status_code=400, detail="API Key required.")
-491 | 
-492 |     test_prompt = "Hello! Output a short 3-word test greeting."
-493 |     node = req.node
-494 |     try:
-495 |         response = await call_provider(
-496 |             provider=req.provider,
-497 |             model=req.node.get("data", {}).get("model") or "gemini-2.5-flash",
-498 |             api_key=api_key,
-499 |             messages=[{"role": "user", "content": test_prompt}],
-500 |             system_prompt=node.get("data", {}).get("systemPrompt", "You are a test agent."),
-501 |             temperature=0.7,
-502 |             timeout=10.0,
-503 |             api_keys=req.api_keys,
-504 |             base_url=req.base_url,
-505 |         )
-506 |         return {"status": "success", "response": response}
-507 |     except Exception as e:
-508 |         return {"status": "error", "detail": str(e)}
-509 | 
-510 | 
-511 | @app.post("/echohouse/init")
-512 | async def echohouse_init(req: EchoHouseInitRequest):
-513 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
-514 |     from providers import PROVIDERS, call_provider, extract_json_from_text
-515 |     is_local = PROVIDERS.get(req.provider.lower(), {}).get("is_local", False)
-516 |     if not api_key and not is_local:
-517 |         raise HTTPException(status_code=400, detail="API key required for initialization.")
-518 |         
-519 |     model = req.model or PROVIDERS.get(req.provider.lower(), {}).get("default_model")
-520 |     
-521 |     system_prompt = (
-522 |         "You are a professional relationship counselor and social dynamics simulator.\n"
-523 |         "Given the user's life problem, infer 2-4 key people in their life who are likely involved in or affect this situation (e.g., family, friends, colleagues, partners, or their own internal self).\n"
-524 |         "Always include one cast member representing the user themselves. For the user themselves, set is_self to true, and role to \"self\".\n\n"
-525 |         "Output JSON format ONLY. Do NOT enclose in markdown formatting, just raw JSON list.\n"
-526 |         "Each item in the list must have:\n"
-527 |         "- inferred_name (string): Name of the person (e.g. \"You (Self)\", \"Sarah\", \"Dad\")\n"
-528 |         "- role (string): Their relation/role (e.g. \"self\", \"friend\", \"father\")\n"
-529 |         "- inferred_problem (string): What this person likely thinks/feels about the situation (their perspective)\n"
-530 |         "- is_self (boolean): True if it represents the user, False otherwise.\n\n"
-531 |         "Example JSON output:\n"
-532 |         "[\n"
-533 |         "  {\"inferred_name\": \"You (Self)\", \"role\": \"self\", \"inferred_problem\": \"I feel stuck and overwhelmed.\", \"is_self\": true},\n"
-534 |         "  {\"inferred_name\": \"Mom\", \"role\": \"mother\", \"inferred_problem\": \"She thinks I'm not trying hard enough.\", \"is_self\": false}\n"
-535 |         "]"
-536 |     )
-537 |     
-538 |     user_prompt = f"User's life problem: \"{req.problem_text}\""
-539 |     
-540 |     try:
-541 |         response = await call_provider(
-542 |             provider=req.provider,
-543 |             model=model,
-544 |             api_key=api_key,
-545 |             messages=[{"role": "user", "content": user_prompt}],
-546 |             system_prompt=system_prompt,
-547 |             temperature=0.7,
-548 |             timeout=15.0,
-549 |             api_keys=req.api_keys,
-550 |             base_url=req.base_url
-551 |         )
-552 |         cast = extract_json_from_text(response)
-553 |         if isinstance(cast, list) and len(cast) > 0:
-554 |             validated_cast = []
-555 |             for item in cast:
-556 |                 if isinstance(item, dict) and "inferred_name" in item and "role" in item:
-557 |                     validated_cast.append({
-558 |                         "inferred_name": str(item["inferred_name"]),
-559 |                         "role": str(item["role"]),
-560 |                         "inferred_problem": str(item.get("inferred_problem", "")),
-561 |                         "is_self": bool(item.get("is_self", False))
-562 |                     })
-563 |             if validated_cast:
-564 |                 return validated_cast
-565 |     except Exception as e:
-566 |         print(f"[EchoHouse Init Error] {e}")
-567 |         
-568 |     return [
-569 |         {
-570 |             "inferred_name": "You (Self)",
-571 |             "role": "self",
-572 |             "inferred_problem": req.problem_text,
-573 |             "is_self": True
-574 |         },
-575 |         {
-576 |             "inferred_name": "Friend",
-577 |             "role": "friend",
-578 |             "inferred_problem": "They are concerned about you but might not know how to help.",
-579 |             "is_self": False
-580 |         }
-581 |     ]
-582 | 
-583 | 
-584 | @app.post("/echohouse/simulate")
-585 | async def echohouse_simulate(req: EchoHouseSimulateRequest):
-586 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
-587 |     from core.echohouse import run_echohouse_simulation
-588 |     from providers import PROVIDERS
-589 |     is_local = PROVIDERS.get(req.provider.lower(), {}).get("is_local", False)
-590 |     if not api_key and not is_local:
-591 |         raise HTTPException(status_code=400, detail="API key required for simulation.")
-592 |         
-593 |     model = req.model or PROVIDERS.get(req.provider.lower(), {}).get("default_model")
-594 |     
-595 |     return StreamingResponse(
-596 |         run_echohouse_simulation(
-597 |             session_id=req.session_id,
-598 |             problem_text=req.problem_text,
-599 |             cast=req.cast,
-600 |             provider=req.provider,
-601 |             model=model,
-602 |             api_key=api_key,
-603 |             api_keys=req.api_keys,
-604 |             base_url=req.base_url
-605 |         ),
-606 |         media_type="text/event-stream"
-607 |     )
-608 | 
-609 | 
-610 | @app.get("/ollama/models")
-611 | async def get_ollama_models():
-612 |     url = "http://localhost:11434/api/tags"
-613 |     try:
-614 |         async with httpx.AsyncClient(timeout=5.0) as client:
-615 |             resp = await client.get(url)
-616 |             if resp.status_code == 200:
-617 |                 data = resp.json()
-618 |                 raw_models = data.get("models", [])
-619 |                 models = []
-620 |                 for m in raw_models:
-621 |                     name = m.get("name")
-622 |                     if name:
-623 |                         models.append({
-624 |                             "id": name,
-625 |                             "name": name,
-626 |                             "tier": "local"
-627 |                         })
-628 |                 return {"models": models, "ollama_available": True}
-629 |     except Exception as e:
-630 |         print(f"[Ollama Check Failed] {e}")
-631 |     return {"models": [], "ollama_available": False}
-632 | 
-633 | 
-634 |
+427 | @app.get("/sessions")
+428 | async def get_sessions():
+429 |     sessions = await load_sessions()
+430 |     result = []
+431 |     for s in sessions:
+432 |         result.append({
+433 |             "session_id": s["session_id"],
+434 |             "title": s["title"],
+435 |             "prompt": s["prompt"],
+436 |             "mode": s.get("mode", "auto"),
+437 |             "execution_state": s.get("execution_state", "setup"),
+438 |             "status_message": s.get("status_message", ""),
+439 |         })
+440 |     return result
+441 | 
+442 | 
+443 | @app.get("/sessions/{session_id}")
+444 | async def get_session(session_id: str):
+445 |     session = await load_session(session_id)
+446 |     if not session:
+447 |         raise HTTPException(status_code=404, detail="Session not found")
+448 |     return {
+449 |         "id": session["session_id"],
+450 |         "title": session["title"],
+451 |         "prompt": session["prompt"],
+452 |         "mode": session.get("mode", "auto"),
+453 |         "nodes": session.get("nodes", []),
+454 |         "edges": session.get("edges", []),
+455 |         "chatMessages": session.get("chat_messages", []),
+456 |         "agentTalkLogs": session.get("agent_talk_logs", []),
+457 |         "executionState": session.get("execution_state", "setup"),
+458 |         "statusMessage": session.get("status_message", ""),
+459 |         "followUpSuggestions": session.get("follow_up_suggestions", []),
+460 |     }
+461 | 
+462 | 
+463 | @app.delete("/sessions/{session_id}")
+464 | async def delete_session_route(session_id: str):
+465 |     await delete_session(session_id)
+466 |     return {"status": "deleted"}
+467 | 
+468 | 
+469 | @app.post("/sessions/save")
+470 | async def save_session_route(req: SaveSessionRequest):
+471 |     await save_session(
+472 |         session_id=req.session_id,
+473 |         title=req.title,
+474 |         prompt=req.prompt,
+475 |         mode=req.mode,
+476 |         nodes=req.nodes,
+477 |         edges=req.edges,
+478 |         chat_messages=req.chat_messages,
+479 |         agent_talk_logs=req.agent_talk_logs,
+480 |         execution_state=req.execution_state,
+481 |         status_message=req.status_message,
+482 |         follow_up_suggestions=req.follow_up_suggestions,
+483 |     )
+484 |     return {"status": "saved"}
+485 | 
+486 | 
+487 | class TestAgentRequest(BaseModel):
+488 |     node: Dict[str, Any]
+489 |     provider: str
+490 |     api_key: Optional[str] = None
+491 |     api_keys: Optional[Dict[str, str]] = None
+492 |     base_url: Optional[str] = None
+493 | 
+494 | 
+495 | @app.post("/test_agent")
+496 | async def test_agent_route(req: TestAgentRequest):
+497 |     """
+498 |     Test execution of a single agent node.
+499 |     Runs a simple prompt and verifies the LLM connection and system prompt.
+500 |     """
+501 |     from providers import get_provider_config, call_provider
+502 |     provider_config = get_provider_config(req.provider)
+503 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
+504 |     if not api_key and not provider_config.get("is_local", False):
+505 |         raise HTTPException(status_code=400, detail="API Key required.")
+506 | 
+507 |     test_prompt = "Hello! Output a short 3-word test greeting."
+508 |     node = req.node
+509 |     try:
+510 |         response = await call_provider(
+511 |             provider=req.provider,
+512 |             model=req.node.get("data", {}).get("model") or provider_config.get("default_model", "llama3"),
+513 |             api_key=api_key,
+514 |             messages=[{"role": "user", "content": test_prompt}],
+515 |             system_prompt=node.get("data", {}).get("systemPrompt", "You are a test agent."),
+516 |             temperature=0.7,
+517 |             timeout=10.0,
+518 |             api_keys=req.api_keys,
+519 |             base_url=req.base_url,
+520 |         )
+521 |         return {"status": "success", "response": response}
+522 |     except Exception as e:
+523 |         return {"status": "error", "detail": str(e)}
+524 | 
+525 | 
+526 | @app.post("/echohouse/init")
+527 | async def echohouse_init(req: EchoHouseInitRequest):
+528 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
+529 |     from providers import PROVIDERS, call_provider, extract_json_from_text
+530 |     is_local = PROVIDERS.get(req.provider.lower(), {}).get("is_local", False)
+531 |     if not api_key and not is_local:
+532 |         raise HTTPException(status_code=400, detail="API key required for initialization.")
+533 |         
+534 |     model = req.model or PROVIDERS.get(req.provider.lower(), {}).get("default_model")
+535 |     
+536 |     system_prompt = (
+537 |         "You are a professional relationship counselor and social dynamics simulator.\n"
+538 |         "Given the user's life problem, infer 2-4 key people in their life who are likely involved in or affect this situation (e.g., family, friends, colleagues, partners, or their own internal self).\n"
+539 |         "Always include one cast member representing the user themselves. For the user themselves, set is_self to true, and role to \"self\".\n\n"
+540 |         "Output JSON format ONLY. Do NOT enclose in markdown formatting, just raw JSON list.\n"
+541 |         "Each item in the list must have:\n"
+542 |         "- inferred_name (string): Name of the person (e.g. \"You (Self)\", \"Sarah\", \"Dad\")\n"
+543 |         "- role (string): Their relation/role (e.g. \"self\", \"friend\", \"father\")\n"
+544 |         "- inferred_problem (string): What this person likely thinks/feels about the situation (their perspective)\n"
+545 |         "- emotional_core (string): One sentence describing the deepest emotional need or fear driving this person's behavior. Example: \"Needs to feel respected and not dismissed.\"\n"
+546 |         "- is_self (boolean): True if it represents the user, False otherwise.\n\n"
+547 |         "Example JSON output:\n"
+548 |         "[\n"
+549 |         "  {\"inferred_name\": \"You (Self)\", \"role\": \"self\", \"inferred_problem\": \"I feel stuck and overwhelmed.\", \"emotional_core\": \"Needs to feel heard and understood.\", \"is_self\": true},\n"
+550 |         "  {\"inferred_name\": \"Mom\", \"role\": \"mother\", \"inferred_problem\": \"She thinks I'm not trying hard enough.\", \"emotional_core\": \"Fears losing connection with her child.\", \"is_self\": false}\n"
+551 |         "]"
+552 |     )
+553 |     
+554 |     user_prompt = f"User's life problem: \"{req.problem_text}\""
+555 |     
+556 |     try:
+557 |         response = await call_provider(
+558 |             provider=req.provider,
+559 |             model=model,
+560 |             api_key=api_key,
+561 |             messages=[{"role": "user", "content": user_prompt}],
+562 |             system_prompt=system_prompt,
+563 |             temperature=0.7,
+564 |             timeout=15.0,
+565 |             api_keys=req.api_keys,
+566 |             base_url=req.base_url
+567 |         )
+568 |         cast = extract_json_from_text(response)
+569 |         if isinstance(cast, list) and len(cast) > 0:
+570 |             validated_cast = []
+571 |             for item in cast:
+572 |                 if isinstance(item, dict) and "inferred_name" in item and "role" in item:
+573 |                     validated_cast.append({
+574 |                         "inferred_name": str(item["inferred_name"]),
+575 |                         "role": str(item["role"]),
+576 |                         "inferred_problem": str(item.get("inferred_problem", "")),
+577 |                         "emotional_core": str(item.get("emotional_core", "")),
+578 |                         "is_self": bool(item.get("is_self", False))
+579 |                     })
+580 |             if validated_cast:
+581 |                 return validated_cast
+582 |     except Exception as e:
+583 |         print(f"[EchoHouse Init Error] {e}")
+584 |         
+585 |     return [
+586 |         {
+587 |             "inferred_name": "You (Self)",
+588 |             "role": "self",
+589 |             "inferred_problem": req.problem_text,
+590 |             "is_self": True
+591 |         },
+592 |         {
+593 |             "inferred_name": "Friend",
+594 |             "role": "friend",
+595 |             "inferred_problem": "They are concerned about you but might not know how to help.",
+596 |             "is_self": False
+597 |         }
+598 |     ]
+599 | 
+600 | 
+601 | @app.post("/echohouse/simulate")
+602 | async def echohouse_simulate(req: EchoHouseSimulateRequest):
+603 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
+604 |     from core.echohouse import run_echohouse_simulation
+605 |     from providers import PROVIDERS
+606 |     is_local = PROVIDERS.get(req.provider.lower(), {}).get("is_local", False)
+607 |     if not api_key and not is_local:
+608 |         raise HTTPException(status_code=400, detail="API key required for simulation.")
+609 |         
+610 |     model = req.model or PROVIDERS.get(req.provider.lower(), {}).get("default_model")
+611 |     
+612 |     return StreamingResponse(
+613 |         run_echohouse_simulation(
+614 |             session_id=req.session_id,
+615 |             problem_text=req.problem_text,
+616 |             cast=req.cast,
+617 |             provider=req.provider,
+618 |             model=model,
+619 |             api_key=api_key,
+620 |             api_keys=req.api_keys,
+621 |             base_url=req.base_url,
+622 |             rounds=req.rounds,
+623 |             tone=req.tone
+624 |         ),
+625 |         media_type="text/event-stream"
+626 |     )
+627 | 
+628 | 
+629 | @app.post("/echohouse/takeaways")
+630 | async def echohouse_takeaways(req: EchoHouseTakeawaysRequest):
+631 |     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
+632 |     from providers import PROVIDERS, call_provider, extract_json_from_text
+633 |     is_local = PROVIDERS.get(req.provider.lower(), {}).get("is_local", False)
+634 |     if not api_key and not is_local:
+635 |         raise HTTPException(status_code=400, detail="API key required.")
+636 | 
+637 |     model = req.model or PROVIDERS.get(req.provider.lower(), {}).get("default_model")
+638 | 
+639 |     system_prompt = (
+640 |         "You are a concise therapeutic coach. Given the simulation text and problem below, "
+641 |         "output EXACTLY a JSON array of 3 strings. Each string is a specific, actionable step "
+642 |         "written in second person (\"You could...\", \"Try...\", \"Next time...\"). "
+643 |         "Each string must be under 25 words. Do NOT output generic advice. Be behavioral and specific. "
+644 |         "Output raw JSON only, no markdown fences. Example: "
+645 |         '["Try stating one boundary out loud before the next family call.", '
+646 |         '"Write down one thing you felt but did not say, then say it to a mirror.", '
+647 |         '"Ask directly for what you need rather than waiting for others to notice."]'
+648 |     )
+649 | 
+650 |     user_prompt = (
+651 |         f"Problem: {req.problem_text}\n\n"
+652 |         f"Simulation transcript:\n{req.simulation_text[:6000]}"
+653 |     )
+654 | 
+655 |     try:
+656 |         response = await call_provider(
+657 |             provider=req.provider,
+658 |             model=model,
+659 |             api_key=api_key,
+660 |             messages=[{"role": "user", "content": user_prompt}],
+661 |             system_prompt=system_prompt,
+662 |             temperature=0.5,
+663 |             timeout=15.0,
+664 |             api_keys=req.api_keys,
+665 |             base_url=req.base_url
+666 |         )
+667 |         takeaways = extract_json_from_text(response)
+668 |         if isinstance(takeaways, list) and len(takeaways) >= 1:
+669 |             result = [str(t) for t in takeaways[:3]]
+670 |             while len(result) < 3:
+671 |                 result.append("Reflect on what you truly need from this relationship.")
+672 |             return {"takeaways": result}
+673 |     except Exception as e:
+674 |         print(f"[EchoHouse Takeaways Error] {e}")
+675 | 
+676 |     return {"takeaways": [
+677 |         "Notice one moment this week where you held back, and speak up instead.",
+678 |         "Write down what you wish the other person understood about your perspective.",
+679 |         "Before the next difficult interaction, state your need clearly to yourself first."
+680 |     ]}
+681 | 
+682 | 
+683 | @app.get("/ollama/models")
+684 | async def get_ollama_models():
+685 |     url = "http://localhost:11434/api/tags"
+686 |     try:
+687 |         async with httpx.AsyncClient(timeout=5.0) as client:
+688 |             resp = await client.get(url)
+689 |             if resp.status_code == 200:
+690 |                 data = resp.json()
+691 |                 raw_models = data.get("models", [])
+692 |                 models = []
+693 |                 for m in raw_models:
+694 |                     name = m.get("name")
+695 |                     if name:
+696 |                         models.append({
+697 |                             "id": name,
+698 |                             "name": name,
+699 |                             "tier": "local"
+700 |                         })
+701 |                 return {"models": models, "ollama_available": True}
+702 |     except Exception as e:
+703 |         print(f"[Ollama Check Failed] {e}")
+704 |     return {"models": [], "ollama_available": False}
+705 | 
+706 | 
+707 |
 ```
 
 ### File: `Backend/requirements.txt`
@@ -4773,6 +4861,45 @@ SoloSpace/
 78 |   }
 79 | }
 80 |
+```
+
+### File: `Frontend/app/api/gemini/echohouse/takeaways/route.ts`
+
+> 32 lines | 0.8 KB
+
+```typescript
+ 1 | import { NextResponse } from "next/server";
+ 2 | 
+ 3 | export async function POST(req: Request) {
+ 4 |   try {
+ 5 |     const body = await req.json();
+ 6 | 
+ 7 |     const pyResponse = await fetch("http://127.0.0.1:8000/echohouse/takeaways", {
+ 8 |       method: "POST",
+ 9 |       headers: {
+10 |         "Content-Type": "application/json",
+11 |       },
+12 |       body: JSON.stringify(body),
+13 |     });
+14 | 
+15 |     if (!pyResponse.ok) {
+16 |       return NextResponse.json(
+17 |         { error: `Backend error: ${pyResponse.status}` },
+18 |         { status: pyResponse.status }
+19 |       );
+20 |     }
+21 | 
+22 |     const data = await pyResponse.json();
+23 |     return NextResponse.json(data);
+24 |   } catch (err: any) {
+25 |     console.error("Proxy error — Python backend unreachable for EchoHouse takeaways:", err.message);
+26 |     return NextResponse.json(
+27 |       { error: "Python backend is unavailable" },
+28 |       { status: 503 }
+29 |     );
+30 |   }
+31 | }
+32 |
 ```
 
 ### File: `Frontend/app/api/gemini/execute_custom/route.ts`
@@ -5521,7 +5648,7 @@ SoloSpace/
 
 ### File: `Frontend/app/page.tsx`
 
-> 674 lines | 44.2 KB
+> 979 lines | 61.2 KB
 
 ```tsx
   1 | 'use client';
@@ -5616,588 +5743,893 @@ SoloSpace/
  90 | 
  91 |   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
  92 | 
- 93 |   useEffect(() => {
- 94 |     if (textareaRef.current) {
- 95 |       textareaRef.current.style.height = "auto";
- 96 |       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
- 97 |     }
- 98 |   }, [userQuery]);
- 99 | 
-100 |   useEffect(() => {
-101 |     if (selectedNodeId) setIsConfigPanelOpen(true);
-102 |     else setIsConfigPanelOpen(false);
-103 |   }, [selectedNodeId]);
-104 | 
-105 |   useEffect(() => {
-106 |     if (shouldAutoScroll) chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-107 |   }, [chatMessages, isThinking, shouldAutoScroll]);
-108 | 
-109 |   useEffect(() => {
-110 |     if (workspaceState === "active" && activeSessionId === null) {
-111 |       setWorkspaceState("home");
-112 |       setCurrentTab("chat");
-113 |       setUserQuery("");
-114 |     }
-115 |   }, [activeSessionId, workspaceState]);
+ 93 |   // EchoHouse guided intake state
+ 94 |   const [echoStep, setEchoStep] = useState<1 | 2 | 3>(1);
+ 95 |   const [echoSituation, setEchoSituation] = useState("");
+ 96 |   const [echoFocus, setEchoFocus] = useState("");
+ 97 |   const [echoCast, setEchoCast] = useState<any[]>([]);
+ 98 |   const [isLoadingCast, setIsLoadingCast] = useState(false);
+ 99 |   const [editingCastIdx, setEditingCastIdx] = useState<number | null>(null);
+100 | 
+101 |   useEffect(() => {
+102 |     if (textareaRef.current) {
+103 |       textareaRef.current.style.height = "auto";
+104 |       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+105 |     }
+106 |   }, [userQuery]);
+107 | 
+108 |   useEffect(() => {
+109 |     if (selectedNodeId) setIsConfigPanelOpen(true);
+110 |     else setIsConfigPanelOpen(false);
+111 |   }, [selectedNodeId]);
+112 | 
+113 |   useEffect(() => {
+114 |     if (shouldAutoScroll) chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+115 |   }, [chatMessages, isThinking, shouldAutoScroll]);
 116 | 
 117 |   useEffect(() => {
-118 |     const init = async () => {
-119 |       await fetchSessions().catch(e => console.error("Failed to load sessions:", e));
-120 |       await fetchAvailableProviders().catch(e => console.error("Failed to load providers:", e));
-121 |       await loadPersistedKeys().catch(e => console.error("Failed to load API keys:", e));
-122 |       await loadPersistedState().catch(e => console.error("Failed to load state:", e));
-123 |       if (useWorkflowStore.getState().isOrchestrating) {
-124 |         useWorkflowStore.setState({
-125 |           isOrchestrating: false,
-126 |           isThinking: false,
-127 |           abortController: null
-128 |         });
-129 |       }
-130 |     };
-131 |     init();
-132 | 
-133 |     const handleUnload = () => {
-134 |       useWorkflowStore.getState().saveCurrentSession();
-135 |     };
-136 |     window.addEventListener("beforeunload", handleUnload);
-137 |     return () => {
-138 |       window.removeEventListener("beforeunload", handleUnload);
-139 |     };
-140 |   }, []);
-141 | 
-142 |   useEffect(() => {
-143 |     const handleResize = () => setIsSidebarExpanded(window.innerWidth >= 768);
-144 |     handleResize();
-145 |     window.addEventListener("resize", handleResize);
-146 |     return () => window.removeEventListener("resize", handleResize);
-147 |   }, []);
-148 | 
-149 |   const startOrchestration = async (promptText: string) => {
-150 |     if (!promptText.trim()) return;
-151 | 
-152 |     if (isEchoHouseMode) {
-153 |       const userMsgId = Date.now().toString();
-154 |       const userMsg: ChatMessage = {
-155 |         id: userMsgId,
-156 |         sender: "user",
-157 |         text: promptText,
-158 |         speakerName: "You (Self)",
-159 |         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-160 |       };
-161 |       setChatMessages((prev) => [...prev, userMsg]);
-162 |       setUserQuery("");
-163 |       setCurrentTab("arena");
-164 | 
-165 |       const selfNode = {
-166 |         id: "self-node",
-167 |         type: "custom",
-168 |         position: { x: 300, y: 200 },
-169 |         data: {
-170 |           name: "You (Self)",
-171 |           tag: "SELF",
-172 |           icon: "bot",
-173 |           objective: promptText.length > 120 ? promptText.substring(0, 120) + "..." : promptText,
-174 |           systemPrompt: "You are the user themselves, experiencing this problem from the inside.",
-175 |           status: "IDLE" as const,
-176 |           enabled: true,
-177 |           isEchoHouseAgent: true,
-178 |           echohouseRole: "self",
-179 |           echohouseProblem: promptText,
-180 |           rules: [],
-181 |           dependencies: [],
-182 |           tools: [],
-183 |           toolPermissions: {},
-184 |           temp: 0.7,
-185 |           logic: 70,
-186 |           empathy: 50,
-187 |           priority: 5,
-188 |           toolLogs: [],
-189 |           personality: "",
-190 |           senderId: "self-node"
-191 |         }
-192 |       };
-193 |       setNodes([selfNode]);
-194 |       setEdges([]);
-195 | 
-196 |       try {
-197 |         const activeProv = useWorkflowStore.getState().provider;
-198 |         const apiKey = useWorkflowStore.getState().apiKeys[activeProv] || useWorkflowStore.getState().apiKey || "";
-199 |         const resp = await fetch("/api/gemini/echohouse/init", {
-200 |           method: "POST",
-201 |           headers: { "Content-Type": "application/json" },
-202 |           body: JSON.stringify({
-203 |             problem_text: promptText,
-204 |             provider: activeProv,
-205 |             model: useWorkflowStore.getState().model,
-206 |             api_key: apiKey,
-207 |             api_keys: useWorkflowStore.getState().apiKeys,
-208 |             base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null
-209 |           })
-210 |         });
-211 |         if (resp.ok) {
-212 |           const suggestedCast = await resp.json();
-213 |           const nodesList = [selfNode];
-214 |           suggestedCast.forEach((member: any, idx: number) => {
-215 |             if (member.is_self || member.role === "self") return;
-216 |             
-217 |             const angle = (idx * 2 * Math.PI) / (suggestedCast.length - 1 || 1);
-218 |             const x = 300 + Math.cos(angle) * 250;
-219 |             const y = 200 + Math.sin(angle) * 200;
-220 |             
-221 |             nodesList.push({
-222 |               id: `echo-agent-${idx}-${Date.now()}`,
-223 |               type: "custom",
-224 |               position: { x: Math.max(50, x), y: Math.max(50, y) },
-225 |               data: {
-226 |                 name: member.inferred_name,
-227 |                 tag: member.role.toUpperCase().replace(/\s+/g, "_"),
-228 |                 icon: "science",
-229 |                 objective: `Provide perspective as ${member.inferred_name} (${member.role}).`,
-230 |                 systemPrompt: `You are ${member.inferred_name}, whose role in the user's life is ${member.role}. From your perspective about their situation: ${member.inferred_problem}`,
-231 |                 status: "IDLE" as const,
-232 |                 enabled: true,
-233 |                 isEchoHouseAgent: true,
-234 |                 echohouseRole: member.role,
-235 |                 echohouseProblem: member.inferred_problem,
-236 |                 rules: [],
-237 |                 dependencies: [],
-238 |                 tools: [],
-239 |                 toolPermissions: {},
-240 |                 temp: 0.8,
-241 |                 logic: 70,
-242 |                 empathy: 50,
-243 |                 priority: 5,
-244 |                 toolLogs: [],
-245 |                 personality: "",
-246 |                 senderId: `echo-agent-${idx}-${Date.now()}`
-247 |               }
-248 |             });
-249 |           });
-250 |           setNodes(nodesList);
-251 |         }
-252 |       } catch (e) {
-253 |         console.error("Failed to suggest cast:", e);
-254 |       }
-255 |       return;
-256 |     }
-257 | 
-258 |     setWorkspaceState("active");
-259 |     setCurrentTab("chat");
-260 |     let sessionId = activeSessionId;
-261 |     if (!sessionId) sessionId = createSession(promptText, executionMode);
-262 |     setExecutionState("running");
-263 |     triggerSteerOrchestration(promptText, executionMode !== "custom", executionMode);
-264 |     setUserQuery("");
-265 |   };
-266 | 
-267 |   const handleRegenerate = () => {
-268 |     const lastAIIdx = chatMessages.findLastIndex(m => m.sender === "ai");
-269 |     if (lastAIIdx === -1) return;
-270 |     
-271 |     const lastUserMsg = chatMessages.slice(0, lastAIIdx).findLast(m => m.sender === "user");
-272 |     if (!lastUserMsg) return;
+118 |     if (workspaceState === "active" && activeSessionId === null) {
+119 |       setWorkspaceState("home");
+120 |       setCurrentTab("chat");
+121 |       setUserQuery("");
+122 |     }
+123 |   }, [activeSessionId, workspaceState]);
+124 | 
+125 |   useEffect(() => {
+126 |     const init = async () => {
+127 |       await fetchSessions().catch(e => console.error("Failed to load sessions:", e));
+128 |       await fetchAvailableProviders().catch(e => console.error("Failed to load providers:", e));
+129 |       await loadPersistedKeys().catch(e => console.error("Failed to load API keys:", e));
+130 |       await loadPersistedState().catch(e => console.error("Failed to load state:", e));
+131 |       if (useWorkflowStore.getState().isOrchestrating) {
+132 |         useWorkflowStore.setState({
+133 |           isOrchestrating: false,
+134 |           isThinking: false,
+135 |           abortController: null
+136 |         });
+137 |       }
+138 |     };
+139 |     init();
+140 | 
+141 |     const handleUnload = () => {
+142 |       useWorkflowStore.getState().saveCurrentSession();
+143 |     };
+144 |     window.addEventListener("beforeunload", handleUnload);
+145 |     return () => {
+146 |       window.removeEventListener("beforeunload", handleUnload);
+147 |     };
+148 |   }, []);
+149 | 
+150 |   useEffect(() => {
+151 |     const handleResize = () => setIsSidebarExpanded(window.innerWidth >= 768);
+152 |     handleResize();
+153 |     window.addEventListener("resize", handleResize);
+154 |     return () => window.removeEventListener("resize", handleResize);
+155 |   }, []);
+156 | 
+157 |   // Reset EchoHouse intake when session changes
+158 |   useEffect(() => {
+159 |     if (isEchoHouseMode) {
+160 |       setEchoStep(1);
+161 |       setEchoSituation("");
+162 |       setEchoFocus("");
+163 |       setEchoCast([]);
+164 |       setEditingCastIdx(null);
+165 |     }
+166 |   }, [activeSessionId]);
+167 | 
+168 |   const fetchEchoCast = async (situationText: string, focusText: string) => {
+169 |     setIsLoadingCast(true);
+170 |     try {
+171 |       const activeProv = useWorkflowStore.getState().provider;
+172 |       const apiKey = useWorkflowStore.getState().apiKeys[activeProv] || useWorkflowStore.getState().apiKey || "";
+173 |       const resp = await fetch("/api/gemini/echohouse/init", {
+174 |         method: "POST",
+175 |         headers: { "Content-Type": "application/json" },
+176 |         body: JSON.stringify({
+177 |           problem_text: `${situationText}\n\nFocus: ${focusText}`,
+178 |           provider: activeProv,
+179 |           model: useWorkflowStore.getState().model,
+180 |           api_key: apiKey,
+181 |           api_keys: useWorkflowStore.getState().apiKeys,
+182 |           base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null
+183 |         })
+184 |       });
+185 |       if (resp.ok) {
+186 |         const castData = await resp.json();
+187 |         if (Array.isArray(castData)) {
+188 |           setEchoCast(castData);
+189 |         }
+190 |       }
+191 |     } catch (e) {
+192 |       console.error("Failed to fetch cast:", e);
+193 |     } finally {
+194 |       setIsLoadingCast(false);
+195 |     }
+196 |   };
+197 | 
+198 |   const beginEchoHouseSimulation = () => {
+199 |     const selfMember = echoCast.find(m => m.is_self || m.role === "self");
+200 |     const selfNode = {
+201 |       id: "self-node",
+202 |       type: "custom",
+203 |       position: { x: 300, y: 200 },
+204 |       data: {
+205 |         name: selfMember?.inferred_name || "You (Self)",
+206 |         tag: "SELF",
+207 |         icon: "bot",
+208 |         objective: echoSituation.length > 120 ? echoSituation.substring(0, 120) + "..." : echoSituation,
+209 |         systemPrompt: "You are the user themselves, experiencing this problem from the inside.",
+210 |         status: "IDLE" as const,
+211 |         enabled: true,
+212 |         isEchoHouseAgent: true,
+213 |         echohouseRole: "self",
+214 |         echohouseProblem: echoSituation,
+215 |         emotional_core: selfMember?.emotional_core || "",
+216 |         rules: [],
+217 |         dependencies: [],
+218 |         tools: [],
+219 |         toolPermissions: {},
+220 |         temp: 0.7,
+221 |         logic: 70,
+222 |         empathy: 50,
+223 |         priority: 5,
+224 |         toolLogs: [],
+225 |         personality: "",
+226 |         senderId: "self-node"
+227 |       }
+228 |     };
+229 |     const nodesList: any[] = [selfNode];
+230 |     echoCast.forEach((member: any, idx: number) => {
+231 |       if (member.is_self || member.role === "self") return;
+232 |       const angle = (idx * 2 * Math.PI) / Math.max(echoCast.length - 1, 1);
+233 |       const x = 300 + Math.cos(angle) * 250;
+234 |       const y = 200 + Math.sin(angle) * 200;
+235 |       nodesList.push({
+236 |         id: `echo-agent-${idx}-${Date.now()}`,
+237 |         type: "custom",
+238 |         position: { x: Math.max(50, x), y: Math.max(50, y) },
+239 |         data: {
+240 |           name: member.inferred_name,
+241 |           tag: member.role.toUpperCase().replace(/\s+/g, "_"),
+242 |           icon: "science",
+243 |           objective: `Provide perspective as ${member.inferred_name} (${member.role}).`,
+244 |           systemPrompt: `You are ${member.inferred_name}, whose role in the user's life is ${member.role}. From your perspective about their situation: ${member.inferred_problem}`,
+245 |           status: "IDLE" as const,
+246 |           enabled: true,
+247 |           isEchoHouseAgent: true,
+248 |           echohouseRole: member.role,
+249 |           echohouseProblem: member.inferred_problem,
+250 |           emotional_core: member.emotional_core || "",
+251 |           rules: [],
+252 |           dependencies: [],
+253 |           tools: [],
+254 |           toolPermissions: {},
+255 |           temp: 0.8,
+256 |           logic: 70,
+257 |           empathy: 50,
+258 |           priority: 5,
+259 |           toolLogs: [],
+260 |           personality: "",
+261 |           senderId: `echo-agent-${idx}-${Date.now()}`
+262 |         }
+263 |       });
+264 |     });
+265 |     setNodes(nodesList);
+266 |     setEdges([]);
+267 |     setWorkspaceState("active");
+268 |     setCurrentTab("arena");
+269 |   };
+270 | 
+271 |   const startOrchestration = async (promptText: string) => {
+272 |     if (!promptText.trim()) return;
 273 | 
-274 |     setChatMessages((prev) => prev.slice(0, lastAIIdx));
-275 |     startOrchestration(lastUserMsg.text);
-276 |   };
-277 | 
-278 |   const handleAddRule = () => {
-279 |     if (!newRuleText.trim() || !selectedNodeId) return;
-280 |     addRule(selectedNodeId, newRuleText.trim());
-281 |     setNewRuleText("");
-282 |   };
-283 | 
-284 |   const activeNodeDetail = nodes.find(n => n.id === selectedNodeId) as any;
-285 | 
-286 |   const ModeSelector = () => (
-287 |     <div className="flex items-center gap-1 bg-neutral-900/40 rounded-full p-0.5 border border-[#1f1f1f]">
-288 |       <button onClick={() => setExecutionMode("auto")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "auto" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Smart</button>
-289 |       <button onClick={() => setExecutionMode("custom")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "custom" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Custom</button>
-290 |     </div>
-291 |   );
-292 | 
-293 |   const handleFileAttach = () => {
-294 |     const input = document.createElement("input");
-295 |     input.type = "file";
-296 |     input.accept = ".txt,.md,.json,.csv,.py,.js,.ts,.tsx,.html,.css,.yaml,.yml,.xml,.ini,.cfg,.pdf,.jpg,.png";
-297 |     input.onchange = (e: any) => {
-298 |       const file = e.target.files?.[0];
-299 |       if (!file) return;
-300 |       const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-301 |       if (['.txt', '.md', '.json', '.csv', '.py', '.js', '.ts', '.tsx', '.html', '.css', '.yaml', '.yml', '.xml', '.ini', '.cfg'].includes(ext)) {
-302 |         const reader = new FileReader();
-303 |         reader.onload = (ev) => setUserQuery((prev) => prev + `\n[Attached: ${file.name}]\n${ev.target?.result as string}\n`);
-304 |         reader.readAsText(file);
-305 |       }
-306 |     };
-307 |     input.click();
-308 |   };
-309 | 
-310 |   return (
-311 |     <div className="flex h-screen w-full bg-black text-[#f5f5f5] overflow-hidden font-sans">
-312 |       <aside onClick={() => { if (!isSidebarExpanded) setIsSidebarExpanded(true); }} className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-30 select-none cursor-pointer ${isSidebarExpanded ? "w-64 cursor-default" : "w-[60px]"}`}>
-313 |         <div className="flex items-center gap-3 h-16 border-b border-[#1f1f1f] px-4 justify-between">
-314 |           {isSidebarExpanded ? (
-315 |             <div className="flex items-center gap-2.5">
-316 |               <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
-317 |               <h1 className="text-sm font-bold text-white tracking-tight leading-none">Solospace</h1>
-318 |             </div>
-319 |           ) : (
-320 |             <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center mx-auto"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
-321 |           )}
-322 |           {isSidebarExpanded && <button onClick={(e) => { e.stopPropagation(); setIsSidebarExpanded(false); }} className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>}
-323 |         </div>
-324 | 
-325 |         <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto custom-scrollbar">
-326 |           <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); useWorkflowStore.getState().abortController?.abort(); setWorkspaceState("home"); setUserQuery(""); useWorkflowStore.setState({ activeSessionId: null, nodes: [], edges: [], chatMessages: [], agentTalkLogs: [], executionState: "setup", statusMessage: "", isThinking: false, isOrchestrating: false, liveThoughts: "", pendingApproval: null, followUpSuggestions: [], abortController: null }); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
-327 |             <SquarePlus className="w-5 h-5 stroke-[1.8]" />
-328 |             {isSidebarExpanded && <span className="text-xs font-semibold">New Chat</span>}
-329 |           </button>
-330 | 
-331 |           <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsSecretOpen(true); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
-332 |             <Key className="w-5 h-5 stroke-[1.8]" />
-333 |             {isSidebarExpanded && <span className="text-xs font-semibold">API Keys</span>}
-334 |           </button>
-335 | 
-336 |           {/* Templates Section */}
-337 |           <div className="pt-2 select-none">
-338 |             {isSidebarExpanded ? (
-339 |               <>
-340 |                 <button
-341 |                   onClick={(e) => { e.stopPropagation(); setIsTemplatesExpanded(!isTemplatesExpanded); }}
-342 |                   className="w-full flex items-center justify-between px-3 py-1.5 text-neutral-600 hover:text-neutral-400 cursor-pointer"
-343 |                 >
-344 |                   <span className="text-[10px] font-bold uppercase tracking-widest font-mono">Templates</span>
-345 |                   <ChevronRight className={`w-3.5 h-3.5 transition-transform duration-200 ${isTemplatesExpanded ? "rotate-90" : ""}`} />
-346 |                 </button>
-347 |                 {isTemplatesExpanded && (
-348 |                   <button
-349 |                     onClick={(e) => {
-350 |                       e.stopPropagation();
-351 |                       createSession("EchoHouse Simulation", "echohouse");
-352 |                       setWorkspaceState("active");
-353 |                       setCurrentTab("chat");
-354 |                     }}
-355 |                     className="w-full flex items-center rounded-lg transition-all duration-150 py-2.5 px-3 gap-3 hover:bg-neutral-900 text-neutral-200 cursor-pointer"
-356 |                   >
-357 |                     <Globe className="w-5 h-5 stroke-[1.8]" />
-358 |                     <span className="text-xs font-semibold">EchoHouse</span>
-359 |                   </button>
-360 |                 )}
-361 |               </>
-362 |             ) : (
-363 |               <button
-364 |                 onClick={() => {
-365 |                   createSession("EchoHouse Simulation", "echohouse");
-366 |                   setWorkspaceState("active");
-367 |                   setCurrentTab("chat");
-368 |                 }}
-369 |                 className="w-full flex items-center justify-center rounded-lg transition-all duration-150 py-2.5 hover:bg-neutral-900 text-neutral-400 cursor-pointer"
-370 |                 title="EchoHouse Template"
-371 |               >
-372 |                 <Globe className="w-5 h-5 stroke-[1.8]" />
-373 |               </button>
-374 |             )}
-375 |           </div>
-376 | 
-377 |           {isSidebarExpanded && (
-378 |             <div className="pt-6 space-y-2 select-none">
-379 |               <div className="flex items-center gap-1.5 px-3"><History className="w-3.5 h-3.5 text-neutral-600" /><span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest font-mono">Recents</span></div>
-380 |               <div className="space-y-1 max-h-[220px] overflow-y-auto custom-scrollbar">
-381 |                 {Object.values(sessions).length === 0 ? <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span> : (
-382 |                   Object.values(sessions).reverse().map((s) => (
-383 |                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
-384 |                       <button disabled={isLoadingSession} onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsLoadingSession(true); try { await loadSessionFromDb(s.id); setWorkspaceState("active"); setCurrentTab("chat"); } catch (err) { console.error(err); } finally { setIsLoadingSession(false); } } }} className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${activeSessionId === s.id ? "text-white font-bold" : "text-neutral-500 hover:text-white"}`} title={s.prompt}>{s.title}</button>
-385 |                       <button onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); if (confirm(`Delete "${s.title}"?`)) await deleteSessionFromDb(s.id); } }} className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
-386 |                     </div>
-387 |                   ))
-388 |                 )}
-389 |               </div>
-390 |             </div>
-391 |           )}
-392 |         </nav>
-393 |       </aside>
+274 |     if (isEchoHouseMode) {
+275 |       const userMsgId = Date.now().toString();
+276 |       const userMsg: ChatMessage = {
+277 |         id: userMsgId,
+278 |         sender: "user",
+279 |         text: promptText,
+280 |         speakerName: "You (Self)",
+281 |         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+282 |       };
+283 |       setChatMessages((prev) => [...prev, userMsg]);
+284 |       setUserQuery("");
+285 |       setCurrentTab("arena");
+286 | 
+287 |       const selfNode = {
+288 |         id: "self-node",
+289 |         type: "custom",
+290 |         position: { x: 300, y: 200 },
+291 |         data: {
+292 |           name: "You (Self)",
+293 |           tag: "SELF",
+294 |           icon: "bot",
+295 |           objective: promptText.length > 120 ? promptText.substring(0, 120) + "..." : promptText,
+296 |           systemPrompt: "You are the user themselves, experiencing this problem from the inside.",
+297 |           status: "IDLE" as const,
+298 |           enabled: true,
+299 |           isEchoHouseAgent: true,
+300 |           echohouseRole: "self",
+301 |           echohouseProblem: promptText,
+302 |           rules: [],
+303 |           dependencies: [],
+304 |           tools: [],
+305 |           toolPermissions: {},
+306 |           temp: 0.7,
+307 |           logic: 70,
+308 |           empathy: 50,
+309 |           priority: 5,
+310 |           toolLogs: [],
+311 |           personality: "",
+312 |           senderId: "self-node"
+313 |         }
+314 |       };
+315 |       setNodes([selfNode]);
+316 |       setEdges([]);
+317 | 
+318 |       try {
+319 |         const activeProv = useWorkflowStore.getState().provider;
+320 |         const apiKey = useWorkflowStore.getState().apiKeys[activeProv] || useWorkflowStore.getState().apiKey || "";
+321 |         const resp = await fetch("/api/gemini/echohouse/init", {
+322 |           method: "POST",
+323 |           headers: { "Content-Type": "application/json" },
+324 |           body: JSON.stringify({
+325 |             problem_text: promptText,
+326 |             provider: activeProv,
+327 |             model: useWorkflowStore.getState().model,
+328 |             api_key: apiKey,
+329 |             api_keys: useWorkflowStore.getState().apiKeys,
+330 |             base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null
+331 |           })
+332 |         });
+333 |         if (resp.ok) {
+334 |           const suggestedCast = await resp.json();
+335 |           const nodesList = [selfNode];
+336 |           suggestedCast.forEach((member: any, idx: number) => {
+337 |             if (member.is_self || member.role === "self") return;
+338 |             
+339 |             const angle = (idx * 2 * Math.PI) / (suggestedCast.length - 1 || 1);
+340 |             const x = 300 + Math.cos(angle) * 250;
+341 |             const y = 200 + Math.sin(angle) * 200;
+342 |             
+343 |             nodesList.push({
+344 |               id: `echo-agent-${idx}-${Date.now()}`,
+345 |               type: "custom",
+346 |               position: { x: Math.max(50, x), y: Math.max(50, y) },
+347 |               data: {
+348 |                 name: member.inferred_name,
+349 |                 tag: member.role.toUpperCase().replace(/\s+/g, "_"),
+350 |                 icon: "science",
+351 |                 objective: `Provide perspective as ${member.inferred_name} (${member.role}).`,
+352 |                 systemPrompt: `You are ${member.inferred_name}, whose role in the user's life is ${member.role}. From your perspective about their situation: ${member.inferred_problem}`,
+353 |                 status: "IDLE" as const,
+354 |                 enabled: true,
+355 |                 isEchoHouseAgent: true,
+356 |                 echohouseRole: member.role,
+357 |                 echohouseProblem: member.inferred_problem,
+358 |                 rules: [],
+359 |                 dependencies: [],
+360 |                 tools: [],
+361 |                 toolPermissions: {},
+362 |                 temp: 0.8,
+363 |                 logic: 70,
+364 |                 empathy: 50,
+365 |                 priority: 5,
+366 |                 toolLogs: [],
+367 |                 personality: "",
+368 |                 senderId: `echo-agent-${idx}-${Date.now()}`
+369 |               }
+370 |             });
+371 |           });
+372 |           setNodes(nodesList);
+373 |         }
+374 |       } catch (e) {
+375 |         console.error("Failed to suggest cast:", e);
+376 |       }
+377 |       return;
+378 |     }
+379 | 
+380 |     setWorkspaceState("active");
+381 |     let sessionId = activeSessionId;
+382 |     if (!sessionId) sessionId = createSession(promptText, executionMode);
+383 |     setExecutionState("running");
+384 |     if (executionMode === "custom") {
+385 |       setCurrentTab("arena");
+386 |       triggerSteerOrchestration(promptText, false, "custom");
+387 |       // executionState will be set to "paused" by the store after the plan arrives
+388 |     } else {
+389 |       setCurrentTab("chat");
+390 |       triggerSteerOrchestration(promptText, true, "auto");
+391 |     }
+392 |     setUserQuery("");
+393 |   };
 394 | 
-395 |       <main onClick={() => { if (isSidebarExpanded && window.innerWidth < 768) setIsSidebarExpanded(false); }} className="flex-1 flex flex-col min-w-0 bg-[#000000] relative transition-all duration-300">
-396 |         <header className="flex justify-between items-center w-full px-6 h-16 border-b border-[#141414] shrink-0 z-10 bg-black/85 backdrop-blur-md">
-397 |           <div className="flex items-center gap-2">
-398 |             {isConnected && activeSessionId && (
-399 |               <span className="flex items-center gap-1.5 text-[9px] font-mono text-emerald-400 bg-emerald-950/30 border border-emerald-500/20 px-2 py-0.5 rounded-full">
-400 |                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> LIVE SYNC
-401 |               </span>
-402 |             )}
-403 |           </div>
-404 |           <div className="flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-[2px] rounded-full select-none">
-405 |             <button onClick={() => { if (workspaceState !== "home") setCurrentTab("chat"); }} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${currentTab === "chat" || workspaceState === "home" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>Chat</button>
-406 |             {workspaceState === "active" && (
-407 |               <button onClick={() => setCurrentTab("arena")} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${currentTab === "arena" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>
-408 |                 <GitFork className="w-3 h-3" /> Flow {nodes.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse ml-0.5" />}
-409 |               </button>
-410 |             )}
-411 |           </div>
-412 |           <div className="flex items-center gap-2 select-none">
-413 |             <button onClick={() => alert("Solospace AI OS")} className="text-neutral-400 hover:text-white p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer"><HelpCircle className="w-4 h-4 stroke-[1.8]" /></button>
-414 |           </div>
-415 |         </header>
-416 | 
-417 |         <div className="flex-1 relative overflow-hidden">
-418 |           {workspaceState === "home" && (
-419 |             <div className="absolute inset-0 flex flex-col justify-between overflow-y-auto custom-scrollbar">
-420 |               <div />
-421 |               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
-422 |                 <div className="text-center mb-10 space-y-2 select-none">
-423 |                   <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">
-424 |                     {isEchoHouseMode ? "What is your problem in life?" : "What's on your mind?"}
-425 |                   </h1>
-426 |                   <p className="text-sm text-neutral-400 font-sans">
-427 |                     {isEchoHouseMode ? "Describe your struggle below to initialize the simulation." : "Ask anything. Get a real, complete answer instantly."}
-428 |                   </p>
-429 |                 </div>
-430 |                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
-431 |                   <div className="flex items-center gap-3">
-432 |                     <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
-433 |                     <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder={isEchoHouseMode ? "What is your problem in life?" : "Describe your idea, problem, or question..."} className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
-434 |                     <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim()} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
-435 |                   </div>
-436 |                 </div>
-437 |                 <div className="flex items-center gap-3 mt-5 select-none">
-438 |                   <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">Mode:</span>
-439 |                   <button onClick={() => setExecutionMode("auto")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "auto" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sparkles className="w-3 h-3 stroke-[2]" /><span>Smart Auto</span></button>
-440 |                   <button onClick={() => setExecutionMode("custom")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "custom" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sliders className="w-3 h-3" /><span>Custom Agent</span></button>
-441 |                 </div>
-442 |               </div>
-443 |               <div />
-444 |             </div>
-445 |           )}
-446 | 
-447 |           {workspaceState === "active" && (
-448 |             <div className="absolute inset-0 flex">
-449 |               {currentTab === "chat" && (
-450 |                 <div className="flex-1 flex flex-col justify-between overflow-hidden bg-black">
-451 |                   <div ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
-452 |                     {isLoadingSession ? (
-453 |                       <div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" /></div>
-454 |                     ) : (
-455 |                       <div className="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto space-y-4 select-text">
-456 |                         {chatMessages.length === 0 ? (
-457 |                           <div className="flex flex-col items-center justify-center py-20 text-center space-y-2 select-none">
-458 |                             <h1 className="text-2xl font-bold text-white">
-459 |                               {isEchoHouseMode ? "What is your problem in life?" : "What's on your mind?"}
-460 |                             </h1>
-461 |                             <p className="text-xs text-neutral-500">
-462 |                               {isEchoHouseMode ? "Type your struggle below to initialize the simulation." : "Start a conversation to see AI response."}
-463 |                             </p>
-464 |                           </div>
-465 |                         ) : (
-466 |                           chatMessages.map((msg, msgIdx) => (
-467 |                             <motion.div key={msg.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={`flex w-full ${msg.sender === "user" ? "justify-end" : "justify-start"}`}>
-468 |                               {msg.sender === "user" ? (
-469 |                                 <div className="flex flex-col items-end space-y-1 max-w-[72%] group">
-470 |                                   {msg.speakerName && (
-471 |                                     <span className="text-[10px] font-mono text-neutral-500 mr-2">{msg.speakerName}</span>
-472 |                                   )}
-473 |                                   <div className="rounded-3xl px-5 py-3 bg-[#2f2f2f] text-neutral-100 text-sm leading-relaxed"><p className="whitespace-pre-wrap">{msg.text}</p></div>
-474 |                                   <div className="flex items-center gap-3 mt-1.5 text-neutral-500 select-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 mr-2">
-475 |                                     <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
-476 |                                       {copiedMsgId === msg.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-477 |                                       <span>{copiedMsgId === msg.id ? "Copied" : "Copy"}</span>
-478 |                                     </button>
-479 |                                     <button onClick={() => { setUserQuery(msg.text); textareaRef.current?.focus(); textareaRef.current?.scrollIntoView({ behavior: "smooth" }); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
-480 |                                       <Pencil className="w-3 h-3" />
-481 |                                       <span>Edit</span>
-482 |                                     </button>
-483 |                                   </div>
-484 |                                 </div>
-485 |                               ) : (
-486 |                                 <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
-487 |                                   {msg.speakerName === "insight" && (
-488 |                                     <div className="w-full flex items-center gap-4 my-6">
-489 |                                       <div className="h-px flex-1 bg-[#1f1f1f]" />
-490 |                                       <span className="text-[10px] font-mono text-neutral-500 tracking-wider uppercase">Simulation Analysis</span>
-491 |                                       <div className="h-px flex-1 bg-[#1f1f1f]" />
-492 |                                     </div>
-493 |                                   )}
-494 |                                   {msg.speakerName && msg.speakerName !== "insight" && (
-495 |                                     <span className="text-[10px] font-mono text-neutral-500 ml-1">{msg.speakerName}</span>
-496 |                                   )}
-497 |                                   <div className="w-full text-neutral-100 text-sm leading-relaxed px-1 py-2">
-498 |                                     {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
-499 |                                     {msg.text && (!isOrchestrating || msgIdx !== chatMessages.length - 1) && (
-500 |                                       <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
-501 |                                         <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
-502 |                                           {copiedMsgId === msg.id ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400 font-medium">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
-503 |                                         </button>
-504 |                                         {!isEchoHouseMode && msgIdx === chatMessages.length - 1 && !isOrchestrating && (
-505 |                                           <button onClick={handleRegenerate} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
-506 |                                             <RefreshCw className="w-3.5 h-3.5" />
-507 |                                             <span>Regenerate</span>
-508 |                                           </button>
-509 |                                         )}
-510 |                                       </div>
-511 |                                     )}
-512 |                                   </div>
-513 |                                   {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && nodes.length > 0 && (
-514 |                                     <div className="flex gap-3 mt-4 select-none">
-515 |                                       <button onClick={() => setCurrentTab("arena")} className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max">
-516 |                                         <GitFork className="w-3.5 h-3.5 text-cyan-400" /><span>See Agent Flow</span>
-517 |                                       </button>
-518 |                                       {!isEchoHouseMode && useWorkflowStore.getState().executionState === "paused" && (
-519 |                                         <button
-520 |                                           onClick={async () => {
-521 |                                             setExecutionState("running");
-522 |                                             await useWorkflowStore.getState().triggerCustomExecution();
-523 |                                           }}
-524 |                                           className="px-4 py-2 bg-white hover:bg-neutral-200 rounded-xl text-xs font-bold text-black transition-all flex items-center gap-1.5 cursor-pointer max-w-max"
-525 |                                         >
-526 |                                           Proceed
-527 |                                         </button>
-528 |                                       )}
-529 |                                     </div>
-530 |                                   )}
-531 |                                 </div>
-532 |                               )}
-533 |                             </motion.div>
-534 |                           ))
-535 |                         )}
-536 |                         <div ref={chatEndRef} />
-537 |                       </div>
-538 |                     )}
-539 |                   </div>
-540 |                   <div className="px-4 sm:px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
-541 |                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
-542 |                       <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
-543 |                       <textarea ref={textareaRef} rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery); } }} placeholder={isOrchestrating ? "Streaming..." : isEchoHouseMode ? "What is your problem in life?" : "Ask a follow-up..."} disabled={isOrchestrating} className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar" />
-544 |                       <div className="flex items-center gap-2 shrink-0">
-545 |                         <ModeSelector />
-546 |                         {isOrchestrating ? (
-547 |                           <button onClick={cancelOrchestration} className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all cursor-pointer"><Square className="w-3.5 h-3.5 text-white fill-white" /></button>
-548 |                         ) : (
-549 |                           <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim() || isThinking} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
-550 |                         )}
-551 |                       </div>
-552 |                     </div>
-553 |                   </div>
-554 |                 </div>
-555 |               )}
-556 |               {currentTab === "arena" && (
-557 |                 <div className="flex-1 relative overflow-hidden bg-[#000000] flex">
-558 |                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#0d0d0d]/90 border border-[#1f1f1f] rounded-full px-4 py-2 backdrop-blur-md shadow-xl pointer-events-auto">
-559 |                     <button onClick={() => setCurrentTab("chat")} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-mono"><ChevronLeft className="w-3.5 h-3.5" /> Back to Chat</button>
-560 |                   </div>
-561 |                   <FlowArena onProceed={() => setCurrentTab("chat")} />
-562 |                 </div>
-563 |               )}
-564 |             </div>
-565 |           )}
-566 |         </div>
-567 |       </main>
-568 | 
-569 |       {currentTab === "arena" && isConfigPanelOpen && activeNodeDetail && (
-570 |         <div className="fixed top-0 right-0 h-full w-80 bg-[#0c0c0c]/95 border-l border-[#1f1f1f] z-40 flex flex-col justify-between shadow-2xl transition-transform duration-300 right-panel select-none">
-571 |           <div className="p-5 border-b border-[#1f1f1f] flex justify-between items-center bg-[#0d0d0d]">
-572 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider">{activeNodeDetail.data.name}</h3>
-573 |             <button onClick={() => { setIsConfigPanelOpen(false); setSelectedNodeId(null); }} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
-574 |           </div>
-575 |           <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
-576 |             {activeNodeDetail.data.isEchoHouseAgent ? (
-577 |               <>
-578 |                 <div className="space-y-1.5">
-579 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label>
-580 |                   <input
-581 |                     type="text"
-582 |                     value={activeNodeDetail.data.name}
-583 |                     onChange={(e) => {
-584 |                       const nameVal = e.target.value;
-585 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
-586 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
-587 |                       updateNodeField(activeNodeDetail.id, {
-588 |                         name: nameVal,
-589 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
-590 |                         objective: nameVal === "You (Self)" || roleVal === "self"
-591 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
-592 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
-593 |                       });
-594 |                     }}
-595 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
-596 |                   />
-597 |                 </div>
-598 |                 <div className="space-y-1.5">
-599 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Role</label>
-600 |                   <input
-601 |                     type="text"
-602 |                     value={activeNodeDetail.data.echohouseRole}
-603 |                     disabled={activeNodeDetail.data.echohouseRole === "self"}
-604 |                     onChange={(e) => {
-605 |                       const nameVal = activeNodeDetail.data.name || "";
-606 |                       const roleVal = e.target.value;
-607 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
-608 |                       updateNodeField(activeNodeDetail.id, {
-609 |                         echohouseRole: roleVal,
-610 |                         tag: roleVal.toUpperCase().replace(/\s+/g, '_'),
-611 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
-612 |                         objective: `Provide perspective as ${nameVal} (${roleVal}).`
-613 |                       });
-614 |                     }}
-615 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none disabled:opacity-40"
-616 |                   />
-617 |                 </div>
-618 |                 <div className="space-y-1.5">
-619 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">
-620 |                     {activeNodeDetail.data.echohouseRole === "self" ? "Your problem in life" : "What do they think about your situation?"}
-621 |                   </label>
-622 |                   <textarea
-623 |                     value={activeNodeDetail.data.echohouseProblem}
-624 |                     onChange={(e) => {
-625 |                       const nameVal = activeNodeDetail.data.name || "";
-626 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
-627 |                       const probVal = e.target.value;
-628 |                       updateNodeField(activeNodeDetail.id, {
-629 |                         echohouseProblem: probVal,
-630 |                         systemPrompt: roleVal === "self"
-631 |                           ? "You are the user themselves, experiencing this problem from the inside."
-632 |                           : `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
-633 |                         objective: roleVal === "self"
-634 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
-635 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
-636 |                       });
-637 |                     }}
-638 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[100px] resize-none leading-relaxed"
-639 |                   />
-640 |                 </div>
-641 |               </>
-642 |             ) : (
-643 |               <>
-644 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label><input type="text" value={activeNodeDetail.data.name} onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none" /></div>
-645 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label><textarea value={activeNodeDetail.data.systemPrompt} onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed" /></div>
-646 |               </>
-647 |             )}
-648 |           </div>
-649 |         </div>
-650 |       )}
-651 | 
-652 |       <AnimatePresence>
-653 |         {isSecretOpen && <APIKeysModal isOpen={isSecretOpen} onClose={() => setIsSecretOpen(false)} />}
-654 |         
-655 |         {pendingApproval && (
-656 |           <div className="fixed bottom-6 right-6 w-96 bg-[#0d0d0d] border border-amber-500/50 shadow-[0_0_50px_rgba(245,158,11,0.15)] rounded-2xl p-5 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300 select-none">
-657 |             <div className="flex gap-4 items-start">
-658 |               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 shrink-0"><Sliders className="w-5 h-5 animate-pulse" /></div>
-659 |               <div className="flex-1 space-y-2">
-660 |                 <h4 className="text-xs font-bold text-white">&apos;{(nodes.find(n => n.id === pendingApproval.nodeId)?.data as any)?.name}&apos; wants to use <span className="text-amber-400 font-mono">[{pendingApproval.toolName}]</span></h4>
-661 |                 <p className="text-[10px] text-neutral-400 leading-normal">Action: <span className="text-white font-semibold">{pendingApproval.action}</span> — {pendingApproval.detail}</p>
-662 |                 <div className="pt-3 flex gap-2">
-663 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "approve", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Approve</button>
-664 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "deny", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="px-4 py-2 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Deny</button>
-665 |                 </div>
-666 |               </div>
-667 |             </div>
-668 |           </div>
-669 |         )}
-670 |       </AnimatePresence>
-671 |     </div>
-672 |   );
-673 | }
-674 |
+395 |   const handleRegenerate = () => {
+396 |     const lastAIIdx = chatMessages.findLastIndex(m => m.sender === "ai");
+397 |     if (lastAIIdx === -1) return;
+398 |     
+399 |     const lastUserMsg = chatMessages.slice(0, lastAIIdx).findLast(m => m.sender === "user");
+400 |     if (!lastUserMsg) return;
+401 | 
+402 |     setChatMessages((prev) => prev.slice(0, lastAIIdx));
+403 |     startOrchestration(lastUserMsg.text);
+404 |   };
+405 | 
+406 |   const handleAddRule = () => {
+407 |     if (!newRuleText.trim() || !selectedNodeId) return;
+408 |     addRule(selectedNodeId, newRuleText.trim());
+409 |     setNewRuleText("");
+410 |   };
+411 | 
+412 |   const activeNodeDetail = nodes.find(n => n.id === selectedNodeId) as any;
+413 | 
+414 |   const ModeSelector = () => (
+415 |     <div className="flex items-center gap-1 bg-neutral-900/40 rounded-full p-0.5 border border-[#1f1f1f]">
+416 |       <button onClick={() => setExecutionMode("auto")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "auto" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Smart</button>
+417 |       <button onClick={() => setExecutionMode("custom")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "custom" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Custom</button>
+418 |     </div>
+419 |   );
+420 | 
+421 |   const handleFileAttach = () => {
+422 |     const input = document.createElement("input");
+423 |     input.type = "file";
+424 |     input.accept = ".txt,.md,.json,.csv,.py,.js,.ts,.tsx,.html,.css,.yaml,.yml,.xml,.ini,.cfg,.pdf,.jpg,.png";
+425 |     input.onchange = (e: any) => {
+426 |       const file = e.target.files?.[0];
+427 |       if (!file) return;
+428 |       const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+429 |       if (['.txt', '.md', '.json', '.csv', '.py', '.js', '.ts', '.tsx', '.html', '.css', '.yaml', '.yml', '.xml', '.ini', '.cfg'].includes(ext)) {
+430 |         const reader = new FileReader();
+431 |         reader.onload = (ev) => setUserQuery((prev) => prev + `\n[Attached: ${file.name}]\n${ev.target?.result as string}\n`);
+432 |         reader.readAsText(file);
+433 |       }
+434 |     };
+435 |     input.click();
+436 |   };
+437 | 
+438 |   return (
+439 |     <div className="flex h-screen w-full bg-black text-[#f5f5f5] overflow-hidden font-sans">
+440 |       <aside onClick={() => { if (!isSidebarExpanded) setIsSidebarExpanded(true); }} className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-30 select-none cursor-pointer ${isSidebarExpanded ? "w-64 cursor-default" : "w-[60px]"}`}>
+441 |         <div className="flex items-center gap-3 h-16 border-b border-[#1f1f1f] px-4 justify-between">
+442 |           {isSidebarExpanded ? (
+443 |             <div className="flex items-center gap-2.5">
+444 |               <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
+445 |               <h1 className="text-sm font-bold text-white tracking-tight leading-none">Solospace</h1>
+446 |             </div>
+447 |           ) : (
+448 |             <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center mx-auto"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
+449 |           )}
+450 |           {isSidebarExpanded && <button onClick={(e) => { e.stopPropagation(); setIsSidebarExpanded(false); }} className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>}
+451 |         </div>
+452 | 
+453 |         <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto custom-scrollbar">
+454 |           <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); useWorkflowStore.getState().abortController?.abort(); setWorkspaceState("home"); setUserQuery(""); useWorkflowStore.setState({ activeSessionId: null, nodes: [], edges: [], chatMessages: [], agentTalkLogs: [], executionState: "setup", statusMessage: "", isThinking: false, isOrchestrating: false, liveThoughts: "", pendingApproval: null, followUpSuggestions: [], abortController: null }); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
+455 |             <SquarePlus className="w-5 h-5 stroke-[1.8]" />
+456 |             {isSidebarExpanded && <span className="text-xs font-semibold">New Chat</span>}
+457 |           </button>
+458 | 
+459 |           <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsSecretOpen(true); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
+460 |             <Key className="w-5 h-5 stroke-[1.8]" />
+461 |             {isSidebarExpanded && <span className="text-xs font-semibold">API Keys</span>}
+462 |           </button>
+463 | 
+464 |           {/* Templates Section */}
+465 |           <div className="pt-2 select-none">
+466 |             {isSidebarExpanded ? (
+467 |               <>
+468 |                 <button
+469 |                   onClick={(e) => { e.stopPropagation(); setIsTemplatesExpanded(!isTemplatesExpanded); }}
+470 |                   className="w-full flex items-center justify-between px-3 py-1.5 text-neutral-600 hover:text-neutral-400 cursor-pointer"
+471 |                 >
+472 |                   <span className="text-[10px] font-bold uppercase tracking-widest font-mono">Templates</span>
+473 |                   <ChevronRight className={`w-3.5 h-3.5 transition-transform duration-200 ${isTemplatesExpanded ? "rotate-90" : ""}`} />
+474 |                 </button>
+475 |                 {isTemplatesExpanded && (
+476 |                   <button
+477 |                     onClick={(e) => {
+478 |                       e.stopPropagation();
+479 |                       createSession("EchoHouse Simulation", "echohouse");
+480 |                       setWorkspaceState("active");
+481 |                       setCurrentTab("chat");
+482 |                     }}
+483 |                     className="w-full flex items-center rounded-lg transition-all duration-150 py-2.5 px-3 gap-3 hover:bg-neutral-900 text-neutral-200 cursor-pointer"
+484 |                   >
+485 |                     <Globe className="w-5 h-5 stroke-[1.8]" />
+486 |                     <span className="text-xs font-semibold">EchoHouse</span>
+487 |                   </button>
+488 |                 )}
+489 |               </>
+490 |             ) : (
+491 |               <button
+492 |                 onClick={() => {
+493 |                   createSession("EchoHouse Simulation", "echohouse");
+494 |                   setWorkspaceState("active");
+495 |                   setCurrentTab("chat");
+496 |                 }}
+497 |                 className="w-full flex items-center justify-center rounded-lg transition-all duration-150 py-2.5 hover:bg-neutral-900 text-neutral-400 cursor-pointer"
+498 |                 title="EchoHouse Template"
+499 |               >
+500 |                 <Globe className="w-5 h-5 stroke-[1.8]" />
+501 |               </button>
+502 |             )}
+503 |           </div>
+504 | 
+505 |           {isSidebarExpanded && (
+506 |             <div className="pt-6 space-y-2 select-none">
+507 |               <div className="flex items-center gap-1.5 px-3"><History className="w-3.5 h-3.5 text-neutral-600" /><span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest font-mono">Recents</span></div>
+508 |               <div className="space-y-1 max-h-[220px] overflow-y-auto custom-scrollbar">
+509 |                 {Object.values(sessions).length === 0 ? <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span> : (
+510 |                   Object.values(sessions).reverse().map((s) => (
+511 |                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
+512 |                       <button disabled={isLoadingSession} onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsLoadingSession(true); try { await loadSessionFromDb(s.id); setWorkspaceState("active"); setCurrentTab("chat"); } catch (err) { console.error(err); } finally { setIsLoadingSession(false); } } }} className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${activeSessionId === s.id ? "text-white font-bold" : "text-neutral-500 hover:text-white"}`} title={s.prompt}>{s.title}</button>
+513 |                       <button onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); if (confirm(`Delete "${s.title}"?`)) await deleteSessionFromDb(s.id); } }} className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+514 |                     </div>
+515 |                   ))
+516 |                 )}
+517 |               </div>
+518 |             </div>
+519 |           )}
+520 |         </nav>
+521 |       </aside>
+522 | 
+523 |       <main onClick={() => { if (isSidebarExpanded && window.innerWidth < 768) setIsSidebarExpanded(false); }} className="flex-1 flex flex-col min-w-0 bg-[#000000] relative transition-all duration-300">
+524 |         <header className="flex justify-between items-center w-full px-6 h-16 border-b border-[#141414] shrink-0 z-10 bg-black/85 backdrop-blur-md">
+525 |           <div className="flex items-center gap-2">
+526 |             {isConnected && activeSessionId && (
+527 |               <span className="flex items-center gap-1.5 text-[9px] font-mono text-emerald-400 bg-emerald-950/30 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+528 |                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> LIVE SYNC
+529 |               </span>
+530 |             )}
+531 |           </div>
+532 |           <div className="flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-[2px] rounded-full select-none">
+533 |             <button onClick={() => { if (workspaceState !== "home") setCurrentTab("chat"); }} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${currentTab === "chat" || workspaceState === "home" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>Chat</button>
+534 |             {workspaceState === "active" && (
+535 |               <button onClick={() => setCurrentTab("arena")} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${currentTab === "arena" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>
+536 |                 <GitFork className="w-3 h-3" /> Flow {nodes.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse ml-0.5" />}
+537 |               </button>
+538 |             )}
+539 |           </div>
+540 |           <div className="flex items-center gap-2 select-none">
+541 |             <button onClick={() => alert("Solospace AI OS")} className="text-neutral-400 hover:text-white p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer"><HelpCircle className="w-4 h-4 stroke-[1.8]" /></button>
+542 |           </div>
+543 |         </header>
+544 | 
+545 |         <div className="flex-1 relative overflow-hidden">
+546 |           {workspaceState === "home" && !isEchoHouseMode && (
+547 |             <div className="absolute inset-0 flex flex-col justify-between overflow-y-auto custom-scrollbar">
+548 |               <div />
+549 |               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
+550 |                 <div className="text-center mb-10 space-y-2 select-none">
+551 |                   <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">What&apos;s on your mind?</h1>
+552 |                   <p className="text-sm text-neutral-400 font-sans">Ask anything. Get a real, complete answer instantly.</p>
+553 |                 </div>
+554 |                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
+555 |                   <div className="flex items-center gap-3">
+556 |                     <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
+557 |                     <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder="Describe your idea, problem, or question..." className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
+558 |                     <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim()} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
+559 |                   </div>
+560 |                 </div>
+561 |                 <div className="flex items-center gap-3 mt-5 select-none">
+562 |                   <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">Mode:</span>
+563 |                   <button onClick={() => setExecutionMode("auto")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "auto" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sparkles className="w-3 h-3 stroke-[2]" /><span>Smart Auto</span></button>
+564 |                   <button onClick={() => setExecutionMode("custom")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "custom" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sliders className="w-3 h-3" /><span>Custom Agent</span></button>
+565 |                 </div>
+566 |               </div>
+567 |               <div />
+568 |             </div>
+569 |           )}
+570 | 
+571 |           {workspaceState === "home" && isEchoHouseMode && (
+572 |             <div className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto custom-scrollbar px-6 py-12">
+573 |               <div className="w-full max-w-xl space-y-8">
+574 |                 {/* Step indicator */}
+575 |                 <div className="flex items-center gap-2 select-none">
+576 |                   {[1, 2, 3].map((s) => (
+577 |                     <div key={s} className="flex items-center gap-2">
+578 |                       <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-mono font-bold transition-all ${echoStep >= s ? 'bg-white text-black' : 'bg-neutral-800 text-neutral-500'}`}>{s}</div>
+579 |                       {s < 3 && <div className={`w-8 h-px transition-all ${echoStep > s ? 'bg-white' : 'bg-neutral-800'}`} />}
+580 |                     </div>
+581 |                   ))}
+582 |                   <span className="text-[10px] font-mono text-neutral-500 ml-2 uppercase tracking-wider">
+583 |                     {echoStep === 1 ? 'Situation' : echoStep === 2 ? 'Focus' : 'Cast Review'}
+584 |                   </span>
+585 |                 </div>
+586 | 
+587 |                 {/* Step 1 — Situation */}
+588 |                 {echoStep === 1 && (
+589 |                   <div className="space-y-4">
+590 |                     <div className="space-y-1">
+591 |                       <h1 className="text-2xl font-bold text-white tracking-tight">Describe the situation you are navigating.</h1>
+592 |                       <p className="text-xs text-neutral-500 font-sans">Write freely. This is private. The more specific, the more useful the simulation.</p>
+593 |                     </div>
+594 |                     <textarea
+595 |                       rows={6}
+596 |                       value={echoSituation}
+597 |                       onChange={(e) => setEchoSituation(e.target.value)}
+598 |                       placeholder="My manager keeps dismissing my ideas in meetings. Last week they took credit for a suggestion I made and..."
+599 |                       className="w-full bg-neutral-950 border border-[#1f1f1f] rounded-2xl p-4 text-sm text-neutral-200 outline-none placeholder:text-neutral-700 focus:border-neutral-600 resize-none leading-relaxed transition-colors custom-scrollbar"
+600 |                     />
+601 |                     <button
+602 |                       onClick={() => { if (echoSituation.trim()) setEchoStep(2); }}
+603 |                       disabled={!echoSituation.trim()}
+604 |                       className="w-full py-3 bg-white text-black font-semibold text-sm rounded-2xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
+605 |                     >
+606 |                       Continue
+607 |                     </button>
+608 |                   </div>
+609 |                 )}
+610 | 
+611 |                 {/* Step 2 — Focus */}
+612 |                 {echoStep === 2 && (
+613 |                   <div className="space-y-4">
+614 |                     <div className="space-y-1">
+615 |                       <h1 className="text-2xl font-bold text-white tracking-tight">What do you want from this simulation?</h1>
+616 |                       <p className="text-xs text-neutral-500 font-sans">Select the focus that best fits your goal.</p>
+617 |                     </div>
+618 |                     <div className="space-y-2">
+619 |                       {[
+620 |                         "Understand why this keeps happening",
+621 |                         "Prepare for a difficult conversation",
+622 |                         "Process feelings about a past event"
+623 |                       ].map((option) => (
+624 |                         <button
+625 |                           key={option}
+626 |                           onClick={() => setEchoFocus(option)}
+627 |                           className={`w-full text-left px-4 py-3 rounded-xl border text-sm transition-all cursor-pointer ${echoFocus === option ? 'border-white bg-white/[0.06] text-white font-semibold' : 'border-[#1f1f1f] text-neutral-400 hover:border-neutral-600 hover:text-white'}`}
+628 |                         >
+629 |                           {option}
+630 |                         </button>
+631 |                       ))}
+632 |                     </div>
+633 |                     <div className="flex gap-2">
+634 |                       <button onClick={() => setEchoStep(1)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
+635 |                       <button
+636 |                         onClick={async () => {
+637 |                           if (echoFocus.trim()) {
+638 |                             setEchoStep(3);
+639 |                             await fetchEchoCast(echoSituation, echoFocus);
+640 |                           }
+641 |                         }}
+642 |                         disabled={!echoFocus.trim()}
+643 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
+644 |                       >
+645 |                         {isLoadingCast ? "Inferring cast..." : "Next"}
+646 |                       </button>
+647 |                     </div>
+648 |                   </div>
+649 |                 )}
+650 | 
+651 |                 {/* Step 3 — Cast Review */}
+652 |                 {echoStep === 3 && (
+653 |                   <div className="space-y-4">
+654 |                     <div className="space-y-1">
+655 |                       <h1 className="text-2xl font-bold text-white tracking-tight">Review the cast.</h1>
+656 |                       <p className="text-xs text-neutral-500 font-sans">These are the people who will participate in the simulation. Edit, remove, or add as needed.</p>
+657 |                     </div>
+658 |                     {isLoadingCast ? (
+659 |                       <div className="flex items-center justify-center py-12">
+660 |                         <div className="w-5 h-5 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
+661 |                         <span className="text-xs text-neutral-500 ml-3 font-mono">Inferring cast...</span>
+662 |                       </div>
+663 |                     ) : (
+664 |                       <div className="space-y-2">
+665 |                         {echoCast.map((member, idx) => (
+666 |                           <div key={idx} className="bg-neutral-950 border border-[#1f1f1f] rounded-xl p-3 space-y-2">
+667 |                             {editingCastIdx === idx ? (
+668 |                               <div className="space-y-2">
+669 |                                 <input
+670 |                                   type="text"
+671 |                                   value={member.inferred_name}
+672 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_name: e.target.value } : m))}
+673 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
+674 |                                   placeholder="Name"
+675 |                                 />
+676 |                                 <input
+677 |                                   type="text"
+678 |                                   value={member.role}
+679 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, role: e.target.value } : m))}
+680 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
+681 |                                   placeholder="Role"
+682 |                                 />
+683 |                                 <textarea
+684 |                                   value={member.inferred_problem}
+685 |                                   rows={2}
+686 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_problem: e.target.value } : m))}
+687 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2.5 text-xs text-white outline-none focus:border-neutral-500 resize-none"
+688 |                                   placeholder="Their perspective..."
+689 |                                 />
+690 |                                 <button onClick={() => setEditingCastIdx(null)} className="text-[10px] font-mono text-neutral-400 hover:text-white cursor-pointer">Done</button>
+691 |                               </div>
+692 |                             ) : (
+693 |                               <div className="flex items-start justify-between gap-2">
+694 |                                 <div className="min-w-0 flex-1">
+695 |                                   <div className="flex items-center gap-2">
+696 |                                     <span className="text-xs font-semibold text-white">{member.inferred_name}</span>
+697 |                                     <span className="text-[9px] font-mono text-neutral-500 uppercase tracking-wider">{member.role}</span>
+698 |                                   </div>
+699 |                                   <p className="text-[11px] text-neutral-500 leading-relaxed mt-0.5 line-clamp-2">{member.inferred_problem}</p>
+700 |                                 </div>
+701 |                                 {!member.is_self && (
+702 |                                   <div className="flex gap-1 shrink-0">
+703 |                                     <button onClick={() => setEditingCastIdx(idx)} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><Pencil className="w-3 h-3" /></button>
+704 |                                     <button onClick={() => setEchoCast(prev => prev.filter((_, i) => i !== idx))} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><X className="w-3 h-3" /></button>
+705 |                                   </div>
+706 |                                 )}
+707 |                               </div>
+708 |                             )}
+709 |                           </div>
+710 |                         ))}
+711 |                         <button
+712 |                           onClick={() => setEchoCast(prev => [...prev, { inferred_name: "New Person", role: "acquaintance", inferred_problem: "Enter their perspective...", emotional_core: "", is_self: false }])}
+713 |                           className="w-full py-2.5 border border-dashed border-[#1f1f1f] rounded-xl text-xs text-neutral-500 hover:text-white hover:border-neutral-600 transition-all cursor-pointer"
+714 |                         >
+715 |                           Add Person
+716 |                         </button>
+717 |                       </div>
+718 |                     )}
+719 |                     <div className="flex gap-2">
+720 |                       <button onClick={() => setEchoStep(2)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
+721 |                       <button
+722 |                         onClick={beginEchoHouseSimulation}
+723 |                         disabled={isLoadingCast || echoCast.filter(m => !m.is_self).length === 0}
+724 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
+725 |                       >
+726 |                         Begin Simulation
+727 |                       </button>
+728 |                     </div>
+729 |                   </div>
+730 |                 )}
+731 |               </div>
+732 |             </div>
+733 |           )}
+734 | 
+735 |           {workspaceState === "active" && (
+736 |             <div className="absolute inset-0 flex">
+737 |               {currentTab === "chat" && (
+738 |                 <div className="flex-1 flex flex-col justify-between overflow-hidden bg-black">
+739 |                   <div ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
+740 |                     {isLoadingSession ? (
+741 |                       <div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" /></div>
+742 |                     ) : (
+743 |                       <div className="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto space-y-4 select-text">
+744 |                         {chatMessages.length === 0 ? (
+745 |                           <div className="flex flex-col items-center justify-center py-20 text-center space-y-2 select-none">
+746 |                             <h1 className="text-2xl font-bold text-white">
+747 |                               {isEchoHouseMode ? "What is your problem in life?" : "What's on your mind?"}
+748 |                             </h1>
+749 |                             <p className="text-xs text-neutral-500">
+750 |                               {isEchoHouseMode ? "Type your struggle below to initialize the simulation." : "Start a conversation to see AI response."}
+751 |                             </p>
+752 |                           </div>
+753 |                         ) : (
+754 |                           chatMessages.map((msg, msgIdx) => (
+755 |                             <motion.div key={msg.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={`flex w-full ${msg.sender === "divider" ? "justify-center" : msg.sender === "user" ? "justify-end" : "justify-start"}`}>
+756 |                               {msg.sender === "divider" ? (
+757 |                                 <div className="w-full flex items-center gap-4 my-4 select-none">
+758 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
+759 |                                   <span className="text-[10px] font-mono text-neutral-500 tracking-wider uppercase">{msg.text}</span>
+760 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
+761 |                                 </div>
+762 |                               ) : msg.sender === "user" ? (
+763 |                                 <div className="flex flex-col items-end space-y-1 max-w-[72%] group">
+764 |                                   {msg.speakerName && (
+765 |                                     <span className="text-[10px] font-mono text-neutral-500 mr-2">{msg.speakerName}</span>
+766 |                                   )}
+767 |                                   <div className={`rounded-3xl px-5 py-3 text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'bg-neutral-800' : 'bg-[#2f2f2f]'}`}><p className="whitespace-pre-wrap">{msg.text}</p></div>
+768 |                                   <div className="flex items-center gap-3 mt-1.5 text-neutral-500 select-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 mr-2">
+769 |                                     <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
+770 |                                       {copiedMsgId === msg.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+771 |                                       <span>{copiedMsgId === msg.id ? "Copied" : "Copy"}</span>
+772 |                                     </button>
+773 |                                     <button onClick={() => { setUserQuery(msg.text); textareaRef.current?.focus(); textareaRef.current?.scrollIntoView({ behavior: "smooth" }); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
+774 |                                       <Pencil className="w-3 h-3" />
+775 |                                       <span>Edit</span>
+776 |                                     </button>
+777 |                                   </div>
+778 |                                 </div>
+779 |                               ) : (
+780 |                                 <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
+781 |                                   {msg.speakerName && msg.speakerName !== "insight" && msg.speakerName !== "takeaways" && (
+782 |                                     <span className="text-[10px] font-mono text-neutral-500 ml-1">{msg.speakerName}</span>
+783 |                                   )}
+784 |                                   {msg.speakerName === "takeaways" && msg.takeaways ? (
+785 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 space-y-3 mt-2">
+786 |                                       <span className="text-[10px] font-mono text-neutral-400 uppercase tracking-wider font-bold block">What you can try</span>
+787 |                                       <ol className="space-y-2">
+788 |                                         {msg.takeaways.map((item, ti) => (
+789 |                                           <li key={ti} className="flex gap-2.5 text-xs text-neutral-300 leading-relaxed">
+790 |                                             <span className="font-mono text-neutral-600 shrink-0">{ti + 1}.</span>
+791 |                                             <span>{item}</span>
+792 |                                           </li>
+793 |                                         ))}
+794 |                                       </ol>
+795 |                                     </div>
+796 |                                   ) : msg.speakerName === "insight" ? (
+797 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+798 |                                       {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
+799 |                                     </div>
+800 |                                   ) : (
+801 |                                     <div className={`w-full text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'rounded-2xl px-4 py-3 bg-neutral-900' : 'px-1 py-2'}`}>
+802 |                                       {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
+803 |                                       {msg.text && (!isOrchestrating || msgIdx !== chatMessages.length - 1) && (
+804 |                                         <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
+805 |                                           <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
+806 |                                             {copiedMsgId === msg.id ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400 font-medium">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
+807 |                                           </button>
+808 |                                           {!isEchoHouseMode && msgIdx === chatMessages.length - 1 && !isOrchestrating && (
+809 |                                             <button onClick={handleRegenerate} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
+810 |                                               <RefreshCw className="w-3.5 h-3.5" />
+811 |                                               <span>Regenerate</span>
+812 |                                             </button>
+813 |                                           )}
+814 |                                         </div>
+815 |                                       )}
+816 |                                     </div>
+817 |                                   )}
+818 |                                   {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && nodes.length > 0 && (
+819 |                                     <div className="flex gap-3 mt-4 select-none">
+820 |                                       <button onClick={() => setCurrentTab("arena")} className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max">
+821 |                                         <GitFork className="w-3.5 h-3.5 text-cyan-400" /><span>See Agent Flow</span>
+822 |                                       </button>
+823 |                                       {!isEchoHouseMode && useWorkflowStore.getState().executionState === "paused" && (
+824 |                                         <button
+825 |                                           onClick={async () => {
+826 |                                             setExecutionState("running");
+827 |                                             await useWorkflowStore.getState().triggerCustomExecution();
+828 |                                           }}
+829 |                                           className="px-4 py-2 bg-white hover:bg-neutral-200 rounded-xl text-xs font-bold text-black transition-all flex items-center gap-1.5 cursor-pointer max-w-max"
+830 |                                         >
+831 |                                           Proceed
+832 |                                         </button>
+833 |                                       )}
+834 |                                     </div>
+835 |                                   )}
+836 |                                 </div>
+837 |                               )}
+838 |                             </motion.div>
+839 |                           ))
+840 |                         )}
+841 |                         <div ref={chatEndRef} />
+842 |                       </div>
+843 |                     )}
+844 |                   </div>
+845 |                   <div className="px-4 sm:px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
+846 |                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
+847 |                       <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
+848 |                       <textarea ref={textareaRef} rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery); } }} placeholder={isOrchestrating ? "Streaming..." : isEchoHouseMode ? "What is your problem in life?" : "Ask a follow-up..."} disabled={isOrchestrating} className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar" />
+849 |                       <div className="flex items-center gap-2 shrink-0">
+850 |                         <ModeSelector />
+851 |                         {isOrchestrating ? (
+852 |                           <button onClick={cancelOrchestration} className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all cursor-pointer"><Square className="w-3.5 h-3.5 text-white fill-white" /></button>
+853 |                         ) : (
+854 |                           <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim() || isThinking} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
+855 |                         )}
+856 |                       </div>
+857 |                     </div>
+858 |                   </div>
+859 |                 </div>
+860 |               )}
+861 |               {currentTab === "arena" && (
+862 |                 <div className="flex-1 relative overflow-hidden bg-[#000000] flex">
+863 |                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#0d0d0d]/90 border border-[#1f1f1f] rounded-full px-4 py-2 backdrop-blur-md shadow-xl pointer-events-auto">
+864 |                     <button onClick={() => setCurrentTab("chat")} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-mono"><ChevronLeft className="w-3.5 h-3.5" /> Back to Chat</button>
+865 |                   </div>
+866 |                   <FlowArena onProceed={() => setCurrentTab("chat")} />
+867 |                 </div>
+868 |               )}
+869 |             </div>
+870 |           )}
+871 |         </div>
+872 |       </main>
+873 | 
+874 |       {currentTab === "arena" && isConfigPanelOpen && activeNodeDetail && (
+875 |         <div className="fixed top-0 right-0 h-full w-80 bg-[#0c0c0c]/95 border-l border-[#1f1f1f] z-40 flex flex-col justify-between shadow-2xl transition-transform duration-300 right-panel select-none">
+876 |           <div className="p-5 border-b border-[#1f1f1f] flex justify-between items-center bg-[#0d0d0d]">
+877 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider">{activeNodeDetail.data.name}</h3>
+878 |             <button onClick={() => { setIsConfigPanelOpen(false); setSelectedNodeId(null); }} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
+879 |           </div>
+880 |           <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
+881 |             {activeNodeDetail.data.isEchoHouseAgent ? (
+882 |               <>
+883 |                 <div className="space-y-1.5">
+884 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label>
+885 |                   <input
+886 |                     type="text"
+887 |                     value={activeNodeDetail.data.name}
+888 |                     onChange={(e) => {
+889 |                       const nameVal = e.target.value;
+890 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
+891 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
+892 |                       updateNodeField(activeNodeDetail.id, {
+893 |                         name: nameVal,
+894 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+895 |                         objective: nameVal === "You (Self)" || roleVal === "self"
+896 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
+897 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
+898 |                       });
+899 |                     }}
+900 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
+901 |                   />
+902 |                 </div>
+903 |                 <div className="space-y-1.5">
+904 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Role</label>
+905 |                   <input
+906 |                     type="text"
+907 |                     value={activeNodeDetail.data.echohouseRole}
+908 |                     disabled={activeNodeDetail.data.echohouseRole === "self"}
+909 |                     onChange={(e) => {
+910 |                       const nameVal = activeNodeDetail.data.name || "";
+911 |                       const roleVal = e.target.value;
+912 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
+913 |                       updateNodeField(activeNodeDetail.id, {
+914 |                         echohouseRole: roleVal,
+915 |                         tag: roleVal.toUpperCase().replace(/\s+/g, '_'),
+916 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+917 |                         objective: `Provide perspective as ${nameVal} (${roleVal}).`
+918 |                       });
+919 |                     }}
+920 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none disabled:opacity-40"
+921 |                   />
+922 |                 </div>
+923 |                 <div className="space-y-1.5">
+924 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">
+925 |                     {activeNodeDetail.data.echohouseRole === "self" ? "Your problem in life" : "What do they think about your situation?"}
+926 |                   </label>
+927 |                   <textarea
+928 |                     value={activeNodeDetail.data.echohouseProblem}
+929 |                     onChange={(e) => {
+930 |                       const nameVal = activeNodeDetail.data.name || "";
+931 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
+932 |                       const probVal = e.target.value;
+933 |                       updateNodeField(activeNodeDetail.id, {
+934 |                         echohouseProblem: probVal,
+935 |                         systemPrompt: roleVal === "self"
+936 |                           ? "You are the user themselves, experiencing this problem from the inside."
+937 |                           : `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+938 |                         objective: roleVal === "self"
+939 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
+940 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
+941 |                       });
+942 |                     }}
+943 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[100px] resize-none leading-relaxed"
+944 |                   />
+945 |                 </div>
+946 |               </>
+947 |             ) : (
+948 |               <>
+949 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label><input type="text" value={activeNodeDetail.data.name} onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none" /></div>
+950 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label><textarea value={activeNodeDetail.data.systemPrompt} onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed" /></div>
+951 |               </>
+952 |             )}
+953 |           </div>
+954 |         </div>
+955 |       )}
+956 | 
+957 |       <AnimatePresence>
+958 |         {isSecretOpen && <APIKeysModal isOpen={isSecretOpen} onClose={() => setIsSecretOpen(false)} />}
+959 |         
+960 |         {pendingApproval && (
+961 |           <div className="fixed bottom-6 right-6 w-96 bg-[#0d0d0d] border border-amber-500/50 shadow-[0_0_50px_rgba(245,158,11,0.15)] rounded-2xl p-5 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300 select-none">
+962 |             <div className="flex gap-4 items-start">
+963 |               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 shrink-0"><Sliders className="w-5 h-5 animate-pulse" /></div>
+964 |               <div className="flex-1 space-y-2">
+965 |                 <h4 className="text-xs font-bold text-white">&apos;{(nodes.find(n => n.id === pendingApproval.nodeId)?.data as any)?.name}&apos; wants to use <span className="text-amber-400 font-mono">[{pendingApproval.toolName}]</span></h4>
+966 |                 <p className="text-[10px] text-neutral-400 leading-normal">Action: <span className="text-white font-semibold">{pendingApproval.action}</span> — {pendingApproval.detail}</p>
+967 |                 <div className="pt-3 flex gap-2">
+968 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "approve", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Approve</button>
+969 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "deny", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="px-4 py-2 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Deny</button>
+970 |                 </div>
+971 |               </div>
+972 |             </div>
+973 |           </div>
+974 |         )}
+975 |       </AnimatePresence>
+976 |     </div>
+977 |   );
+978 | }
+979 |
 ```
 
 ### File: `Frontend/components/edges/CustomEdge.tsx`
@@ -6357,7 +6789,7 @@ SoloSpace/
 
 ### File: `Frontend/components/nodes/CustomNode.tsx`
 
-> 304 lines | 13.4 KB
+> 316 lines | 13.9 KB
 
 ```tsx
   1 | 'use client';
@@ -6501,169 +6933,181 @@ SoloSpace/
 139 |         'backdrop-blur-sm',
 140 |         // Shadow
 141 |         'shadow-[0_4px_32px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.04)]',
-142 |         statusRing,
-143 |       ].join(' ')}
-144 |     >
-145 |       {/* ─── Top status bar ─── */}
-146 |       <div className={`h-1 w-full rounded-t-2xl transition-all duration-300 ${
-147 |         isActive ? 'bg-cyan-500 shadow-[0_1px_8px_rgba(6,182,212,0.6)] animate-pulse' :
-148 |         isError ? 'bg-rose-500 shadow-[0_1px_8px_rgba(244,63,94,0.6)]' :
-149 |         'bg-neutral-800'
-150 |       }`} />
-151 | 
-152 |       {/* Ambient glow — active state */}
-153 |       {isActive && (
-154 |         <div className="absolute inset-0 rounded-2xl pointer-events-none bg-cyan-500/[0.04] animate-pulse" />
-155 |       )}
-156 | 
-157 |       {/* Top status badge */}
-158 |       <StatusBadge status={data.status ?? ''} enabled={isEnabled} />
-159 | 
-160 |       {/* Floating action bar */}
-161 |       {hovered && isEnabled && (
-162 |         <div className="absolute -top-9 left-1/2 -translate-x-1/2 z-30 flex items-center gap-0.5 px-1 py-0.5 rounded-xl bg-neutral-900/95 border border-white/[0.07] shadow-xl backdrop-blur-sm animate-in fade-in zoom-in-95 duration-100">
-163 |           <button
-164 |             id={`node-edit-${id}`}
-165 |             onClick={(e) => { e.stopPropagation(); setSelectedId(id); }}
-166 |             className="p-1.5 rounded-lg hover:bg-white/[0.06] text-neutral-400 hover:text-white transition-colors"
-167 |             title="Configure"
-168 |           >
-169 |             <Pencil className="w-3 h-3" />
-170 |           </button>
-171 |           <div className="w-px h-3 bg-white/10" />
-172 |           <button
-173 |             id={`node-delete-${id}`}
-174 |             onClick={(e) => { e.stopPropagation(); deleteNode(id); }}
-175 |             className="p-1.5 rounded-lg hover:bg-rose-500/10 text-neutral-400 hover:text-rose-400 transition-colors"
-176 |             title="Delete agent"
-177 |           >
-178 |             <Trash2 className="w-3 h-3" />
-179 |           </button>
-180 |         </div>
-181 |       )}
-182 | 
-183 |       {/* ── Left Handle (IN) ────────────────────────────────── */}
-184 |       {!data.isEchoHouseAgent && (
-185 |         <div className="absolute group/in" style={{ top: 22, left: -8, zIndex: 10 }}>
-186 |           <Handle
-187 |             type="target"
-188 |             position={Position.Left}
-189 |             id="input"
-190 |             isConnectable
-191 |             className="!w-3 !h-3 !bg-neutral-950 !border-2 !border-rose-500 !rounded-full !shadow-[0_0_8px_rgba(244,63,94,0.5)] hover:!scale-125 !transition-transform"
-192 |           />
-193 |           <span className="pointer-events-none select-none absolute left-5 top-1/2 -translate-y-1/2 text-[7px] font-mono font-bold text-rose-400 bg-rose-950/90 border border-rose-500/30 px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover/in:opacity-100 transition-opacity duration-100">
-194 |             IN
-195 |           </span>
-196 |         </div>
-197 |       )}
-198 | 
-199 |       {/* ── Right Handle (OUT) ──────────────────────────────── */}
-200 |       {!data.isEchoHouseAgent && (
-201 |         <div className="absolute group/out" style={{ top: 22, right: -8, zIndex: 10 }}>
-202 |           <span className="pointer-events-none select-none absolute right-5 top-1/2 -translate-y-1/2 text-[7px] font-mono font-bold text-emerald-400 bg-emerald-950/90 border border-emerald-500/30 px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover/out:opacity-100 transition-opacity duration-100">
-203 |             OUT
-204 |           </span>
-205 |           <Handle
-206 |             type="source"
-207 |             position={Position.Right}
-208 |             id="output"
-209 |             isConnectable
-210 |             className="!w-3 !h-3 !bg-neutral-950 !border-2 !border-emerald-500 !rounded-full !shadow-[0_0_8px_rgba(16,185,129,0.5)] hover:!scale-125 !transition-transform"
-211 |           />
-212 |         </div>
-213 |       )}
-214 | 
-215 |       {/* ── Node Body ──────────────────────────────────────── */}
-216 |       <div className="p-4 pt-3.5">
-217 |         {/* Header row */}
-218 |         <div className="flex items-center gap-3">
-219 |           {/* Icon */}
-220 |           <div className="relative shrink-0">
-221 |             <div className={[
-222 |               'w-8 h-8 rounded-lg flex items-center justify-center',
-223 |               'bg-gradient-to-br from-neutral-800 to-neutral-900',
-224 |               'border border-white/[0.07]',
-225 |               'shadow-inner',
-226 |               isActive ? 'text-cyan-400' : isError ? 'text-rose-400' : 'text-neutral-300',
-227 |             ].join(' ')}>
-228 |               <AgentIcon name={data.icon ?? 'bot'} className="w-4 h-4" />
-229 |             </div>
-230 |             {/* Active spinner overlay */}
-231 |             {isActive && (
-232 |               <Loader2 className="absolute -bottom-1 -right-1 w-3.5 h-3.5 text-cyan-400 animate-spin" />
-233 |             )}
-234 |             {!isActive && !isError && isEnabled && (
-235 |               <CheckCircle2 className="absolute -bottom-1 -right-1 w-3 h-3 text-emerald-500" />
-236 |             )}
-237 |             {isError && (
-238 |               <AlertTriangle className="absolute -bottom-1 -right-1 w-3 h-3 text-rose-500" />
+142 |         // EchoHouse left border
+143 |         data.isEchoHouseAgent
+144 |           ? (data.echohouseRole === 'self'
+145 |               ? 'border-l-2 border-l-white'
+146 |               : 'border-l-2 border-l-neutral-600')
+147 |           : '',
+148 |         statusRing,
+149 |       ].join(' ')}
+150 |     >
+151 |       {/* ─── Top status bar ─── */}
+152 |       <div className={`h-1 w-full rounded-t-2xl transition-all duration-300 ${
+153 |         isActive ? 'bg-cyan-500 shadow-[0_1px_8px_rgba(6,182,212,0.6)] animate-pulse' :
+154 |         isError ? 'bg-rose-500 shadow-[0_1px_8px_rgba(244,63,94,0.6)]' :
+155 |         'bg-neutral-800'
+156 |       }`} />
+157 | 
+158 |       {/* Ambient glow — active state */}
+159 |       {isActive && (
+160 |         <div className="absolute inset-0 rounded-2xl pointer-events-none bg-cyan-500/[0.04] animate-pulse" />
+161 |       )}
+162 | 
+163 |       {/* Top status badge */}
+164 |       <StatusBadge status={data.status ?? ''} enabled={isEnabled} />
+165 | 
+166 |       {/* Floating action bar */}
+167 |       {hovered && isEnabled && !data.isEchoHouseAgent && (
+168 |         <div className="absolute -top-9 left-1/2 -translate-x-1/2 z-30 flex items-center gap-0.5 px-1 py-0.5 rounded-xl bg-neutral-900/95 border border-white/[0.07] shadow-xl backdrop-blur-sm animate-in fade-in zoom-in-95 duration-100">
+169 |           <button
+170 |             id={`node-edit-${id}`}
+171 |             onClick={(e) => { e.stopPropagation(); setSelectedId(id); }}
+172 |             className="p-1.5 rounded-lg hover:bg-white/[0.06] text-neutral-400 hover:text-white transition-colors"
+173 |             title="Configure"
+174 |           >
+175 |             <Pencil className="w-3 h-3" />
+176 |           </button>
+177 |           <div className="w-px h-3 bg-white/10" />
+178 |           <button
+179 |             id={`node-delete-${id}`}
+180 |             onClick={(e) => { e.stopPropagation(); deleteNode(id); }}
+181 |             className="p-1.5 rounded-lg hover:bg-rose-500/10 text-neutral-400 hover:text-rose-400 transition-colors"
+182 |             title="Delete agent"
+183 |           >
+184 |             <Trash2 className="w-3 h-3" />
+185 |           </button>
+186 |         </div>
+187 |       )}
+188 | 
+189 |       {/* ── Left Handle (IN) ────────────────────────────────── */}
+190 |       {!data.isEchoHouseAgent && (
+191 |         <div className="absolute group/in" style={{ top: 22, left: -8, zIndex: 10 }}>
+192 |           <Handle
+193 |             type="target"
+194 |             position={Position.Left}
+195 |             id="input"
+196 |             isConnectable
+197 |             className="!w-3 !h-3 !bg-neutral-950 !border-2 !border-rose-500 !rounded-full !shadow-[0_0_8px_rgba(244,63,94,0.5)] hover:!scale-125 !transition-transform"
+198 |           />
+199 |           <span className="pointer-events-none select-none absolute left-5 top-1/2 -translate-y-1/2 text-[7px] font-mono font-bold text-rose-400 bg-rose-950/90 border border-rose-500/30 px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover/in:opacity-100 transition-opacity duration-100">
+200 |             IN
+201 |           </span>
+202 |         </div>
+203 |       )}
+204 | 
+205 |       {/* ── Right Handle (OUT) ──────────────────────────────── */}
+206 |       {!data.isEchoHouseAgent && (
+207 |         <div className="absolute group/out" style={{ top: 22, right: -8, zIndex: 10 }}>
+208 |           <span className="pointer-events-none select-none absolute right-5 top-1/2 -translate-y-1/2 text-[7px] font-mono font-bold text-emerald-400 bg-emerald-950/90 border border-emerald-500/30 px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover/out:opacity-100 transition-opacity duration-100">
+209 |             OUT
+210 |           </span>
+211 |           <Handle
+212 |             type="source"
+213 |             position={Position.Right}
+214 |             id="output"
+215 |             isConnectable
+216 |             className="!w-3 !h-3 !bg-neutral-950 !border-2 !border-emerald-500 !rounded-full !shadow-[0_0_8px_rgba(16,185,129,0.5)] hover:!scale-125 !transition-transform"
+217 |           />
+218 |         </div>
+219 |       )}
+220 | 
+221 |       {/* ── Node Body ──────────────────────────────────────── */}
+222 |       <div className="p-4 pt-3.5">
+223 |         {/* Header row */}
+224 |         <div className="flex items-center gap-3">
+225 |           {/* Icon */}
+226 |           <div className="relative shrink-0">
+227 |             <div className={[
+228 |               'w-8 h-8 rounded-lg flex items-center justify-center',
+229 |               'bg-gradient-to-br from-neutral-800 to-neutral-900',
+230 |               'border border-white/[0.07]',
+231 |               'shadow-inner',
+232 |               isActive ? 'text-cyan-400' : isError ? 'text-rose-400' : 'text-neutral-300',
+233 |             ].join(' ')}>
+234 |               <AgentIcon name={data.icon ?? 'bot'} className="w-4 h-4" />
+235 |             </div>
+236 |             {/* Active spinner overlay */}
+237 |             {isActive && (
+238 |               <Loader2 className="absolute -bottom-1 -right-1 w-3.5 h-3.5 text-cyan-400 animate-spin" />
 239 |             )}
-240 |           </div>
-241 | 
-242 |           {/* Name + tag */}
-243 |           <div className="min-w-0 flex-1">
-244 |             <div className="flex items-center gap-1.5">
-245 |               <h4 className="text-xs font-bold text-white tracking-tight truncate leading-tight">
-246 |                 {data.name}
-247 |               </h4>
-248 |               {isActive && (
-249 |                 <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-250 |               )}
-251 |             </div>
-252 |             <span className="text-[7.5px] font-mono text-neutral-500 uppercase tracking-widest leading-none mt-0.5 block">
-253 |               {data.tag ?? 'AGENT'}
-254 |             </span>
-255 |           </div>
-256 |         </div>
-257 | 
-258 |         {/* Objective */}
-259 |         <p className="text-[9.5px] text-neutral-400/90 leading-relaxed mt-2.5 line-clamp-2">
-260 |           {data.isEchoHouseAgent ? data.echohouseProblem : data.objective}
-261 |         </p>
-262 | 
-263 |         {/* Live Progress Bar when ACTIVE */}
-264 |         {isActive && (
-265 |           <div className="mt-3 space-y-1.5">
-266 |             <div className="flex justify-between items-center text-[8px] font-mono text-cyan-400">
-267 |               <span className="flex items-center gap-1">
-268 |                 <Loader2 className="w-2.5 h-2.5 animate-spin" />
-269 |                 {data.status || 'PROCESSING'}
-270 |               </span>
-271 |               <span className="animate-pulse">ACTIVE</span>
-272 |             </div>
-273 |             <div className="w-full bg-neutral-950/80 border border-neutral-900 rounded-full h-1 overflow-hidden">
-274 |               <div className="bg-cyan-500 h-full rounded-full animate-pulse" style={{ width: '65%' }} />
-275 |             </div>
-276 |           </div>
-277 |         )}
-278 | 
-279 |         {/* Output Preview when Completed */}
-280 |         {!isActive && !isError && data.finalAnswer && (
-281 |           <div className="mt-3 p-2 bg-neutral-950/80 border border-white/[0.04] rounded-lg text-[9px] text-neutral-400 leading-normal line-clamp-2 font-mono">
-282 |             <span className="text-[8px] text-emerald-400 font-bold uppercase tracking-wider block mb-0.5">Output:</span>
-283 |             {data.finalAnswer}
-284 |           </div>
-285 |         )}
-286 | 
-287 |         {/* Tools chips (max 3) */}
-288 |         {!data.isEchoHouseAgent && (data.tools?.length ?? 0) > 0 && (
-289 |           <div className="mt-3 pt-2.5 border-t border-white/[0.04] flex flex-wrap gap-1 items-center">
-290 |             {data.tools.slice(0, 3).map((tool) => (
-291 |               <ToolPill key={tool} name={tool} />
-292 |             ))}
-293 |             {data.tools.length > 3 && (
-294 |               <span className="text-[8px] text-neutral-500 font-mono pl-1">
-295 |                 +{data.tools.length - 3}
-296 |               </span>
-297 |             )}
-298 |           </div>
-299 |         )}
-300 |       </div>
-301 |     </div>
-302 |   );
-303 | };
-304 |
+240 |             {!isActive && !isError && isEnabled && (
+241 |               <CheckCircle2 className="absolute -bottom-1 -right-1 w-3 h-3 text-emerald-500" />
+242 |             )}
+243 |             {isError && (
+244 |               <AlertTriangle className="absolute -bottom-1 -right-1 w-3 h-3 text-rose-500" />
+245 |             )}
+246 |           </div>
+247 | 
+248 |           {/* Name + tag */}
+249 |           <div className="min-w-0 flex-1">
+250 |             <div className="flex items-center gap-1.5">
+251 |               <h4 className="text-xs font-bold text-white tracking-tight truncate leading-tight">
+252 |                 {data.name}
+253 |               </h4>
+254 |               {isActive && (
+255 |                 <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+256 |               )}
+257 |             </div>
+258 |             {data.isEchoHouseAgent ? (
+259 |               <span className="text-[7.5px] font-mono text-neutral-500 leading-none mt-0.5 block">
+260 |                 {data.echohouseRole}
+261 |               </span>
+262 |             ) : (
+263 |               <span className="text-[7.5px] font-mono text-neutral-500 uppercase tracking-widest leading-none mt-0.5 block">
+264 |                 {data.tag ?? 'AGENT'}
+265 |               </span>
+266 |             )}
+267 |           </div>
+268 |         </div>
+269 | 
+270 |         {/* Objective */}
+271 |         <p className="text-[9.5px] text-neutral-400/90 leading-relaxed mt-2.5 line-clamp-2">
+272 |           {data.isEchoHouseAgent ? data.echohouseProblem : data.objective}
+273 |         </p>
+274 | 
+275 |         {/* Live Progress Bar when ACTIVE */}
+276 |         {isActive && (
+277 |           <div className="mt-3 space-y-1.5">
+278 |             <div className="flex justify-between items-center text-[8px] font-mono text-cyan-400">
+279 |               <span className="flex items-center gap-1">
+280 |                 <Loader2 className="w-2.5 h-2.5 animate-spin" />
+281 |                 {data.status || 'PROCESSING'}
+282 |               </span>
+283 |               <span className="animate-pulse">ACTIVE</span>
+284 |             </div>
+285 |             <div className="w-full bg-neutral-950/80 border border-neutral-900 rounded-full h-1 overflow-hidden">
+286 |               <div className="bg-cyan-500 h-full rounded-full animate-pulse" style={{ width: '65%' }} />
+287 |             </div>
+288 |           </div>
+289 |         )}
+290 | 
+291 |         {/* Output Preview when Completed */}
+292 |         {!isActive && !isError && data.finalAnswer && (
+293 |           <div className="mt-3 p-2 bg-neutral-950/80 border border-white/[0.04] rounded-lg text-[9px] text-neutral-400 leading-normal line-clamp-2 font-mono">
+294 |             <span className="text-[8px] text-emerald-400 font-bold uppercase tracking-wider block mb-0.5">Output:</span>
+295 |             {data.finalAnswer}
+296 |           </div>
+297 |         )}
+298 | 
+299 |         {/* Tools chips (max 3) */}
+300 |         {!data.isEchoHouseAgent && (data.tools?.length ?? 0) > 0 && (
+301 |           <div className="mt-3 pt-2.5 border-t border-white/[0.04] flex flex-wrap gap-1 items-center">
+302 |             {data.tools.slice(0, 3).map((tool) => (
+303 |               <ToolPill key={tool} name={tool} />
+304 |             ))}
+305 |             {data.tools.length > 3 && (
+306 |               <span className="text-[8px] text-neutral-500 font-mono pl-1">
+307 |                 +{data.tools.length - 3}
+308 |               </span>
+309 |             )}
+310 |           </div>
+311 |         )}
+312 |       </div>
+313 |     </div>
+314 |   );
+315 | };
+316 |
 ```
 
 ### File: `Frontend/components/nodes/GroupNode.tsx`
@@ -6711,7 +7155,7 @@ SoloSpace/
 
 ### File: `Frontend/components/APIKeysModal.tsx`
 
-> 602 lines | 25.8 KB
+> 609 lines | 26.3 KB
 
 ```tsx
   1 | 'use client';
@@ -6891,7 +7335,7 @@ SoloSpace/
 175 |       const resp = await fetch("/api/gemini/ollama");
 176 |       if (resp.ok) {
 177 |         const data = await resp.json();
-178 |         if (data.ollama_available) {
+178 |         if (data.ollama_available || (Array.isArray(data.models) && data.models.length > 0)) {
 179 |           setOllamaStatus('available');
 180 |         } else {
 181 |           setOllamaStatus('unavailable');
@@ -7023,299 +7467,306 @@ SoloSpace/
 307 |   
 308 |   // Custom or local providers require base URL
 309 |   const isCustomOrLocal = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || selectedProvider === 'custom' || currentProviderInfo.is_custom || currentProviderInfo.is_local;
-310 | 
-311 |   return (
-312 |     <motion.div
-313 |       initial={{ opacity: 0 }}
-314 |       animate={{ opacity: 1 }}
-315 |       exit={{ opacity: 0 }}
-316 |       className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
-317 |     >
-318 |       <motion.div
-319 |         initial={{ scale: 0.95 }}
-320 |         animate={{ scale: 1 }}
-321 |         exit={{ scale: 0.95 }}
-322 |         className="w-full max-w-md bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl text-white overflow-y-auto max-h-[90vh] custom-scrollbar"
-323 |       >
-324 |         {/* Close Button */}
-325 |         <button onClick={onClose} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer transition-colors">
-326 |           <X className="w-5 h-5" />
-327 |         </button>
-328 | 
-329 |         {/* Header */}
-330 |         <div className="flex gap-4 items-center mb-6">
-331 |           <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
-332 |             <Key className="w-6 h-6 text-white" />
-333 |           </div>
-334 |           <div>
-335 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">AI Engine Settings</h3>
-336 |             <p className="text-xs text-neutral-400 font-sans mt-0.5">Configure your active AI provider, model routing, and keys.</p>
-337 |           </div>
-338 |         </div>
-339 | 
-340 |         <div className="space-y-4">
-341 |           {/* 1. Provider Selector */}
-342 |           <div className="space-y-1.5">
-343 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Provider</label>
-344 |             <select
-345 |               value={selectedProvider}
-346 |               onChange={(e) => handleProviderChange(e.target.value)}
-347 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
-348 |             >
-349 |               {Object.keys(providersConfig).map((pKey) => (
-350 |                 <option key={pKey} value={pKey}>
-351 |                   {providersConfig[pKey]?.name || pKey}
-352 |                 </option>
-353 |               ))}
-354 |             </select>
-355 |           </div>
-356 | 
-357 |           {/* 2. Model Selector */}
-358 |           <div className="space-y-1.5">
-359 |             <div className="flex justify-between items-center">
-360 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Model</label>
-361 |               {(modelsList.length > 0 || selectedProvider === 'ollama') && (
-362 |                 <button
-363 |                   type="button"
-364 |                   onClick={() => {
-365 |                     const willBeCustom = !isCustomModelInput;
-366 |                     setIsCustomModelInput(willBeCustom);
-367 |                     if (willBeCustom) {
-368 |                       setCustomModelText(selectedModel);
-369 |                     } else {
-370 |                       const defaultMod = modelsList[0]?.id || currentProviderInfo.default_model || "";
-371 |                       setSelectedModel(defaultMod);
-372 |                     }
-373 |                   }}
-374 |                   className="text-[9px] text-cyan-400 hover:underline font-mono cursor-pointer"
-375 |                 >
-376 |                   {isCustomModelInput ? "Select from list" : "Enter custom model ID"}
-377 |                 </button>
-378 |               )}
-379 |             </div>
-380 |             {isCustomModelInput || (modelsList.length === 0 && selectedProvider !== 'ollama') ? (
-381 |               <input
-382 |                 type="text"
-383 |                 placeholder="e.g. custom-fine-tune-v1, llama3"
-384 |                 value={isCustomModelInput ? customModelText : selectedModel}
-385 |                 onChange={(e) => {
-386 |                   const val = e.target.value;
-387 |                   if (isCustomModelInput) {
-388 |                     setCustomModelText(val);
-389 |                   }
-390 |                   setSelectedModel(val);
-391 |                 }}
-392 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-393 |               />
-394 |             ) : (
-395 |               <select
-396 |                 value={selectedModel}
-397 |                 onChange={(e) => {
-398 |                   const val = e.target.value;
-399 |                   if (val === "__custom__") {
-400 |                     setIsCustomModelInput(true);
-401 |                     setCustomModelText(selectedModel);
-402 |                   } else {
-403 |                     setSelectedModel(val);
-404 |                   }
-405 |                 }}
-406 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
-407 |               >
-408 |                 {selectedProvider === "ollama" && modelsList.length === 0 ? (
-409 |                   <option value="" disabled>
-410 |                     No local models detected
-411 |                   </option>
-412 |                 ) : (
-413 |                   modelsList.map((m: any) => (
-414 |                     <option key={m.id} value={m.id}>
-415 |                       {m.name || m.id} ({m.tier || "standard"})
-416 |                     </option>
-417 |                   ))
-418 |                 )}
-419 |                 <option value="__custom__">Custom Model ID...</option>
-420 |               </select>
-421 |             )}
-422 |           </div>
-423 | 
-424 |           {/* 3. Custom Base URL Gateway */}
-425 |           <div className="space-y-1.5">
-426 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold flex items-center gap-1">
-427 |               <Globe className="w-3.5 h-3.5" /> Base URL {isCustomOrLocal ? "(Required)" : "(Optional)"}
-428 |             </label>
-429 |             <input
-430 |               type="text"
-431 |               placeholder={currentProviderInfo.base_url || "https://api.provider.com/v1"}
-432 |               value={baseUrlInput}
-433 |               onChange={(e) => setUrlInput(e.target.value)}
-434 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-435 |             />
-436 |           </div>
-437 | 
-438 |           {/* 4. API Key Input or Status Box (Ollama) */}
-439 |           {selectedProvider === "ollama" ? (
-440 |             <div className="space-y-1.5">
-441 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
-442 |                 Ollama Status
-443 |               </label>
-444 |               <div className="bg-black border border-[#1f1f1f] rounded-xl p-4 flex flex-col gap-2">
-445 |                 <div className="flex items-center gap-2 text-xs">
-446 |                   {ollamaStatus === "checking" && (
-447 |                     <>
-448 |                       <div className="w-3.5 h-3.5 border-2 border-neutral-400 border-t-transparent rounded-full animate-spin shrink-0" />
-449 |                       <span className="text-neutral-400 font-mono">Checking local Ollama availability...</span>
-450 |                     </>
-451 |                   )}
-452 |                   {ollamaStatus === "available" && (
-453 |                     <>
-454 |                       <Check className="w-4 h-4 text-emerald-500 shrink-0" />
-455 |                       <span className="text-emerald-400 font-mono font-bold">Ollama running locally</span>
-456 |                     </>
-457 |                   )}
-458 |                   {ollamaStatus === "unavailable" && (
-459 |                     <>
-460 |                       <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
-461 |                       <span className="text-rose-400 font-mono font-bold">Ollama not detected</span>
-462 |                     </>
-463 |                   )}
-464 |                 </div>
-465 |                 {ollamaStatus === "unavailable" && (
-466 |                   <p className="text-[10px] text-neutral-400 leading-normal font-sans">
-467 |                     Make sure Ollama is running on your machine. You can download it from{" "}
-468 |                     <a
-469 |                       href="https://ollama.com"
-470 |                       target="_blank"
-471 |                       rel="noreferrer"
-472 |                       className="text-cyan-400 hover:underline inline-flex items-center gap-0.5"
-473 |                     >
-474 |                       ollama.com <ExternalLink className="w-2.5 h-2.5" />
-475 |                     </a>
-476 |                   </p>
-477 |                 )}
-478 |               </div>
-479 |             </div>
-480 |           ) : (
-481 |             <div className="space-y-1.5">
-482 |               <div className="flex justify-between items-center">
-483 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
-484 |                   {selectedProvider.toUpperCase()}_API_KEY
-485 |                 </label>
-486 |                 {currentProviderInfo.key_url && (
-487 |                   <a
-488 |                     href={currentProviderInfo.key_url}
-489 |                     target="_blank"
-490 |                     rel="noreferrer"
-491 |                     className="text-[9px] text-cyan-400 hover:underline flex items-center gap-1 cursor-pointer"
-492 |                   >
-493 |                     Get key <ExternalLink className="w-3 h-3" />
-494 |                   </a>
-495 |                 )}
-496 |               </div>
-497 |               <div className="relative">
-498 |                 <input
-499 |                   type={showKey ? "text" : "password"}
-500 |                   placeholder={
-501 |                     currentProviderInfo.key_hint
-502 |                       ? `Enter key (starts with ${currentProviderInfo.key_hint})`
-503 |                       : "Enter API key"
-504 |                   }
-505 |                   value={apiKeyInput}
-506 |                   onChange={(e) => setApiKeyInput(e.target.value)}
-507 |                   className="w-full bg-black border border-[#1f1f1f] rounded-xl pl-4 pr-12 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-508 |                 />
-509 |                 <button
-510 |                   type="button"
-511 |                   onClick={() => setShowKey(!showKey)}
-512 |                   className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
-513 |                 >
-514 |                   {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-515 |                 </button>
-516 |               </div>
-517 |             </div>
-518 |           )}
-519 | 
-520 |           {/* 5. Fallback Provider Selector */}
-521 |           <div className="space-y-1.5">
-522 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Automatic Fallback</label>
-523 |             <select
-524 |               value={fallbackProv}
-525 |               onChange={(e) => setFallbackProv(e.target.value)}
-526 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
-527 |             >
-528 |               <option value="">No Fallback (Error immediately)</option>
-529 |               {Object.keys(providersConfig)
-530 |                 .filter((pKey) => pKey !== selectedProvider)
-531 |                 .map((pKey) => (
-532 |                   <option key={pKey} value={pKey}>
-533 |                     Fallback: {providersConfig[pKey]?.name || pKey}
-534 |                   </option>
-535 |                 ))}
-536 |             </select>
-537 |           </div>
-538 | 
-539 |           {/* Connection Test pipeline */}
-540 |           <div className="pt-2">
-541 |             <button
-542 |               type="button"
-543 |               onClick={handleTestConnection}
-544 |               disabled={isTesting || (!apiKeyInput && selectedProvider !== "ollama" && selectedProvider !== "lmstudio")}
-545 |               className="w-full py-2 bg-neutral-900 hover:bg-neutral-800 border border-[#1f1f1f] text-neutral-300 hover:text-white font-bold rounded-xl text-xs font-mono transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-20 disabled:scale-100"
-546 |             >
-547 |               {isTesting ? (
-548 |                 <>
-549 |                   <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-550 |                   Testing Pipeline...
-551 |                 </>
-552 |               ) : (
-553 |                 "Test Connection"
-554 |               )}
-555 |             </button>
-556 | 
-557 |             {/* Test Connection Results */}
-558 |             <AnimatePresence>
-559 |               {testResult.status !== 'idle' && (
-560 |                 <motion.div
-561 |                   initial={{ opacity: 0, y: 5 }}
-562 |                   animate={{ opacity: 1, y: 0 }}
-563 |                   exit={{ opacity: 0, y: 5 }}
-564 |                   className={`mt-3 flex items-start gap-2.5 p-3 rounded-xl text-[10px] leading-normal font-mono border ${
-565 |                     testResult.status === 'success'
-566 |                       ? 'bg-emerald-950/20 border-emerald-950/30 text-emerald-400'
-567 |                       : 'bg-rose-950/20 border-rose-950/30 text-rose-400'
-568 |                   }`}
-569 |                 >
-570 |                   {testResult.status === 'success' ? (
-571 |                     <Check className="w-4 h-4 shrink-0 text-emerald-500 mt-0.5" />
-572 |                   ) : (
-573 |                     <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
-574 |                   )}
-575 |                   <span className="whitespace-pre-wrap">{testResult.message}</span>
-576 |                 </motion.div>
-577 |               )}
-578 |             </AnimatePresence>
-579 |           </div>
-580 | 
-581 |           {/* 6. Save and Cancel Buttons */}
-582 |           <div className="pt-4 flex gap-3 border-t border-[#141414]">
-583 |             <button
-584 |               id="save-api-key-btn"
-585 |               onClick={handleSaveSettings}
-586 |               className="flex-1 py-2.5 bg-white hover:bg-neutral-100 text-black font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
-587 |             >
-588 |               Save Settings
-589 |             </button>
+310 |   const isLocalProvider = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || !!currentProviderInfo.is_local;
+311 | 
+312 |   return (
+313 |     <motion.div
+314 |       initial={{ opacity: 0 }}
+315 |       animate={{ opacity: 1 }}
+316 |       exit={{ opacity: 0 }}
+317 |       className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
+318 |     >
+319 |       <motion.div
+320 |         initial={{ scale: 0.95 }}
+321 |         animate={{ scale: 1 }}
+322 |         exit={{ scale: 0.95 }}
+323 |         className="w-full max-w-md bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl text-white overflow-y-auto max-h-[90vh] custom-scrollbar"
+324 |       >
+325 |         {/* Close Button */}
+326 |         <button onClick={onClose} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer transition-colors">
+327 |           <X className="w-5 h-5" />
+328 |         </button>
+329 | 
+330 |         {/* Header */}
+331 |         <div className="flex gap-4 items-center mb-6">
+332 |           <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
+333 |             <Key className="w-6 h-6 text-white" />
+334 |           </div>
+335 |           <div>
+336 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">AI Engine Settings</h3>
+337 |             <p className="text-xs text-neutral-400 font-sans mt-0.5">Configure your active AI provider, model routing, and keys.</p>
+338 |           </div>
+339 |         </div>
+340 | 
+341 |         <div className="space-y-4">
+342 |           {/* 1. Provider Selector */}
+343 |           <div className="space-y-1.5">
+344 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Provider</label>
+345 |             <select
+346 |               value={selectedProvider}
+347 |               onChange={(e) => handleProviderChange(e.target.value)}
+348 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
+349 |             >
+350 |               {Object.keys(providersConfig).map((pKey) => (
+351 |                 <option key={pKey} value={pKey}>
+352 |                   {providersConfig[pKey]?.name || pKey}
+353 |                 </option>
+354 |               ))}
+355 |             </select>
+356 |           </div>
+357 | 
+358 |           {/* 2. Model Selector */}
+359 |           <div className="space-y-1.5">
+360 |             <div className="flex justify-between items-center">
+361 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Model</label>
+362 |               {(modelsList.length > 0 || selectedProvider === 'ollama') && (
+363 |                 <button
+364 |                   type="button"
+365 |                   onClick={() => {
+366 |                     const willBeCustom = !isCustomModelInput;
+367 |                     setIsCustomModelInput(willBeCustom);
+368 |                     if (willBeCustom) {
+369 |                       setCustomModelText(selectedModel);
+370 |                     } else {
+371 |                       const defaultMod = modelsList[0]?.id || currentProviderInfo.default_model || "";
+372 |                       setSelectedModel(defaultMod);
+373 |                     }
+374 |                   }}
+375 |                   className="text-[9px] text-cyan-400 hover:underline font-mono cursor-pointer"
+376 |                 >
+377 |                   {isCustomModelInput ? "Select from list" : "Enter custom model ID"}
+378 |                 </button>
+379 |               )}
+380 |             </div>
+381 |             {isCustomModelInput || (modelsList.length === 0 && selectedProvider !== 'ollama') ? (
+382 |               <input
+383 |                 type="text"
+384 |                 placeholder="e.g. custom-fine-tune-v1, llama3"
+385 |                 value={isCustomModelInput ? customModelText : selectedModel}
+386 |                 onChange={(e) => {
+387 |                   const val = e.target.value;
+388 |                   if (isCustomModelInput) {
+389 |                     setCustomModelText(val);
+390 |                   }
+391 |                   setSelectedModel(val);
+392 |                 }}
+393 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+394 |               />
+395 |             ) : (
+396 |               <select
+397 |                 value={selectedModel}
+398 |                 onChange={(e) => {
+399 |                   const val = e.target.value;
+400 |                   if (val === "__custom__") {
+401 |                     setIsCustomModelInput(true);
+402 |                     setCustomModelText(selectedModel);
+403 |                   } else {
+404 |                     setSelectedModel(val);
+405 |                   }
+406 |                 }}
+407 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
+408 |               >
+409 |                 {selectedProvider === "ollama" && modelsList.length === 0 ? (
+410 |                   <option value="" disabled>
+411 |                     No local models detected
+412 |                   </option>
+413 |                 ) : (
+414 |                   modelsList.map((m: any) => (
+415 |                     <option key={m.id} value={m.id}>
+416 |                       {m.name || m.id} ({m.tier || "standard"})
+417 |                     </option>
+418 |                   ))
+419 |                 )}
+420 |                 <option value="__custom__">Custom Model ID...</option>
+421 |               </select>
+422 |             )}
+423 |           </div>
+424 | 
+425 |           {/* 3. Custom Base URL Gateway */}
+426 |           <div className="space-y-1.5">
+427 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold flex items-center gap-1">
+428 |               <Globe className="w-3.5 h-3.5" /> Base URL {isCustomOrLocal ? "(Required)" : "(Optional)"}
+429 |             </label>
+430 |             <input
+431 |               type="text"
+432 |               placeholder={currentProviderInfo.base_url || "https://api.provider.com/v1"}
+433 |               value={baseUrlInput}
+434 |               onChange={(e) => setUrlInput(e.target.value)}
+435 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+436 |             />
+437 |           </div>
+438 | 
+439 |           {/* 4. API Key Input or Status Box (Ollama) */}
+440 |           {selectedProvider === "ollama" ? (
+441 |             <div className="space-y-1.5">
+442 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
+443 |                 Ollama Status
+444 |               </label>
+445 |               <div className="bg-black border border-[#1f1f1f] rounded-xl p-4 flex flex-col gap-2">
+446 |                 <div className="flex items-center gap-2 text-xs">
+447 |                   {ollamaStatus === "checking" && (
+448 |                     <>
+449 |                       <div className="w-3.5 h-3.5 border-2 border-neutral-400 border-t-transparent rounded-full animate-spin shrink-0" />
+450 |                       <span className="text-neutral-400 font-mono">Checking local Ollama availability...</span>
+451 |                     </>
+452 |                   )}
+453 |                   {ollamaStatus === "available" && (
+454 |                     <>
+455 |                       <Check className="w-4 h-4 text-emerald-500 shrink-0" />
+456 |                       <span className="text-emerald-400 font-mono font-bold">Ollama running locally</span>
+457 |                     </>
+458 |                   )}
+459 |                   {ollamaStatus === "unavailable" && (
+460 |                     <>
+461 |                       <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+462 |                       <span className="text-rose-400 font-mono font-bold">Ollama not detected</span>
+463 |                     </>
+464 |                   )}
+465 |                 </div>
+466 |                 {ollamaStatus === "unavailable" && (
+467 |                   <p className="text-[10px] text-neutral-400 leading-normal font-sans">
+468 |                     Make sure Ollama is running on your machine. You can download it from{" "}
+469 |                     <a
+470 |                       href="https://ollama.com"
+471 |                       target="_blank"
+472 |                       rel="noreferrer"
+473 |                       className="text-cyan-400 hover:underline inline-flex items-center gap-0.5"
+474 |                     >
+475 |                       ollama.com <ExternalLink className="w-2.5 h-2.5" />
+476 |                     </a>
+477 |                   </p>
+478 |                 )}
+479 |               </div>
+480 |             </div>
+481 |           ) : (
+482 |             <div className="space-y-1.5">
+483 |               <div className="flex justify-between items-center">
+484 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
+485 |                   {selectedProvider.toUpperCase()}_API_KEY
+486 |                 </label>
+487 |                 {currentProviderInfo.key_url && (
+488 |                   <a
+489 |                     href={currentProviderInfo.key_url}
+490 |                     target="_blank"
+491 |                     rel="noreferrer"
+492 |                     className="text-[9px] text-cyan-400 hover:underline flex items-center gap-1 cursor-pointer"
+493 |                   >
+494 |                     Get key <ExternalLink className="w-3 h-3" />
+495 |                   </a>
+496 |                 )}
+497 |               </div>
+498 |               <div className="relative">
+499 |                 <input
+500 |                   type={showKey ? "text" : "password"}
+501 |                   placeholder={
+502 |                     currentProviderInfo.key_hint
+503 |                       ? `Enter key (starts with ${currentProviderInfo.key_hint})`
+504 |                       : "Enter API key"
+505 |                   }
+506 |                   value={apiKeyInput}
+507 |                   onChange={(e) => setApiKeyInput(e.target.value)}
+508 |                   className="w-full bg-black border border-[#1f1f1f] rounded-xl pl-4 pr-12 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+509 |                 />
+510 |                 <button
+511 |                   type="button"
+512 |                   onClick={() => setShowKey(!showKey)}
+513 |                   className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
+514 |                 >
+515 |                   {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+516 |                 </button>
+517 |               </div>
+518 |             </div>
+519 |           )}
+520 | 
+521 |           {/* 5. Fallback Provider Selector */}
+522 |           <div className="space-y-1.5">
+523 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Automatic Fallback</label>
+524 |             <select
+525 |               value={fallbackProv}
+526 |               onChange={(e) => setFallbackProv(e.target.value)}
+527 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
+528 |             >
+529 |               <option value="">No Fallback (Error immediately)</option>
+530 |               {Object.keys(providersConfig)
+531 |                 .filter((pKey) => pKey !== selectedProvider)
+532 |                 .map((pKey) => (
+533 |                   <option key={pKey} value={pKey}>
+534 |                     Fallback: {providersConfig[pKey]?.name || pKey}
+535 |                   </option>
+536 |                 ))}
+537 |             </select>
+538 |           </div>
+539 | 
+540 |           {/* Connection Test pipeline */}
+541 |           {isLocalProvider ? (
+542 |             <div className="p-3 bg-neutral-950/40 border border-[#1f1f1f] rounded-xl text-[10px] text-neutral-400 font-mono leading-normal">
+543 |               ℹ️ Local models run directly on your machine and do not require API connection testing.
+544 |             </div>
+545 |           ) : (
+546 |             <div className="pt-2">
+547 |               <button
+548 |                 type="button"
+549 |                 onClick={handleTestConnection}
+550 |                 disabled={isTesting || (!apiKeyInput && selectedProvider !== "ollama" && selectedProvider !== "lmstudio")}
+551 |                 className="w-full py-2 bg-neutral-900 hover:bg-neutral-800 border border-[#1f1f1f] text-neutral-300 hover:text-white font-bold rounded-xl text-xs font-mono transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-20 disabled:scale-100"
+552 |               >
+553 |                 {isTesting ? (
+554 |                   <>
+555 |                     <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+556 |                     Testing Pipeline...
+557 |                   </>
+558 |                 ) : (
+559 |                   "Test Connection"
+560 |                 )}
+561 |               </button>
+562 | 
+563 |               {/* Test Connection Results */}
+564 |               <AnimatePresence>
+565 |                 {testResult.status !== 'idle' && (
+566 |                   <motion.div
+567 |                     initial={{ opacity: 0, y: 5 }}
+568 |                     animate={{ opacity: 1, y: 0 }}
+569 |                     exit={{ opacity: 0, y: 5 }}
+570 |                     className={`mt-3 flex items-start gap-2.5 p-3 rounded-xl text-[10px] leading-normal font-mono border ${
+571 |                       testResult.status === 'success'
+572 |                         ? 'bg-emerald-950/20 border-emerald-950/30 text-emerald-400'
+573 |                         : 'bg-rose-950/20 border-rose-950/30 text-rose-400'
+574 |                     }`}
+575 |                   >
+576 |                     {testResult.status === 'success' ? (
+577 |                       <Check className="w-4 h-4 shrink-0 text-emerald-500 mt-0.5" />
+578 |                     ) : (
+579 |                       <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
+580 |                     )}
+581 |                     <span className="whitespace-pre-wrap">{testResult.message}</span>
+582 |                   </motion.div>
+583 |                 )}
+584 |               </AnimatePresence>
+585 |             </div>
+586 |           )}
+587 | 
+588 |           {/* 6. Save and Cancel Buttons */}
+589 |           <div className="pt-4 flex gap-3 border-t border-[#141414]">
 590 |             <button
-591 |               onClick={onClose}
-592 |               className="px-5 py-2.5 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-xl text-xs font-mono transition-colors cursor-pointer"
-593 |             >
-594 |               Cancel
-595 |             </button>
-596 |           </div>
-597 |         </div>
-598 |       </motion.div>
-599 |     </motion.div>
-600 |   );
-601 | }
-602 |
+591 |               id="save-api-key-btn"
+592 |               onClick={handleSaveSettings}
+593 |               className="flex-1 py-2.5 bg-white hover:bg-neutral-100 text-black font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
+594 |             >
+595 |               Save Settings
+596 |             </button>
+597 |             <button
+598 |               onClick={onClose}
+599 |               className="px-5 py-2.5 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-xl text-xs font-mono transition-colors cursor-pointer"
+600 |             >
+601 |               Cancel
+602 |             </button>
+603 |           </div>
+604 |         </div>
+605 |       </motion.div>
+606 |     </motion.div>
+607 |   );
+608 | }
+609 |
 ```
 
 ### File: `Frontend/components/ContextMenu.tsx`
@@ -7612,7 +8063,7 @@ SoloSpace/
 
 ### File: `Frontend/components/FlowArena.tsx`
 
-> 541 lines | 21.0 KB
+> 591 lines | 23.9 KB
 
 ```tsx
   1 | import React, { useState, useCallback, useEffect } from 'react';
@@ -7697,465 +8148,515 @@ SoloSpace/
  80 |   const [formRole, setFormRole] = useState("");
  81 |   const [formProblem, setFormProblem] = useState("");
  82 | 
- 83 |   const handleEchoHouseProceed = async () => {
- 84 |     if (onProceed) onProceed();
- 85 |     await useWorkflowStore.getState().triggerEchoHouseSimulation();
- 86 |   };
+ 83 |   // EchoHouse simulation controls
+ 84 |   const [echoRounds, setEchoRounds] = useState(3);
+ 85 |   const [echoTone, setEchoTone] = useState<"Realistic" | "Compassionate" | "Confrontational">("Realistic");
+ 86 |   const [isControlsOpen, setIsControlsOpen] = useState(false);
  87 | 
- 88 |   const handleNormalProceed = async () => {
+ 88 |   const handleEchoHouseProceed = async () => {
  89 |     if (onProceed) onProceed();
- 90 |     
- 91 |     const activeSession = useWorkflowStore.getState().sessions[useWorkflowStore.getState().activeSessionId || ""];
- 92 |     const mode = activeSession?.mode || "auto";
- 93 |     
- 94 |     if (mode === "auto") {
- 95 |       const chatMessages = useWorkflowStore.getState().chatMessages;
- 96 |       const lastUserMsg = chatMessages.findLast(m => m.sender === "user")?.text || "";
- 97 |       useWorkflowStore.getState().triggerSteerOrchestration(lastUserMsg, true, "auto");
- 98 |     } else if (mode === "custom") {
- 99 |       await useWorkflowStore.getState().triggerCustomExecution();
-100 |     }
-101 |   };
-102 | 
-103 |   const handleCreateEchoHousePerson = () => {
-104 |     if (!formName.trim() || !formRole.trim() || !formProblem.trim()) return;
-105 | 
-106 |     const randomId = `echo_agent_${Date.now()}`;
-107 |     const view = getViewport();
-108 |     // Center new node inside view coordinates
-109 |     let x = (-view.x + window.innerWidth / 2 - 120) / view.zoom;
-110 |     let y = (-view.y + window.innerHeight / 2 - 100) / view.zoom;
-111 | 
-112 |     // Avoid collision
-113 |     const NODE_W = 240;
-114 |     const NODE_H = 220;
-115 |     const existingPositions = nodes.map(n => n.position);
-116 |     for (const pos of existingPositions) {
-117 |       if (Math.abs(x - pos.x) < NODE_W && Math.abs(y - pos.y) < NODE_H) {
-118 |         y = pos.y + NODE_H + 40;
-119 |       }
-120 |     }
-121 | 
-122 |     const newNode = {
-123 |       id: randomId,
-124 |       type: 'custom',
-125 |       position: { x: Math.max(50, x), y: Math.max(50, y) },
-126 |       data: {
-127 |         name: formName.trim(),
-128 |         tag: formRole.trim().toUpperCase().replace(/\s+/g, '_'),
-129 |         icon: "science",
-130 |         objective: `Provide perspective as ${formName.trim()} (${formRole.trim()}).`,
-131 |         systemPrompt: `You are ${formName.trim()}, whose role in the user's life is ${formRole.trim()}. From your perspective about their situation: ${formProblem.trim()}`,
-132 |         isEchoHouseAgent: true,
-133 |         echohouseRole: formRole.trim(),
-134 |         echohouseProblem: formProblem.trim(),
-135 |         status: "IDLE" as const,
-136 |         enabled: true,
-137 |         rules: [],
-138 |         dependencies: [],
-139 |         tools: [],
-140 |         toolPermissions: {},
-141 |         temp: 0.8,
-142 |         logic: 70,
-143 |         empathy: 50,
-144 |         priority: 5,
-145 |         toolLogs: [],
-146 |         personality: ""
-147 |       }
-148 |     };
-149 | 
-150 |     addNode(newNode);
-151 |     setFormName("");
-152 |     setFormRole("");
-153 |     setFormProblem("");
-154 |     setIsEchoHouseCreateFormOpen(false);
-155 |     setSelectedNodeId(newNode.id);
-156 |   };
-157 | 
-158 |   const [initialLayoutDone, setInitialLayoutDone] = useState(false);
-159 | 
-160 |   // Context Menu State
-161 |   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: Node | null } | null>(null);
+ 90 |     await useWorkflowStore.getState().triggerEchoHouseSimulation(echoRounds, echoTone.toLowerCase());
+ 91 |   };
+ 92 | 
+ 93 |   const handleNormalProceed = async () => {
+ 94 |     if (onProceed) onProceed();
+ 95 |     
+ 96 |     const activeSession = useWorkflowStore.getState().sessions[useWorkflowStore.getState().activeSessionId || ""];
+ 97 |     const mode = activeSession?.mode || "auto";
+ 98 |     
+ 99 |     if (mode === "auto") {
+100 |       const chatMessages = useWorkflowStore.getState().chatMessages;
+101 |       const lastUserMsg = chatMessages.findLast(m => m.sender === "user")?.text || "";
+102 |       useWorkflowStore.getState().triggerSteerOrchestration(lastUserMsg, true, "auto");
+103 |     } else if (mode === "custom") {
+104 |       await useWorkflowStore.getState().triggerCustomExecution();
+105 |     }
+106 |   };
+107 | 
+108 |   const handleCreateEchoHousePerson = () => {
+109 |     if (!formName.trim() || !formRole.trim() || !formProblem.trim()) return;
+110 | 
+111 |     const randomId = `echo_agent_${Date.now()}`;
+112 |     const view = getViewport();
+113 |     // Center new node inside view coordinates
+114 |     let x = (-view.x + window.innerWidth / 2 - 120) / view.zoom;
+115 |     let y = (-view.y + window.innerHeight / 2 - 100) / view.zoom;
+116 | 
+117 |     // Avoid collision
+118 |     const NODE_W = 240;
+119 |     const NODE_H = 220;
+120 |     const existingPositions = nodes.map(n => n.position);
+121 |     for (const pos of existingPositions) {
+122 |       if (Math.abs(x - pos.x) < NODE_W && Math.abs(y - pos.y) < NODE_H) {
+123 |         y = pos.y + NODE_H + 40;
+124 |       }
+125 |     }
+126 | 
+127 |     const newNode = {
+128 |       id: randomId,
+129 |       type: 'custom',
+130 |       position: { x: Math.max(50, x), y: Math.max(50, y) },
+131 |       data: {
+132 |         name: formName.trim(),
+133 |         tag: formRole.trim().toUpperCase().replace(/\s+/g, '_'),
+134 |         icon: "science",
+135 |         objective: `Provide perspective as ${formName.trim()} (${formRole.trim()}).`,
+136 |         systemPrompt: `You are ${formName.trim()}, whose role in the user's life is ${formRole.trim()}. From your perspective about their situation: ${formProblem.trim()}`,
+137 |         isEchoHouseAgent: true,
+138 |         echohouseRole: formRole.trim(),
+139 |         echohouseProblem: formProblem.trim(),
+140 |         status: "IDLE" as const,
+141 |         enabled: true,
+142 |         rules: [],
+143 |         dependencies: [],
+144 |         tools: [],
+145 |         toolPermissions: {},
+146 |         temp: 0.8,
+147 |         logic: 70,
+148 |         empathy: 50,
+149 |         priority: 5,
+150 |         toolLogs: [],
+151 |         personality: ""
+152 |       }
+153 |     };
+154 | 
+155 |     addNode(newNode);
+156 |     setFormName("");
+157 |     setFormRole("");
+158 |     setFormProblem("");
+159 |     setIsEchoHouseCreateFormOpen(false);
+160 |     setSelectedNodeId(newNode.id);
+161 |   };
 162 | 
-163 |   // Reconnection state
-164 |   const onReconnect = useCallback((oldEdge: Edge, newConnection: Connection) => {
-165 |     setEdges((eds) => reconnectEdge(oldEdge, newConnection, eds));
-166 |   }, [setEdges]);
+163 |   const [initialLayoutDone, setInitialLayoutDone] = useState(false);
+164 | 
+165 |   // Context Menu State
+166 |   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: Node | null } | null>(null);
 167 | 
-168 |   // Context Menu triggers
-169 |   const onNodeContextMenu = useCallback((event: any, node: Node) => {
-170 |     event.preventDefault();
-171 |     setContextMenu({
-172 |       x: event.clientX,
-173 |       y: event.clientY,
-174 |       node,
-175 |     });
-176 |   }, []);
-177 | 
-178 |   const onPaneContextMenu = useCallback((event: any) => {
-179 |     event.preventDefault();
-180 |     setContextMenu({
-181 |       x: event.clientX,
-182 |       y: event.clientY,
-183 |       node: null,
-184 |     });
-185 |   }, []);
-186 | 
-187 |   const onPaneClick = useCallback(() => {
-188 |     setContextMenu(null);
-189 |   }, []);
-190 | 
-191 |   // Zoom/Viewport Controls
-192 |   const handleZoomIn = () => {
-193 |     zoomIn({ duration: 300 });
-194 |   };
+168 |   // Reconnection state
+169 |   const onReconnect = useCallback((oldEdge: Edge, newConnection: Connection) => {
+170 |     setEdges((eds) => reconnectEdge(oldEdge, newConnection, eds));
+171 |   }, [setEdges]);
+172 | 
+173 |   // Context Menu triggers
+174 |   const onNodeContextMenu = useCallback((event: any, node: Node) => {
+175 |     event.preventDefault();
+176 |     setContextMenu({
+177 |       x: event.clientX,
+178 |       y: event.clientY,
+179 |       node,
+180 |     });
+181 |   }, []);
+182 | 
+183 |   const onPaneContextMenu = useCallback((event: any) => {
+184 |     event.preventDefault();
+185 |     setContextMenu({
+186 |       x: event.clientX,
+187 |       y: event.clientY,
+188 |       node: null,
+189 |     });
+190 |   }, []);
+191 | 
+192 |   const onPaneClick = useCallback(() => {
+193 |     setContextMenu(null);
+194 |   }, []);
 195 | 
-196 |   const handleZoomOut = () => {
-197 |     zoomOut({ duration: 300 });
-198 |   };
-199 | 
-200 |   const handleResetView = () => {
-201 |     setViewport({ x: 100, y: 50, zoom: 0.9 }, { duration: 400 });
-202 |   };
-203 | 
-204 |   const applyLayout = useCallback(() => {
-205 |     if (nodes.length === 0) return;
-206 |     const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
-207 |     setNodes(layoutedNodes);
-208 |   }, [nodes, edges, setNodes]);
-209 | 
-210 |   // Layout nodes once initially when loaded
-211 |   useEffect(() => {
-212 |     if (!initialLayoutDone && nodes.length > 0) {
-213 |       const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
-214 |       setNodes(layoutedNodes);
-215 |       setInitialLayoutDone(true);
-216 |     }
-217 |   }, [nodes, edges, initialLayoutDone, setNodes]);
-218 | 
-219 |   // Reset layout state if node length changes back to 0 (new chat)
-220 |   useEffect(() => {
-221 |     if (nodes.length === 0) {
-222 |       setInitialLayoutDone(false);
-223 |     }
-224 |   }, [nodes.length]);
-225 | 
-226 |   // Auto-fit viewport on node count changes
-227 |   useEffect(() => {
-228 |     if (nodes.length > 0) {
-229 |       const timer = setTimeout(() => {
-230 |         fitView({ padding: 0.2, duration: 400 });
-231 |       }, 300);
-232 |       return () => clearTimeout(timer);
-233 |     }
-234 |   }, [nodes.length, fitView]);
-235 | 
-236 |   const handleAddAgentNode = () => {
-237 |     const randomId = `custom_agent_${Date.now().toString().slice(-4)}`;
-238 |     const view = getViewport();
-239 |     // Center new node inside view coordinates
-240 |     let x = (-view.x + window.innerWidth / 2 - 120) / view.zoom;
-241 |     let y = (-view.y + window.innerHeight / 2 - 100) / view.zoom;
-242 | 
-243 |     // Avoid collision
-244 |     const NODE_W = 240;
-245 |     const NODE_H = 220;
-246 |     const existingPositions = nodes.map(n => n.position);
-247 |     for (const pos of existingPositions) {
-248 |       if (Math.abs(x - pos.x) < NODE_W && Math.abs(y - pos.y) < NODE_H) {
-249 |         y = pos.y + NODE_H + 40;
-250 |       }
-251 |     }
-252 | 
-253 |     const newNode = {
-254 |       id: randomId,
-255 |       type: 'custom',
-256 |       position: { x: Math.max(50, x), y: Math.max(50, y) },
-257 |       data: {
-258 |         name: "Custom Agent Node",
-259 |         tag: "USER_CUSTOM_NODE",
-260 |         status: "IDLE" as const,
-261 |         metricLabel: "Tasks Completed",
-262 |         metricVal: "0",
-263 |         icon: "science",
-264 |         objective: "Enter agent goals...",
-265 |         personality: "Pragmatic, logical, responsive",
-266 |         systemPrompt: "You are a custom assistant. Fulfill user demands precisely.",
-267 |         rules: ["Verify actions before launching"],
-268 |         tools: ["Web Search"],
-269 |         temp: 0.5,
-270 |         logic: 80,
-271 |         empathy: 50,
-272 |         context: "128k",
-273 |         enabled: true,
-274 |         priority: 5,
-275 |         toolPermissions: {
-276 |           "Web Search": "ALLOWED" as const
-277 |         },
-278 |         toolLogs: []
-279 |       }
-280 |     };
-281 |     addNode(newNode);
-282 |     setSelectedNodeId(newNode.id);
-283 |   };
-284 | 
-285 |   // Node styles for MiniMap representation
-286 |   const getMiniMapNodeColor = (node: Node) => {
-287 |     if (node.type === 'groupNode') return 'rgba(255, 255, 255, 0.03)';
-288 |     const data = node.data as CanvasNodeData;
-289 |     if (data && data.enabled === false) return '#262626';
-290 |     if (data && (data.status === 'ACTIVE' || data.status === 'PROCESSING')) return '#06b6d4';
-291 |     return '#404040';
-292 |   };
-293 | 
-294 |   return (
-295 |     <div className="w-full h-full flex-1 relative bg-black">
-296 |       <ReactFlow
-297 |         nodes={nodes}
-298 |         edges={edges}
-299 |         onNodesChange={onNodesChange}
-300 |         onEdgesChange={onEdgesChange}
-301 |         onConnect={onConnect}
-302 |         onReconnect={onReconnect}
-303 |         nodeTypes={nodeTypes}
-304 |         edgeTypes={edgeTypes}
-305 |         onNodeContextMenu={onNodeContextMenu}
-306 |         onPaneContextMenu={onPaneContextMenu}
-307 |         onPaneClick={onPaneClick}
-308 |         snapToGrid={true}
-309 |         snapGrid={[15, 15]}
-310 |         fitViewOptions={{ padding: 0.2 }}
-311 |         className="flow-arena-editor"
-312 |         minZoom={0.2}
-313 |         maxZoom={2.5}
-314 |         defaultViewport={{ x: 100, y: 50, zoom: 0.9 }}
-315 |       >
-316 |         {/* Subtle grid background dots */}
-317 |         <Background 
-318 |           variant={BackgroundVariant.Dots} 
-319 |           color="rgba(255, 255, 255, 0.06)" 
-320 |           gap={24} 
-321 |           size={1}
-322 |         />
-323 | 
-324 |         {/* Custom Minimap Overlay */}
-325 |         <MiniMap 
-326 |           zoomable 
-327 |           pannable 
-328 |           nodeColor={getMiniMapNodeColor}
-329 |           nodeStrokeWidth={3}
-330 |           nodeBorderRadius={8}
-331 |           maskColor="rgba(0, 0, 0, 0.65)"
-332 |           className="!right-4 !top-4"
-333 |         />
-334 | 
-335 |         {/* Custom Floating Zoom & Node controls */}
-336 |         <Panel position="bottom-left" className="!left-4 !bottom-14 flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-1 rounded-xl z-20 shadow-2xl">
-337 |           <button 
-338 |             onClick={handleZoomIn}
-339 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors cursor-pointer"
-340 |             title="Zoom In"
-341 |           >
-342 |             <Plus className="w-3.5 h-3.5" />
-343 |           </button>
-344 | 
-345 |           <button 
-346 |             onClick={handleZoomOut}
-347 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors cursor-pointer"
-348 |             title="Zoom Out"
-349 |           >
-350 |             <Minus className="w-3.5 h-3.5" />
-351 |           </button>
-352 | 
-353 |           <button 
-354 |             onClick={handleResetView}
-355 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 cursor-pointer"
-356 |             title="Reset Viewport"
-357 |           >
-358 |             <Maximize className="w-3.5 h-3.5" />
-359 |           </button>
-360 | 
-361 |           <button 
-362 |             onClick={applyLayout}
-363 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 cursor-pointer"
-364 |             title="Auto Layout Graph"
-365 |           >
-366 |             <LayoutGrid className="w-3.5 h-3.5" />
-367 |           </button>
-368 | 
-369 |           <button 
-370 |             onClick={isEchoHouseMode ? () => setIsEchoHouseCreateFormOpen(true) : handleAddAgentNode}
-371 |             className="p-2 text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 flex items-center gap-1 text-[10px] cursor-pointer"
-372 |             title={isEchoHouseMode ? "Add Person" : "Add Custom Agent Node"}
-373 |           >
-374 |             <PlusCircle className="w-3.5 h-3.5 text-white" />
-375 |             <span className="font-semibold pr-1">Node</span>
-376 |           </button>
-377 |         </Panel>
-378 | 
-379 |         {/* Right-click Context Menu */}
-380 |         {contextMenu && (
-381 |           <ContextMenu
-382 |             x={contextMenu.x}
-383 |             y={contextMenu.y}
-384 |             node={contextMenu.node}
-385 |             onClose={() => setContextMenu(null)}
-386 |           />
-387 |         )}
-388 | 
-389 |         {/* Connection hint — shown when nodes exist but no edges drawn yet */}
-390 |         {!isEchoHouseMode && nodes.length > 1 && edges.length === 0 && !isOrchestrating && (
-391 |           <Panel position="top-right" className="!right-4 !top-16 select-none">
-392 |             <div className="bg-[#0d0d0d]/92 border border-[#1f1f1f] rounded-xl p-3 backdrop-blur-md shadow-xl w-52">
-393 |               <div className="flex items-center gap-2 mb-2.5">
-394 |                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-395 |                 <span className="text-[9px] font-mono text-neutral-400 uppercase tracking-wider font-bold">How to Connect</span>
-396 |               </div>
-397 |               <div className="space-y-2 text-[10px] text-neutral-500 leading-relaxed">
-398 |                 <div className="flex items-center gap-2">
-399 |                   <span className="w-3 h-3 rounded-full bg-black border-2 border-emerald-500 shrink-0" />
-400 |                   <span>Drag from <span className="text-emerald-400 font-semibold">green (OUT)</span></span>
-401 |                 </div>
-402 |                 <div className="flex items-center gap-2">
-403 |                   <span className="w-3 h-3 rounded-full bg-black border-2 border-rose-500 shrink-0" />
-404 |                   <span>Drop on <span className="text-rose-400 font-semibold">red (IN)</span></span>
-405 |                 </div>
-406 |                 <div className="flex items-center gap-2 pt-0.5 border-t border-[#141414] mt-1">
-407 |                   <span className="w-5 h-0.5 bg-cyan-500 rounded shrink-0" />
-408 |                   <span>Wire = agent dependency</span>
-409 |                 </div>
-410 |               </div>
-411 |             </div>
-412 |           </Panel>
-413 |         )}
-414 | 
-415 |         {/* EchoHouse instructional panel */}
-416 |         {isEchoHouseMode && (
-417 |           <Panel position="top-right" className="!right-4 !top-16 select-none z-20">
-418 |             <div className="bg-[#0d0d0d]/92 border border-[#1f1f1f] rounded-xl p-4 backdrop-blur-md shadow-xl w-72">
-419 |               <p className="text-xs text-neutral-300 leading-relaxed font-sans">
-420 |                 Add the people in your life — give each one a name, their role, and what they think about your situation. Then click Proceed to begin the simulation.
-421 |               </p>
-422 |             </div>
-423 |           </Panel>
-424 |         )}
-425 | 
-426 |         {/* Top-center Proceed Buttons */}
-427 |         {isEchoHouseMode ? (
-428 |           nodes.filter(n => (n.data as any).isEchoHouseAgent && (n.data as any).echohouseRole !== "self").length > 0 && (
-429 |             <Panel position="top-center" className="!top-4 z-20">
-430 |               <button
-431 |                 onClick={handleEchoHouseProceed}
-432 |                 disabled={isOrchestrating}
-433 |                 className="px-6 py-2.5 bg-white text-black font-bold text-xs rounded-full shadow-2xl hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2 select-none"
-434 |               >
-435 |                 {isOrchestrating ? (
-436 |                   <>
-437 |                     <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
-438 |                     <span>Running...</span>
-439 |                   </>
-440 |                 ) : (
-441 |                   <span>Proceed</span>
-442 |                 )}
-443 |               </button>
-444 |             </Panel>
-445 |           )
-446 |         ) : (
-447 |           nodes.length > 0 && executionState !== "running" && (
-448 |             <Panel position="top-center" className="!top-4 z-20">
-449 |               <button
-450 |                 onClick={handleNormalProceed}
-451 |                 disabled={isOrchestrating}
-452 |                 className="px-6 py-2.5 bg-white text-black font-bold text-xs rounded-full shadow-2xl hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2 select-none"
-453 |               >
-454 |                 {isOrchestrating ? (
-455 |                   <>
-456 |                     <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
-457 |                     <span>Running...</span>
-458 |                   </>
-459 |                 ) : (
-460 |                   <span>Proceed</span>
-461 |                 )}
-462 |               </button>
-463 |             </Panel>
-464 |           )
-465 |         )}
-466 | 
-467 |         {/* Persistent legend — bottom right */}
-468 |         <Panel position="bottom-right" className="!right-4 !bottom-14 select-none">
-469 |           <div className="bg-[#0d0d0d]/80 border border-[#1f1f1f] rounded-lg p-2.5 backdrop-blur-md shadow-xl text-[9px] font-mono text-neutral-600 space-y-1.5">
-470 |             <div className="flex items-center gap-2">
-471 |               <span className="w-2.5 h-2.5 rounded-full bg-black border-2 border-rose-500 shrink-0" />
-472 |               <span>Input (data in)</span>
-473 |             </div>
-474 |             <div className="flex items-center gap-2">
-475 |               <span className="w-2.5 h-2.5 rounded-full bg-black border-2 border-emerald-500 shrink-0" />
-476 |               <span>Output (data out)</span>
-477 |             </div>
-478 |             <div className="flex items-center gap-2">
-479 |               <span className="w-3.5 h-0.5 bg-cyan-500 rounded shrink-0" />
-480 |               <span>Dependency wire</span>
-481 |             </div>
-482 |             <div className="flex items-center gap-2">
-483 |               <span className="text-[8px] leading-none">✥</span>
-484 |               <span>Drag card to reposition</span>
-485 |             </div>
-486 |           </div>
-487 |         </Panel>
-488 |       </ReactFlow>
-489 | 
-490 |       {/* EchoHouse Inline Creation Form */}
-491 |       {isEchoHouseCreateFormOpen && isEchoHouseMode && (
-492 |         <div className="absolute bottom-28 left-4 w-72 bg-[#0c0c0c]/95 border border-[#1f1f1f] rounded-xl p-4 shadow-2xl z-30 space-y-3 select-none">
-493 |           <div className="flex justify-between items-center pb-2 border-b border-[#1f1f1f]">
-494 |             <span className="text-xs font-bold text-white uppercase tracking-wider">Add Person</span>
-495 |             <button onClick={() => setIsEchoHouseCreateFormOpen(false)} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-3.5 h-3.5" /></button>
-496 |           </div>
-497 |           <div className="space-y-2 text-xs">
-498 |             <div className="space-y-1">
-499 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">Name</label>
-500 |               <input
-501 |                 type="text"
-502 |                 value={formName}
-503 |                 onChange={(e) => setFormName(e.target.value)}
-504 |                 placeholder="Sarah, Dad, Crush..."
-505 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-white outline-none focus:border-neutral-500"
-506 |               />
-507 |             </div>
-508 |             <div className="space-y-1">
-509 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">Role in your life</label>
-510 |               <input
-511 |                 type="text"
-512 |                 value={formRole}
-513 |                 onChange={(e) => setFormRole(e.target.value)}
-514 |                 placeholder="Girlfriend, Father, Best Friend..."
-515 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-white outline-none focus:border-neutral-500"
-516 |               />
-517 |             </div>
-518 |             <div className="space-y-1">
-519 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">What do they think about your situation?</label>
-520 |               <textarea
-521 |                 value={formProblem}
-522 |                 onChange={(e) => setFormProblem(e.target.value)}
-523 |                 placeholder="Their perspective/context..."
-524 |                 rows={3}
-525 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2 text-white outline-none focus:border-neutral-500 resize-none"
-526 |               />
+196 |   // Zoom/Viewport Controls
+197 |   const handleZoomIn = () => {
+198 |     zoomIn({ duration: 300 });
+199 |   };
+200 | 
+201 |   const handleZoomOut = () => {
+202 |     zoomOut({ duration: 300 });
+203 |   };
+204 | 
+205 |   const handleResetView = () => {
+206 |     setViewport({ x: 100, y: 50, zoom: 0.9 }, { duration: 400 });
+207 |   };
+208 | 
+209 |   const applyLayout = useCallback(() => {
+210 |     if (nodes.length === 0) return;
+211 |     const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
+212 |     setNodes(layoutedNodes);
+213 |   }, [nodes, edges, setNodes]);
+214 | 
+215 |   // Layout nodes once initially when loaded
+216 |   useEffect(() => {
+217 |     if (!initialLayoutDone && nodes.length > 0) {
+218 |       const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
+219 |       setNodes(layoutedNodes);
+220 |       setInitialLayoutDone(true);
+221 |     }
+222 |   }, [nodes, edges, initialLayoutDone, setNodes]);
+223 | 
+224 |   // Reset layout state if node length changes back to 0 (new chat)
+225 |   useEffect(() => {
+226 |     if (nodes.length === 0) {
+227 |       setInitialLayoutDone(false);
+228 |     }
+229 |   }, [nodes.length]);
+230 | 
+231 |   // Auto-fit viewport on node count changes
+232 |   useEffect(() => {
+233 |     if (nodes.length > 0) {
+234 |       const timer = setTimeout(() => {
+235 |         fitView({ padding: 0.2, duration: 400 });
+236 |       }, 300);
+237 |       return () => clearTimeout(timer);
+238 |     }
+239 |   }, [nodes.length, fitView]);
+240 | 
+241 |   const handleAddAgentNode = () => {
+242 |     const randomId = `custom_agent_${Date.now().toString().slice(-4)}`;
+243 |     const view = getViewport();
+244 |     // Center new node inside view coordinates
+245 |     let x = (-view.x + window.innerWidth / 2 - 120) / view.zoom;
+246 |     let y = (-view.y + window.innerHeight / 2 - 100) / view.zoom;
+247 | 
+248 |     // Avoid collision
+249 |     const NODE_W = 240;
+250 |     const NODE_H = 220;
+251 |     const existingPositions = nodes.map(n => n.position);
+252 |     for (const pos of existingPositions) {
+253 |       if (Math.abs(x - pos.x) < NODE_W && Math.abs(y - pos.y) < NODE_H) {
+254 |         y = pos.y + NODE_H + 40;
+255 |       }
+256 |     }
+257 | 
+258 |     const newNode = {
+259 |       id: randomId,
+260 |       type: 'custom',
+261 |       position: { x: Math.max(50, x), y: Math.max(50, y) },
+262 |       data: {
+263 |         name: "Custom Agent Node",
+264 |         tag: "USER_CUSTOM_NODE",
+265 |         status: "IDLE" as const,
+266 |         metricLabel: "Tasks Completed",
+267 |         metricVal: "0",
+268 |         icon: "science",
+269 |         objective: "Enter agent goals...",
+270 |         personality: "Pragmatic, logical, responsive",
+271 |         systemPrompt: "You are a custom assistant. Fulfill user demands precisely.",
+272 |         rules: ["Verify actions before launching"],
+273 |         tools: ["Web Search"],
+274 |         temp: 0.5,
+275 |         logic: 80,
+276 |         empathy: 50,
+277 |         context: "128k",
+278 |         enabled: true,
+279 |         priority: 5,
+280 |         toolPermissions: {
+281 |           "Web Search": "ALLOWED" as const
+282 |         },
+283 |         toolLogs: []
+284 |       }
+285 |     };
+286 |     addNode(newNode);
+287 |     setSelectedNodeId(newNode.id);
+288 |   };
+289 | 
+290 |   // Node styles for MiniMap representation
+291 |   const getMiniMapNodeColor = (node: Node) => {
+292 |     if (node.type === 'groupNode') return 'rgba(255, 255, 255, 0.03)';
+293 |     const data = node.data as CanvasNodeData;
+294 |     if (data && data.enabled === false) return '#262626';
+295 |     if (data && (data.status === 'ACTIVE' || data.status === 'PROCESSING')) return '#06b6d4';
+296 |     return '#404040';
+297 |   };
+298 | 
+299 |   return (
+300 |     <div className="w-full h-full flex-1 relative bg-black">
+301 |       <ReactFlow
+302 |         nodes={nodes}
+303 |         edges={edges}
+304 |         onNodesChange={onNodesChange}
+305 |         onEdgesChange={onEdgesChange}
+306 |         onConnect={onConnect}
+307 |         onReconnect={onReconnect}
+308 |         nodeTypes={nodeTypes}
+309 |         edgeTypes={edgeTypes}
+310 |         onNodeContextMenu={onNodeContextMenu}
+311 |         onPaneContextMenu={onPaneContextMenu}
+312 |         onPaneClick={onPaneClick}
+313 |         snapToGrid={true}
+314 |         snapGrid={[15, 15]}
+315 |         fitViewOptions={{ padding: 0.2 }}
+316 |         className="flow-arena-editor"
+317 |         minZoom={0.2}
+318 |         maxZoom={2.5}
+319 |         defaultViewport={{ x: 100, y: 50, zoom: 0.9 }}
+320 |       >
+321 |         {/* Subtle grid background dots */}
+322 |         <Background 
+323 |           variant={BackgroundVariant.Dots} 
+324 |           color="rgba(255, 255, 255, 0.06)" 
+325 |           gap={24} 
+326 |           size={1}
+327 |         />
+328 | 
+329 |         {/* Custom Minimap Overlay */}
+330 |         <MiniMap 
+331 |           zoomable 
+332 |           pannable 
+333 |           nodeColor={getMiniMapNodeColor}
+334 |           nodeStrokeWidth={3}
+335 |           nodeBorderRadius={8}
+336 |           maskColor="rgba(0, 0, 0, 0.65)"
+337 |           className="!right-4 !top-4"
+338 |         />
+339 | 
+340 |         {/* Custom Floating Zoom & Node controls */}
+341 |         <Panel position="bottom-left" className="!left-4 !bottom-14 flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-1 rounded-xl z-20 shadow-2xl">
+342 |           <button 
+343 |             onClick={handleZoomIn}
+344 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors cursor-pointer"
+345 |             title="Zoom In"
+346 |           >
+347 |             <Plus className="w-3.5 h-3.5" />
+348 |           </button>
+349 | 
+350 |           <button 
+351 |             onClick={handleZoomOut}
+352 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors cursor-pointer"
+353 |             title="Zoom Out"
+354 |           >
+355 |             <Minus className="w-3.5 h-3.5" />
+356 |           </button>
+357 | 
+358 |           <button 
+359 |             onClick={handleResetView}
+360 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 cursor-pointer"
+361 |             title="Reset Viewport"
+362 |           >
+363 |             <Maximize className="w-3.5 h-3.5" />
+364 |           </button>
+365 | 
+366 |           <button 
+367 |             onClick={applyLayout}
+368 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 cursor-pointer"
+369 |             title="Auto Layout Graph"
+370 |           >
+371 |             <LayoutGrid className="w-3.5 h-3.5" />
+372 |           </button>
+373 | 
+374 |           <button 
+375 |             onClick={isEchoHouseMode ? () => setIsEchoHouseCreateFormOpen(true) : handleAddAgentNode}
+376 |             className="p-2 text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 flex items-center gap-1 text-[10px] cursor-pointer"
+377 |             title={isEchoHouseMode ? "Add Person" : "Add Custom Agent Node"}
+378 |           >
+379 |             <PlusCircle className="w-3.5 h-3.5 text-white" />
+380 |             <span className="font-semibold pr-1">Node</span>
+381 |           </button>
+382 |         </Panel>
+383 | 
+384 |         {/* Right-click Context Menu */}
+385 |         {contextMenu && (
+386 |           <ContextMenu
+387 |             x={contextMenu.x}
+388 |             y={contextMenu.y}
+389 |             node={contextMenu.node}
+390 |             onClose={() => setContextMenu(null)}
+391 |           />
+392 |         )}
+393 | 
+394 |         {/* Connection hint — shown when nodes exist but no edges drawn yet */}
+395 |         {!isEchoHouseMode && nodes.length > 1 && edges.length === 0 && !isOrchestrating && (
+396 |           <Panel position="top-right" className="!right-4 !top-16 select-none">
+397 |             <div className="bg-[#0d0d0d]/92 border border-[#1f1f1f] rounded-xl p-3 backdrop-blur-md shadow-xl w-52">
+398 |               <div className="flex items-center gap-2 mb-2.5">
+399 |                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+400 |                 <span className="text-[9px] font-mono text-neutral-400 uppercase tracking-wider font-bold">How to Connect</span>
+401 |               </div>
+402 |               <div className="space-y-2 text-[10px] text-neutral-500 leading-relaxed">
+403 |                 <div className="flex items-center gap-2">
+404 |                   <span className="w-3 h-3 rounded-full bg-black border-2 border-emerald-500 shrink-0" />
+405 |                   <span>Drag from <span className="text-emerald-400 font-semibold">green (OUT)</span></span>
+406 |                 </div>
+407 |                 <div className="flex items-center gap-2">
+408 |                   <span className="w-3 h-3 rounded-full bg-black border-2 border-rose-500 shrink-0" />
+409 |                   <span>Drop on <span className="text-rose-400 font-semibold">red (IN)</span></span>
+410 |                 </div>
+411 |                 <div className="flex items-center gap-2 pt-0.5 border-t border-[#141414] mt-1">
+412 |                   <span className="w-5 h-0.5 bg-cyan-500 rounded shrink-0" />
+413 |                   <span>Wire = agent dependency</span>
+414 |                 </div>
+415 |               </div>
+416 |             </div>
+417 |           </Panel>
+418 |         )}
+419 | 
+420 |         {/* EchoHouse instructional panel */}
+421 |         {isEchoHouseMode && (
+422 |           <Panel position="top-right" className="!right-4 !top-16 select-none z-20">
+423 |             <div className="bg-[#0d0d0d]/92 border border-[#1f1f1f] rounded-xl p-4 backdrop-blur-md shadow-xl w-72 space-y-3">
+424 |               <p className="text-xs text-neutral-300 leading-relaxed font-sans">
+425 |                 Add the people in your life — give each one a name, their role, and what they think about your situation. Then click Proceed to begin the simulation.
+426 |               </p>
+427 |               <div className="border-t border-[#1f1f1f] pt-3">
+428 |                 <button
+429 |                   onClick={() => setIsControlsOpen(!isControlsOpen)}
+430 |                   className="w-full flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-neutral-500 hover:text-neutral-300 transition-colors cursor-pointer"
+431 |                 >
+432 |                   <span>Simulation Settings</span>
+433 |                   <span className={`transition-transform duration-200 ${isControlsOpen ? 'rotate-180' : ''}`}>&#8964;</span>
+434 |                 </button>
+435 |                 {isControlsOpen && (
+436 |                   <div className="mt-3 space-y-3">
+437 |                     <div className="space-y-1.5">
+438 |                       <span className="text-[9px] font-mono uppercase tracking-wider text-neutral-600 font-bold block">Rounds</span>
+439 |                       <div className="flex gap-1">
+440 |                         {[1, 2, 3, 4, 5].map((n) => (
+441 |                           <button
+442 |                             key={n}
+443 |                             onClick={() => setEchoRounds(n)}
+444 |                             className={`w-8 h-8 rounded-lg text-xs font-semibold font-mono transition-all cursor-pointer ${
+445 |                               echoRounds === n ? 'bg-white text-black' : 'bg-neutral-900 text-neutral-400 hover:text-white border border-[#1f1f1f]'
+446 |                             }`}
+447 |                           >
+448 |                             {n}
+449 |                           </button>
+450 |                         ))}
+451 |                       </div>
+452 |                     </div>
+453 |                     <div className="space-y-1.5">
+454 |                       <span className="text-[9px] font-mono uppercase tracking-wider text-neutral-600 font-bold block">Tone</span>
+455 |                       <div className="flex gap-1 flex-wrap">
+456 |                         {(['Realistic', 'Compassionate', 'Confrontational'] as const).map((t) => (
+457 |                           <button
+458 |                             key={t}
+459 |                             onClick={() => setEchoTone(t)}
+460 |                             className={`px-2.5 py-1 rounded-lg text-[10px] font-mono transition-all cursor-pointer ${
+461 |                               echoTone === t ? 'bg-white text-black font-semibold' : 'bg-neutral-900 text-neutral-400 hover:text-white border border-[#1f1f1f]'
+462 |                             }`}
+463 |                           >
+464 |                             {t}
+465 |                           </button>
+466 |                         ))}
+467 |                       </div>
+468 |                     </div>
+469 |                   </div>
+470 |                 )}
+471 |               </div>
+472 |             </div>
+473 |           </Panel>
+474 |         )}
+475 | 
+476 |         {/* Top-center Proceed Buttons */}
+477 |         {isEchoHouseMode ? (
+478 |           nodes.filter(n => (n.data as any).isEchoHouseAgent && (n.data as any).echohouseRole !== "self").length > 0 && (
+479 |             <Panel position="top-center" className="!top-4 z-20">
+480 |               <button
+481 |                 onClick={handleEchoHouseProceed}
+482 |                 disabled={isOrchestrating}
+483 |                 className="px-6 py-2.5 bg-white text-black font-bold text-xs rounded-full shadow-2xl hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2 select-none"
+484 |               >
+485 |                 {isOrchestrating ? (
+486 |                   <>
+487 |                     <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+488 |                     <span>Running...</span>
+489 |                   </>
+490 |                 ) : (
+491 |                   <span>Proceed</span>
+492 |                 )}
+493 |               </button>
+494 |             </Panel>
+495 |           )
+496 |         ) : (
+497 |           nodes.length > 0 && executionState !== "running" && !isOrchestrating && (
+498 |             <Panel position="top-center" className="!top-4 z-20">
+499 |               <button
+500 |                 onClick={handleNormalProceed}
+501 |                 disabled={isOrchestrating}
+502 |                 className="px-6 py-2.5 bg-white text-black font-bold text-xs rounded-full shadow-2xl hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2 select-none"
+503 |               >
+504 |                 {isOrchestrating ? (
+505 |                   <>
+506 |                     <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+507 |                     <span>Running...</span>
+508 |                   </>
+509 |                 ) : (
+510 |                   <span>Proceed</span>
+511 |                 )}
+512 |               </button>
+513 |             </Panel>
+514 |           )
+515 |         )}
+516 | 
+517 |         {/* Persistent legend — bottom right */}
+518 |         <Panel position="bottom-right" className="!right-4 !bottom-14 select-none">
+519 |           <div className="bg-[#0d0d0d]/80 border border-[#1f1f1f] rounded-lg p-2.5 backdrop-blur-md shadow-xl text-[9px] font-mono text-neutral-600 space-y-1.5">
+520 |             <div className="flex items-center gap-2">
+521 |               <span className="w-2.5 h-2.5 rounded-full bg-black border-2 border-rose-500 shrink-0" />
+522 |               <span>Input (data in)</span>
+523 |             </div>
+524 |             <div className="flex items-center gap-2">
+525 |               <span className="w-2.5 h-2.5 rounded-full bg-black border-2 border-emerald-500 shrink-0" />
+526 |               <span>Output (data out)</span>
 527 |             </div>
-528 |             <button
-529 |               onClick={handleCreateEchoHousePerson}
-530 |               disabled={!formName.trim() || !formRole.trim() || !formProblem.trim()}
-531 |               className="w-full py-2 bg-white text-black font-bold rounded-lg text-xs hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-30 disabled:scale-100 cursor-pointer text-center"
-532 |             >
-533 |               Add Person
-534 |             </button>
-535 |           </div>
-536 |         </div>
-537 |       )}
-538 |     </div>
-539 |   );
-540 | }
-541 |
+528 |             <div className="flex items-center gap-2">
+529 |               <span className="w-3.5 h-0.5 bg-cyan-500 rounded shrink-0" />
+530 |               <span>Dependency wire</span>
+531 |             </div>
+532 |             <div className="flex items-center gap-2">
+533 |               <span className="text-[8px] leading-none">✥</span>
+534 |               <span>Drag card to reposition</span>
+535 |             </div>
+536 |           </div>
+537 |         </Panel>
+538 |       </ReactFlow>
+539 | 
+540 |       {/* EchoHouse Inline Creation Form */}
+541 |       {isEchoHouseCreateFormOpen && isEchoHouseMode && (
+542 |         <div className="absolute bottom-28 left-4 w-72 bg-[#0c0c0c]/95 border border-[#1f1f1f] rounded-xl p-4 shadow-2xl z-30 space-y-3 select-none">
+543 |           <div className="flex justify-between items-center pb-2 border-b border-[#1f1f1f]">
+544 |             <span className="text-xs font-bold text-white uppercase tracking-wider">Add Person</span>
+545 |             <button onClick={() => setIsEchoHouseCreateFormOpen(false)} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+546 |           </div>
+547 |           <div className="space-y-2 text-xs">
+548 |             <div className="space-y-1">
+549 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">Name</label>
+550 |               <input
+551 |                 type="text"
+552 |                 value={formName}
+553 |                 onChange={(e) => setFormName(e.target.value)}
+554 |                 placeholder="Sarah, Dad, Crush..."
+555 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-white outline-none focus:border-neutral-500"
+556 |               />
+557 |             </div>
+558 |             <div className="space-y-1">
+559 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">Role in your life</label>
+560 |               <input
+561 |                 type="text"
+562 |                 value={formRole}
+563 |                 onChange={(e) => setFormRole(e.target.value)}
+564 |                 placeholder="Girlfriend, Father, Best Friend..."
+565 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-white outline-none focus:border-neutral-500"
+566 |               />
+567 |             </div>
+568 |             <div className="space-y-1">
+569 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">What do they think about your situation?</label>
+570 |               <textarea
+571 |                 value={formProblem}
+572 |                 onChange={(e) => setFormProblem(e.target.value)}
+573 |                 placeholder="Their perspective/context..."
+574 |                 rows={3}
+575 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2 text-white outline-none focus:border-neutral-500 resize-none"
+576 |               />
+577 |             </div>
+578 |             <button
+579 |               onClick={handleCreateEchoHousePerson}
+580 |               disabled={!formName.trim() || !formRole.trim() || !formProblem.trim()}
+581 |               className="w-full py-2 bg-white text-black font-bold rounded-lg text-xs hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-30 disabled:scale-100 cursor-pointer text-center"
+582 |             >
+583 |               Add Person
+584 |             </button>
+585 |           </div>
+586 |         </div>
+587 |       )}
+588 |     </div>
+589 |   );
+590 | }
+591 |
 ```
 
 ### File: `Frontend/components/MarkdownRenderer.tsx`
@@ -8765,7 +9266,7 @@ SoloSpace/
 
 ### File: `Frontend/store/workflowStore.ts`
 
-> 1251 lines | 41.6 KB
+> 1324 lines | 44.8 KB
 
 ```typescript
    1 | import { create } from 'zustand';
@@ -8818,1207 +9319,1280 @@ SoloSpace/
   48 | 
   49 | export interface ChatMessage {
   50 |   id: string;
-  51 |   sender: 'user' | 'ai';
+  51 |   sender: 'user' | 'ai' | 'divider';
   52 |   text: string;
   53 |   thinkingSummary?: string;
   54 |   timestamp: string;
   55 |   speakerName?: string;
-  56 | }
-  57 | 
-  58 | export interface AgentTalkLog {
-  59 |   id: string;
-  60 |   senderId: string;
-  61 |   senderName: string;
-  62 |   senderIcon: string;
-  63 |   text: string;
-  64 |   timestamp: string;
-  65 | }
-  66 | 
-  67 | export interface PendingApproval {
-  68 |   sessionId?: string;
-  69 |   nodeId: string;
-  70 |   toolName: string;
-  71 |   action: string;
-  72 |   detail: string;
-  73 |   logId: string;
-  74 | }
-  75 | 
-  76 | export interface ChatSession {
-  77 |   id: string;
-  78 |   title: string;
-  79 |   prompt: string;
-  80 |   mode: 'auto' | 'custom' | 'echohouse';
-  81 |   nodes: Node[];
-  82 |   edges: Edge[];
-  83 |   chatMessages: ChatMessage[];
-  84 |   agentTalkLogs: AgentTalkLog[];
-  85 |   executionState: 'setup' | 'running' | 'paused';
-  86 |   statusMessage: string;
-  87 |   followUpSuggestions?: string[];
-  88 | }
-  89 | 
-  90 | export interface WorkflowState {
-  91 |   sessions: Record<string, ChatSession>;
-  92 |   activeSessionId: string | null;
-  93 |   nodes: Node[];
-  94 |   edges: Edge[];
-  95 |   selectedNodeId: string | null;
-  96 |   executionState: 'setup' | 'running' | 'paused';
-  97 |   isOrchestrating: boolean;
-  98 |   isThinking: boolean;
-  99 |   statusMessage: string;
- 100 |   chatMessages: ChatMessage[];
- 101 |   agentTalkLogs: AgentTalkLog[];
- 102 |   pendingApproval: PendingApproval | null;
- 103 |   apiKey: string | null;
- 104 |   setApiKey: (key: string | null) => void;
- 105 |   provider: string;
- 106 |   model: string;
- 107 |   apiKeys: Record<string, string>;
- 108 |   availableProviders: Record<string, any>;
- 109 |   setProvider: (provider: string) => void;
- 110 |   setModel: (model: string) => void;
- 111 |   setProviderApiKey: (provider: string, key: string) => Promise<void>;
- 112 |   loadPersistedKeys: () => Promise<void>;
- 113 |   loadPersistedState: () => Promise<void>;
- 114 |   fetchAvailableProviders: () => Promise<void>;
- 115 |   fallbackProvider: string;
- 116 |   setFallbackProvider: (provider: string) => void;
- 117 |   providerBaseUrls: Record<string, string>;
- 118 |   setProviderBaseUrl: (provider: string, url: string) => void;
- 119 |   providerModels: Record<string, any[]>;
- 120 |   fetchProviderModels: (providerId: string) => Promise<void>;
- 121 |   followUpSuggestions: string[];
- 122 |   liveThoughts: string;
- 123 |   abortController: AbortController | null;
- 124 |   cancelOrchestration: () => void;
- 125 | 
- 126 |   // Actions
- 127 |   setNodes: (nodes: Node[] | ((nds: Node[]) => Node[])) => void;
- 128 |   setEdges: (edges: Edge[] | ((eds: Edge[]) => Edge[])) => void;
- 129 |   onNodesChange: OnNodesChange<Node>;
- 130 |   onEdgesChange: OnEdgesChange;
- 131 |   onConnect: OnConnect;
- 132 |   setSelectedNodeId: (id: string | null) => void;
- 133 |   updateNodeField: (nodeId: string, updates: Partial<CanvasNodeData>) => void;
- 134 |   addNode: (node: Node) => void;
- 135 |   deleteNode: (nodeId: string) => void;
- 136 |   deleteEdge: (edgeId: string) => void;
- 137 |   addRule: (nodeId: string, rule: string) => void;
- 138 |   deleteRule: (nodeId: string, ruleIndex: number) => void;
- 139 |   simulateToolExecution?: never;
- 140 |   setExecutionState: (state: 'setup' | 'running' | 'paused') => void;
- 141 |   setIsOrchestrating: (val: boolean) => void;
- 142 |   setIsThinking: (val: boolean) => void;
- 143 |   setStatusMessage: (msg: string) => void;
- 144 |   setChatMessages: (msgs: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
- 145 |   setAgentTalkLogs: (logs: AgentTalkLog[] | ((prev: AgentTalkLog[]) => AgentTalkLog[])) => void;
- 146 |   setPendingApproval: (val: PendingApproval | null) => void;
- 147 | 
- 148 |   createSession: (prompt: string, mode: 'auto' | 'custom' | 'echohouse') => string;
- 149 |   forkSession: (sessionId: string) => Promise<string | null>;
- 150 |   switchSession: (sessionId: string) => void;
- 151 |   saveCurrentSession: () => void;
- 152 |   fetchSessions: () => Promise<void>;
- 153 |   loadSessionFromDb: (sessionId: string) => Promise<void>;
- 154 |   deleteSessionFromDb: (sessionId: string) => Promise<void>;
- 155 | 
- 156 |   triggerSteerOrchestration: (promptText: string, execute?: boolean, mode?: string) => void;
- 157 |   triggerCustomExecution: () => Promise<void>;
- 158 |   triggerEchoHouseSimulation: () => Promise<void>;
- 159 | }
- 160 | 
- 161 | let saveTimeout: any = null;
- 162 | const debounceSave = (currentSessionId: string, get: any, set: any) => {
- 163 |   if (saveTimeout) clearTimeout(saveTimeout);
- 164 |   saveTimeout = setTimeout(async () => {
- 165 |     // Re-verify the session is still active before saving to prevent stale writes
- 166 |     const activeId = get().activeSessionId;
- 167 |     if (activeId !== currentSessionId) return;
- 168 | 
- 169 |     let updatedSession: any = null;
- 170 | 
- 171 |     set((state: any) => {
- 172 |       // Only save if the session still exists
- 173 |       if (!state.sessions[currentSessionId]) return state;
- 174 | 
- 175 |       const currentSession = {
- 176 |         id: currentSessionId,
- 177 |         title: state.sessions[currentSessionId]?.title || "Chat",
- 178 |         prompt: state.sessions[currentSessionId]?.prompt || "",
- 179 |         mode: state.sessions[currentSessionId]?.mode || "auto",
- 180 |         nodes: state.nodes,
- 181 |         edges: state.edges,
- 182 |         chatMessages: state.chatMessages,
- 183 |         agentTalkLogs: state.agentTalkLogs,
- 184 |         executionState: state.executionState,
- 185 |         statusMessage: state.statusMessage,
- 186 |         followUpSuggestions: state.followUpSuggestions
- 187 |       };
- 188 |       updatedSession = currentSession;
- 189 |       return { sessions: { ...state.sessions, [currentSessionId]: currentSession } };
- 190 |     });
- 191 | 
- 192 |     if (updatedSession) {
- 193 |       try {
- 194 |         await fetch("/api/gemini/sessions/save", {
- 195 |           method: "POST",
- 196 |           headers: {
- 197 |             "Content-Type": "application/json",
- 198 |           },
- 199 |           body: JSON.stringify({
- 200 |             session_id: updatedSession.id,
- 201 |             title: updatedSession.title,
- 202 |             prompt: updatedSession.prompt,
- 203 |             mode: updatedSession.mode,
- 204 |             nodes: updatedSession.nodes,
- 205 |             edges: updatedSession.edges,
- 206 |             chat_messages: updatedSession.chatMessages,
- 207 |             agent_talk_logs: updatedSession.agentTalkLogs,
- 208 |             execution_state: updatedSession.executionState,
- 209 |             status_message: updatedSession.statusMessage,
- 210 |             follow_up_suggestions: updatedSession.followUpSuggestions || [],
- 211 |           }),
- 212 |         });
- 213 |       } catch (e) {
- 214 |         console.error("Failed to save session to SQLite DB:", e);
- 215 |       }
- 216 |     }
- 217 |   }, 500);
- 218 | };
- 219 | 
- 220 | export const useWorkflowStore = create<WorkflowState>((set, get) => ({
- 221 |   sessions: {},
- 222 |   activeSessionId: null,
- 223 |   nodes: [],
- 224 |   edges: [],
- 225 |   selectedNodeId: null,
- 226 |   executionState: 'setup',
- 227 |   isOrchestrating: false,
- 228 |   isThinking: false,
- 229 |   statusMessage: '',
- 230 |   chatMessages: [],
- 231 |   agentTalkLogs: [],
- 232 |   pendingApproval: null,
- 233 |   apiKey: null,
- 234 |   setApiKey: (key) => set({ apiKey: key }),
- 235 |   provider: "gemini",
- 236 |   model: "gemini-2.5-flash",
- 237 |   apiKeys: {},
- 238 |   availableProviders: {},
- 239 |   setProvider: (provider) => set({ provider }),
- 240 |   setModel: (model) => set({ model }),
- 241 |   setProviderApiKey: async (provider, key) => {
- 242 |     set((state) => ({ apiKeys: { ...state.apiKeys, [provider]: key } }));
- 243 |     try {
- 244 |       if (key) {
- 245 |         const encrypted = await encryptKey(key);
- 246 |         await idbSet(`apikey_${provider}`, encrypted);
- 247 |       } else {
- 248 |         await idbDel(`apikey_${provider}`);
- 249 |       }
- 250 |     } catch (e) {
- 251 |       console.error(`Failed to encrypt/persist key for provider ${provider}:`, e);
- 252 |     }
- 253 |   },
- 254 |   loadPersistedKeys: async () => {
- 255 |     try {
- 256 |       const state = get();
- 257 |       const providers = ['gemini', 'openai', 'anthropic', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia'];
- 258 |       const loadedKeys: Record<string, string> = {};
- 259 |       for (const p of providers) {
- 260 |         const encrypted = await idbGet<string>(`apikey_${p}`);
- 261 |         if (encrypted) {
- 262 |           try {
- 263 |             const decrypted = await decryptKey(encrypted);
- 264 |             loadedKeys[p] = decrypted;
- 265 |           } catch (err) {
- 266 |             console.error(`Failed to decrypt key for provider ${p}:`, err);
- 267 |           }
- 268 |         }
- 269 |       }
- 270 |       set({ apiKeys: { ...state.apiKeys, ...loadedKeys } });
- 271 |     } catch (e) {
- 272 |       console.error("Failed to load persisted API keys:", e);
- 273 |     }
- 274 |   },
- 275 |   loadPersistedState: async () => {
- 276 |     try {
- 277 |       const raw = await idbGet<string>('solospace_workflow_state');
- 278 |       if (raw) {
- 279 |         const parsed = JSON.parse(raw);
- 280 |         set({
- 281 |           activeSessionId: parsed.activeSessionId ?? null,
- 282 |           sessions: parsed.sessions ?? {},
- 283 |           nodes: parsed.nodes ?? [],
- 284 |           edges: parsed.edges ?? [],
- 285 |           provider: parsed.provider ?? "gemini",
- 286 |           model: parsed.model ?? "gemini-2.5-flash",
- 287 |           fallbackProvider: parsed.fallbackProvider ?? "",
- 288 |           providerBaseUrls: parsed.providerBaseUrls ?? {},
- 289 |         });
- 290 |       }
- 291 |     } catch (e) {
- 292 |       console.error("Failed to load persisted state from IndexedDB:", e);
- 293 |     }
- 294 |   },
- 295 |   fetchAvailableProviders: async () => {
- 296 |     try {
- 297 |       const resp = await fetch("/api/gemini/providers");
- 298 |       if (resp.ok) {
- 299 |         const data = await resp.json();
- 300 |         set({ availableProviders: data });
- 301 |       }
- 302 |     } catch (e) {
- 303 |       console.error("Failed to fetch available providers", e);
- 304 |     }
- 305 |   },
- 306 |   fallbackProvider: "",
- 307 |   setFallbackProvider: (provider) => set({ fallbackProvider: provider }),
- 308 |   providerBaseUrls: {},
- 309 |   setProviderBaseUrl: (provider, url) => set((state) => ({ providerBaseUrls: { ...state.providerBaseUrls, [provider]: url } })),
- 310 |   providerModels: {},
- 311 |   fetchProviderModels: async (providerId: string) => {
- 312 |     try {
- 313 |       const state = get();
- 314 |       const apiKey = state.apiKeys[providerId] || state.apiKey || "";
- 315 |       const baseUrl = state.providerBaseUrls[providerId] || "";
- 316 |       const isOllama = providerId === "ollama";
- 317 |       
- 318 |       const endpoint = isOllama ? "/api/gemini/ollama" : "/api/gemini/models";
- 319 |       const method = isOllama ? "GET" : "POST";
- 320 |       const body = isOllama ? undefined : JSON.stringify({
- 321 |         provider: providerId,
- 322 |         api_key: apiKey,
- 323 |         api_keys: state.apiKeys,
- 324 |         base_url: baseUrl
- 325 |       });
- 326 | 
- 327 |       const resp = await fetch(endpoint, {
- 328 |         method,
- 329 |         headers: { "Content-Type": "application/json" },
- 330 |         body
- 331 |       });
- 332 |       if (resp.ok) {
- 333 |         const data = await resp.json();
- 334 |         set((state) => ({
- 335 |           providerModels: {
- 336 |             ...state.providerModels,
- 337 |             [providerId]: data.models || []
- 338 |           }
- 339 |         }));
- 340 |       }
- 341 |     } catch (e) {
- 342 |       console.error(`Failed to fetch models for provider ${providerId}`, e);
- 343 |     }
- 344 |   },
- 345 |   followUpSuggestions: [],
- 346 |   liveThoughts: '',
- 347 |   abortController: null,
- 348 |   cancelOrchestration: () => {
- 349 |     const controller = get().abortController;
- 350 |     if (controller) {
- 351 |       controller.abort();
- 352 |       set({ abortController: null, isOrchestrating: false, isThinking: false });
- 353 |     }
- 354 |   },
- 355 | 
- 356 |   setNodes: (newNodes) => {
- 357 |     set((state) => ({
- 358 |       nodes: typeof newNodes === 'function' ? newNodes(state.nodes) : newNodes
- 359 |     }));
- 360 |     get().saveCurrentSession();
- 361 |   },
- 362 | 
- 363 |   setEdges: (newEdges) => {
- 364 |     set((state) => ({
- 365 |       edges: typeof newEdges === 'function' ? newEdges(state.edges) : newEdges
- 366 |     }));
- 367 |     get().saveCurrentSession();
- 368 |   },
- 369 | 
- 370 |   onNodesChange: (changes) => {
- 371 |     set((state) => ({
- 372 |       nodes: applyNodeChanges(changes, state.nodes)
- 373 |     }));
- 374 |     get().saveCurrentSession();
- 375 |   },
- 376 | 
- 377 |   onEdgesChange: (changes) => {
- 378 |     set((state) => ({
- 379 |       edges: applyEdgeChanges(changes, state.edges)
- 380 |     }));
- 381 |     get().saveCurrentSession();
- 382 |   },
- 383 | 
- 384 |   onConnect: (connection) => {
- 385 |     set((state) => {
- 386 |       const edge: Edge = {
- 387 |         ...connection,
- 388 |         id: `e-${connection.source}-${connection.target}`,
- 389 |         animated: true,
- 390 |         type: 'custom',
- 391 |         style: { stroke: '#06b6d4', strokeWidth: 2 }
- 392 |       };
- 393 | 
- 394 |       // Sync dependency: target node depends on source node
- 395 |       const updatedNodes = state.nodes.map(node => {
- 396 |         if (node.id === connection.target) {
- 397 |           const currentDeps = (node.data as any).dependencies || [];
- 398 |           if (!currentDeps.includes(connection.source)) {
- 399 |             return {
- 400 |               ...node,
- 401 |               data: { ...node.data, dependencies: [...currentDeps, connection.source] }
- 402 |             };
- 403 |           }
- 404 |         }
- 405 |         return node;
- 406 |       });
- 407 | 
- 408 |       return { edges: addEdge(edge, state.edges), nodes: updatedNodes };
- 409 |     });
- 410 |     get().saveCurrentSession();
- 411 |   },
- 412 | 
- 413 |   setSelectedNodeId: (id) => set({ selectedNodeId: id }),
- 414 | 
- 415 |   updateNodeField: (nodeId, updates) => {
- 416 |     set((state) => ({
- 417 |       nodes: state.nodes.map((node) => {
- 418 |         if (node.id === nodeId) {
- 419 |           return { ...node, data: { ...node.data, ...updates } };
- 420 |         }
- 421 |         return node;
- 422 |       })
- 423 |     }));
- 424 |     get().saveCurrentSession();
- 425 |   },
- 426 | 
- 427 |   addNode: (node) => {
- 428 |     set((state) => ({ nodes: [...state.nodes, node] }));
- 429 |     get().saveCurrentSession();
- 430 |   },
- 431 | 
- 432 |   deleteNode: (nodeId) => {
- 433 |     set((state) => ({
- 434 |       nodes: state.nodes.filter((node) => node.id !== nodeId),
- 435 |       edges: state.edges.filter((edge) => edge.source !== nodeId && edge.target !== nodeId),
- 436 |       selectedNodeId: state.selectedNodeId === nodeId ? null : state.selectedNodeId
- 437 |     }));
- 438 |     get().saveCurrentSession();
- 439 |   },
- 440 | 
- 441 |   deleteEdge: (edgeId) => {
- 442 |     set((state) => {
- 443 |       const edge = state.edges.find(e => e.id === edgeId);
- 444 |       let updatedNodes = state.nodes;
- 445 | 
- 446 |       // Sync dependency: remove source from target's dependencies when edge deleted
- 447 |       if (edge) {
- 448 |         updatedNodes = state.nodes.map(node => {
- 449 |           if (node.id === edge.target) {
- 450 |             const currentDeps = (node.data as any).dependencies || [];
- 451 |             return {
- 452 |               ...node,
- 453 |               data: { ...node.data, dependencies: currentDeps.filter((d: string) => d !== edge.source) }
- 454 |             };
- 455 |           }
- 456 |           return node;
- 457 |         });
- 458 |       }
- 459 | 
- 460 |       return {
- 461 |         edges: state.edges.filter(e => e.id !== edgeId),
- 462 |         nodes: updatedNodes
- 463 |       };
- 464 |     });
- 465 |     get().saveCurrentSession();
- 466 |   },
- 467 | 
- 468 |   addRule: (nodeId, rule) => {
- 469 |     set((state) => ({
- 470 |       nodes: state.nodes.map((node) => {
- 471 |         if (node.id === nodeId) {
- 472 |           return {
- 473 |             ...node,
- 474 |             data: { ...node.data, rules: [...((node.data as any).rules || []), rule] }
- 475 |           };
- 476 |         }
- 477 |         return node;
- 478 |       })
- 479 |     }));
- 480 |     get().saveCurrentSession();
- 481 |   },
- 482 | 
- 483 |   deleteRule: (nodeId, ruleIndex) => {
- 484 |     set((state) => ({
- 485 |       nodes: state.nodes.map((node) => {
- 486 |         if (node.id === nodeId) {
- 487 |           return {
- 488 |             ...node,
- 489 |             data: {
- 490 |               ...node.data,
- 491 |               rules: ((node.data as any).rules || []).filter((_: any, idx: number) => idx !== ruleIndex)
- 492 |             }
- 493 |           };
- 494 |         }
- 495 |         return node;
- 496 |       })
- 497 |     }));
- 498 |     get().saveCurrentSession();
- 499 |   },
- 500 | 
- 501 |   // (simulateToolExecution removed — backend runs real tools)
- 502 | 
- 503 |   // State modifiers
- 504 |   setExecutionState: (state) => {
- 505 |     set({ executionState: state });
- 506 |     get().saveCurrentSession();
- 507 |   },
- 508 |   setIsOrchestrating: (val) => set({ isOrchestrating: val }),
- 509 |   setIsThinking: (val) => set({ isThinking: val }),
- 510 |   setStatusMessage: (msg) => {
- 511 |     set({ statusMessage: msg });
- 512 |     get().saveCurrentSession();
- 513 |   },
- 514 |   setChatMessages: (msgs) => {
- 515 |     set((state) => ({
- 516 |       chatMessages: typeof msgs === 'function' ? msgs(state.chatMessages) : msgs
- 517 |     }));
- 518 |     get().saveCurrentSession();
- 519 |   },
- 520 |   setAgentTalkLogs: (logs) => {
- 521 |     set((state) => ({
- 522 |       agentTalkLogs: typeof logs === 'function' ? logs(state.agentTalkLogs) : logs
- 523 |     }));
- 524 |     get().saveCurrentSession();
- 525 |   },
- 526 |   setPendingApproval: (val) => set({ pendingApproval: val }),
- 527 | 
- 528 |   createSession: (prompt, mode) => {
- 529 |     const ctrl = get().abortController;
- 530 |     if (ctrl) ctrl.abort();
- 531 | 
- 532 |     const sessionId = Date.now().toString();
- 533 |     const newSession: ChatSession = {
- 534 |       id: sessionId,
- 535 |       title: prompt.length > 40 ? prompt.substring(0, 40) + "..." : prompt,
- 536 |       prompt: prompt,
- 537 |       mode: mode,
- 538 |       nodes: [],
- 539 |       edges: [],
- 540 |       chatMessages: [],
- 541 |       agentTalkLogs: [],
- 542 |       executionState: "setup",
- 543 |       statusMessage: "",
- 544 |       followUpSuggestions: []
- 545 |     };
- 546 | 
- 547 |     set((state) => ({
- 548 |       sessions: { ...state.sessions, [sessionId]: newSession },
- 549 |       activeSessionId: sessionId,
- 550 |       nodes: [],
- 551 |       edges: [],
- 552 |       chatMessages: [],
- 553 |       agentTalkLogs: [],
- 554 |       executionState: "setup",
- 555 |       statusMessage: "",
- 556 |       followUpSuggestions: [],
- 557 |       isOrchestrating: false,
- 558 |       isThinking: false,
- 559 |       liveThoughts: "",
- 560 |       pendingApproval: null,
- 561 |       selectedNodeId: null,
- 562 |       abortController: null
- 563 |     }));
- 564 | 
- 565 |     return sessionId;
- 566 |   },
- 567 | 
- 568 |   forkSession: async (sessionId) => {
- 569 |     const sourceSession = get().sessions[sessionId];
- 570 |     if (!sourceSession) return null;
- 571 | 
- 572 |     const newSessionId = `forked-${Date.now()}`;
- 573 |     const newTitle = `${sourceSession.title} (Fork)`;
- 574 |     
- 575 |     const newSession: ChatSession = {
- 576 |       id: newSessionId,
- 577 |       title: newTitle,
- 578 |       prompt: sourceSession.prompt,
- 579 |       mode: sourceSession.mode,
- 580 |       nodes: JSON.parse(JSON.stringify(sourceSession.nodes || [])),
- 581 |       edges: JSON.parse(JSON.stringify(sourceSession.edges || [])),
- 582 |       chatMessages: JSON.parse(JSON.stringify(sourceSession.chatMessages || [])),
- 583 |       agentTalkLogs: JSON.parse(JSON.stringify(sourceSession.agentTalkLogs || [])),
- 584 |       executionState: sourceSession.executionState || "setup",
- 585 |       statusMessage: sourceSession.statusMessage || "",
- 586 |       followUpSuggestions: sourceSession.followUpSuggestions || []
- 587 |     };
- 588 | 
- 589 |     set((state) => ({
- 590 |       sessions: { ...state.sessions, [newSessionId]: newSession },
- 591 |       activeSessionId: newSessionId,
- 592 |       nodes: newSession.nodes,
- 593 |       edges: newSession.edges,
- 594 |       chatMessages: newSession.chatMessages,
- 595 |       agentTalkLogs: newSession.agentTalkLogs,
- 596 |       executionState: newSession.executionState,
- 597 |       statusMessage: newSession.statusMessage,
- 598 |       followUpSuggestions: newSession.followUpSuggestions,
- 599 |       selectedNodeId: null
- 600 |     }));
- 601 | 
- 602 |     try {
- 603 |       await fetch("/api/gemini/sessions/save", {
- 604 |         method: "POST",
- 605 |         headers: { "Content-Type": "application/json" },
- 606 |         body: JSON.stringify({
- 607 |           session_id: newSession.id,
- 608 |           title: newSession.title,
- 609 |           prompt: newSession.prompt,
- 610 |           mode: newSession.mode,
- 611 |           nodes: newSession.nodes,
- 612 |           edges: newSession.edges,
- 613 |           chat_messages: newSession.chatMessages,
- 614 |           agent_talk_logs: newSession.agentTalkLogs,
- 615 |           execution_state: newSession.executionState,
- 616 |           status_message: newSession.statusMessage,
- 617 |           follow_up_suggestions: newSession.followUpSuggestions,
- 618 |         }),
- 619 |       });
- 620 |     } catch (e) {
- 621 |       console.error("Failed to save forked session to DB", e);
- 622 |     }
- 623 | 
- 624 |     return newSessionId;
- 625 |   },
- 626 | 
- 627 |   switchSession: (sessionId) => {
- 628 |     const ctrl = get().abortController;
- 629 |     if (ctrl) ctrl.abort();
- 630 | 
- 631 |     const currentSessionId = get().activeSessionId;
- 632 |     if (currentSessionId) {
- 633 |       const currentSession: ChatSession = {
- 634 |         id: currentSessionId,
- 635 |         title: get().sessions[currentSessionId]?.title || "Chat",
- 636 |         prompt: get().sessions[currentSessionId]?.prompt || "",
- 637 |         mode: get().sessions[currentSessionId]?.mode || "auto",
- 638 |         nodes: get().nodes,
- 639 |         edges: get().edges,
- 640 |         chatMessages: get().chatMessages,
- 641 |         agentTalkLogs: get().agentTalkLogs,
- 642 |         executionState: get().executionState,
- 643 |         statusMessage: get().statusMessage,
- 644 |         followUpSuggestions: get().followUpSuggestions
- 645 |       };
- 646 |       set((state) => ({
- 647 |         sessions: { ...state.sessions, [currentSessionId]: currentSession }
- 648 |       }));
- 649 |     }
- 650 | 
- 651 |     const newSession = get().sessions[sessionId];
- 652 |     if (newSession) {
- 653 |       set({
- 654 |         activeSessionId: sessionId,
- 655 |         nodes: newSession.nodes,
- 656 |         edges: newSession.edges,
- 657 |         chatMessages: newSession.chatMessages,
- 658 |         agentTalkLogs: newSession.agentTalkLogs,
- 659 |         executionState: newSession.executionState,
- 660 |         statusMessage: "",
- 661 |         followUpSuggestions: [],
- 662 |         selectedNodeId: null,
- 663 |         isOrchestrating: false,
- 664 |         isThinking: false,
- 665 |         liveThoughts: "",
- 666 |         pendingApproval: null,
- 667 |         abortController: null
- 668 |       });
- 669 |     }
- 670 |   },
- 671 | 
- 672 |   saveCurrentSession: () => {
- 673 |     const currentSessionId = get().activeSessionId;
- 674 |     if (!currentSessionId) return;
- 675 |     debounceSave(currentSessionId, get, set);
- 676 |   },
- 677 | 
- 678 |   fetchSessions: async () => {
- 679 |     try {
- 680 |       const response = await fetch("/api/gemini/sessions");
- 681 |       if (response.ok) {
- 682 |         const list = await response.json();
- 683 |         const updatedSessions: Record<string, ChatSession> = { ...get().sessions };
- 684 |         for (const s of list) {
- 685 |           if (!updatedSessions[s.session_id]) {
- 686 |             updatedSessions[s.session_id] = {
- 687 |               id: s.session_id,
- 688 |               title: s.title,
- 689 |               prompt: s.prompt,
- 690 |               mode: s.mode,
- 691 |               nodes: [],
- 692 |               edges: [],
- 693 |               chatMessages: [],
- 694 |               agentTalkLogs: [],
- 695 |               executionState: s.execution_state,
- 696 |               statusMessage: s.status_message,
- 697 |               followUpSuggestions: []
- 698 |             };
- 699 |           }
- 700 |         }
- 701 |         set({ sessions: updatedSessions });
- 702 |       }
- 703 |     } catch (e) {
- 704 |       console.error("Failed to fetch sessions from DB", e);
- 705 |     }
- 706 |   },
- 707 | 
- 708 |   loadSessionFromDb: async (sessionId: string) => {
- 709 |     const ctrl = get().abortController;
- 710 |     if (ctrl) ctrl.abort();
- 711 | 
- 712 |     try {
- 713 |       const response = await fetch(`/api/gemini/sessions/${sessionId}`);
- 714 |       if (response.ok) {
- 715 |         const fullSession = await response.json();
- 716 |         const session: ChatSession = {
- 717 |           id: fullSession.id,
- 718 |           title: fullSession.title,
- 719 |           prompt: fullSession.prompt,
- 720 |           mode: fullSession.mode,
- 721 |           nodes: fullSession.nodes,
- 722 |           edges: fullSession.edges,
- 723 |           chatMessages: fullSession.chatMessages,
- 724 |           agentTalkLogs: fullSession.agentTalkLogs,
- 725 |           executionState: fullSession.executionState,
- 726 |           statusMessage: fullSession.statusMessage,
- 727 |           followUpSuggestions: fullSession.followUpSuggestions
- 728 |         };
- 729 |         
- 730 |         set((state) => ({
- 731 |           sessions: { ...state.sessions, [sessionId]: session },
- 732 |           activeSessionId: sessionId,
- 733 |           nodes: session.nodes,
- 734 |           edges: session.edges,
- 735 |           chatMessages: session.chatMessages,
- 736 |           agentTalkLogs: session.agentTalkLogs,
- 737 |           executionState: session.executionState,
- 738 |           statusMessage: "",
- 739 |           followUpSuggestions: [],
- 740 |           selectedNodeId: null,
- 741 |           isOrchestrating: false,
- 742 |           isThinking: false,
- 743 |           liveThoughts: "",
- 744 |           pendingApproval: null,
- 745 |           abortController: null
- 746 |         }));
- 747 |       }
- 748 |     } catch (e) {
- 749 |       console.error("Failed to load session from DB", e);
- 750 |     }
- 751 |   },
- 752 | 
- 753 |   deleteSessionFromDb: async (sessionId: string) => {
- 754 |     // Abort orchestration if deleting the currently active session
- 755 |     if (get().activeSessionId === sessionId) {
- 756 |       const ctrl = get().abortController;
- 757 |       if (ctrl) ctrl.abort();
- 758 |     }
- 759 | 
- 760 |     try {
- 761 |       const response = await fetch(`/api/gemini/sessions/${sessionId}`, {
- 762 |         method: "DELETE"
- 763 |       });
- 764 |       if (response.ok) {
- 765 |         set((state) => {
- 766 |           const updated = { ...state.sessions };
- 767 |           delete updated[sessionId];
- 768 |           const newActiveId = state.activeSessionId === sessionId ? null : state.activeSessionId;
- 769 |           return {
- 770 |             sessions: updated,
- 771 |             activeSessionId: newActiveId,
- 772 |             abortController: state.activeSessionId === sessionId ? null : state.abortController,
- 773 |             isOrchestrating: state.activeSessionId === sessionId ? false : state.isOrchestrating,
- 774 |             isThinking: state.activeSessionId === sessionId ? false : state.isThinking,
- 775 |             ...(newActiveId ? {} : {
- 776 |               nodes: [],
- 777 |               edges: [],
- 778 |               chatMessages: [],
- 779 |               agentTalkLogs: [],
- 780 |               executionState: "setup",
- 781 |               statusMessage: "",
- 782 |               followUpSuggestions: []
- 783 |             })
- 784 |           };
- 785 |         });
- 786 |       }
- 787 |     } catch (e) {
- 788 |       console.error("Failed to delete session", e);
- 789 |     }
- 790 |   },
- 791 | 
- 792 |   triggerSteerOrchestration: async (promptText, execute = true, mode) => {
- 793 |     if (!promptText.trim()) return;
- 794 | 
- 795 |     // Abort any active orchestration
- 796 |     const currentController = get().abortController;
- 797 |     if (currentController) {
- 798 |       currentController.abort();
- 799 |     }
- 800 | 
- 801 |     const controller = new AbortController();
- 802 | 
- 803 |     const preExistingNodes = [...get().nodes];
- 804 |     const preExistingEdges = [...get().edges];
- 805 | 
- 806 |     const chatMsgs = get().chatMessages;
- 807 |     const lastMsg = chatMsgs[chatMsgs.length - 1];
- 808 |     const isDuplicate = lastMsg && lastMsg.sender === "user" && lastMsg.text === promptText;
- 809 | 
- 810 |     const userMsg: ChatMessage = {
- 811 |       id: Date.now().toString(),
- 812 |       sender: "user",
- 813 |       text: promptText,
- 814 |       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
- 815 |     };
- 816 | 
- 817 |     set((state) => ({
- 818 |       chatMessages: isDuplicate ? state.chatMessages : [...state.chatMessages, userMsg],
- 819 |       isOrchestrating: true,
- 820 |       isThinking: true,
- 821 |       statusMessage: "",
- 822 |       liveThoughts: "",
- 823 |       agentTalkLogs: [],
- 824 |       followUpSuggestions: [],
- 825 |       abortController: controller
- 826 |     }));
- 827 |     get().saveCurrentSession();
- 828 | 
- 829 |     // Create target AI message placeholder
- 830 |     const aiMsgId = (Date.now() + 1).toString();
- 831 |     set((state) => ({
- 832 |       chatMessages: [
- 833 |         ...state.chatMessages,
- 834 |         {
- 835 |           id: aiMsgId,
- 836 |           sender: "ai",
- 837 |           text: "",
- 838 |           thinkingSummary: "",
- 839 |           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
- 840 |         }
- 841 |       ]
- 842 |     }));
- 843 |     get().saveCurrentSession();
- 844 | 
- 845 |     try {
- 846 |       const response = await fetch("/api/gemini/orchestrate", {
- 847 |         method: "POST",
- 848 |         headers: { "Content-Type": "application/json" },
- 849 |         body: JSON.stringify({
- 850 |           prompt: promptText,
- 851 |           history: get().chatMessages
- 852 |             .filter(m => m.id !== aiMsgId) // Exclude current empty prompt placeholder
- 853 |             .map(m => ({ sender: m.sender, text: m.text })),
- 854 |           api_key: get().apiKeys[get().provider] || get().apiKey || "",
- 855 |           api_keys: get().apiKeys,
- 856 |           session_id: get().activeSessionId || "",
- 857 |           execute_agents: execute,
- 858 |           provider: get().provider,
- 859 |           model: get().model,
- 860 |           fallback_provider: get().fallbackProvider || null,
- 861 |           base_url: get().providerBaseUrls[get().provider] || null,
- 862 |           existing_nodes: preExistingNodes,
- 863 |           existing_edges: preExistingEdges,
- 864 |           mode: mode || (execute ? "auto" : "custom")
- 865 |         }),
- 866 |         signal: controller.signal
- 867 |       });
- 868 | 
- 869 |       if (!response.ok) {
- 870 |         const errData = await response.json().catch(() => ({ detail: "Orchestration failed." }));
- 871 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
- 872 |       }
- 873 | 
- 874 |       let assistantResponse = "";
- 875 |       let thinkingSummary = "";
- 876 | 
- 877 |       const handlers = {
- 878 |         onText: (token: string) => {
- 879 |           assistantResponse += token;
- 880 |           set((state) => ({
- 881 |             isThinking: false,
- 882 |             chatMessages: state.chatMessages.map(m =>
- 883 |               m.id === aiMsgId ? { ...m, text: assistantResponse } : m
- 884 |             )
- 885 |           }));
- 886 |         },
- 887 |         onThinking: (thought: string) => {
- 888 |           thinkingSummary += thought;
- 889 |           set((state) => ({
- 890 |             liveThoughts: thinkingSummary,
- 891 |             chatMessages: state.chatMessages.map(m =>
- 892 |               m.id === aiMsgId ? { ...m, thinkingSummary } : m
- 893 |             )
- 894 |           }));
- 895 |         },
- 896 |         onStatus: (msg: string) => set({ statusMessage: msg }),
- 897 |         onMetadata: (meta: Record<string, any>) => {
- 898 |           const { nodes: mergedNodes, edges: mergedEdges } = mergeCanvasState(
- 899 |             preExistingNodes, preExistingEdges,
- 900 |             meta.nodes || [], meta.edges || []
- 901 |           );
- 902 |           set({ nodes: mergedNodes, edges: mergedEdges, agentTalkLogs: meta.agent_talk || [], followUpSuggestions: meta.follow_up_suggestions || [] });
- 903 |           const talk = meta.agent_talk || [];
- 904 |           if (talk.length > 0) {
- 905 |             const latest = talk[talk.length - 1];
- 906 |             set({ statusMessage: `⚙️ **${latest.senderName}** completed — ${latest.text?.substring(0, 80) ?? ''}${(latest.text?.length ?? 0) > 80 ? '...' : ''}` });
+  56 |   takeaways?: string[];
+  57 | }
+  58 | 
+  59 | export interface AgentTalkLog {
+  60 |   id: string;
+  61 |   senderId: string;
+  62 |   senderName: string;
+  63 |   senderIcon: string;
+  64 |   text: string;
+  65 |   timestamp: string;
+  66 | }
+  67 | 
+  68 | export interface PendingApproval {
+  69 |   sessionId?: string;
+  70 |   nodeId: string;
+  71 |   toolName: string;
+  72 |   action: string;
+  73 |   detail: string;
+  74 |   logId: string;
+  75 | }
+  76 | 
+  77 | export interface ChatSession {
+  78 |   id: string;
+  79 |   title: string;
+  80 |   prompt: string;
+  81 |   mode: 'auto' | 'custom' | 'echohouse';
+  82 |   nodes: Node[];
+  83 |   edges: Edge[];
+  84 |   chatMessages: ChatMessage[];
+  85 |   agentTalkLogs: AgentTalkLog[];
+  86 |   executionState: 'setup' | 'running' | 'paused';
+  87 |   statusMessage: string;
+  88 |   followUpSuggestions?: string[];
+  89 | }
+  90 | 
+  91 | export interface WorkflowState {
+  92 |   sessions: Record<string, ChatSession>;
+  93 |   activeSessionId: string | null;
+  94 |   nodes: Node[];
+  95 |   edges: Edge[];
+  96 |   selectedNodeId: string | null;
+  97 |   executionState: 'setup' | 'running' | 'paused';
+  98 |   isOrchestrating: boolean;
+  99 |   isThinking: boolean;
+ 100 |   statusMessage: string;
+ 101 |   chatMessages: ChatMessage[];
+ 102 |   agentTalkLogs: AgentTalkLog[];
+ 103 |   pendingApproval: PendingApproval | null;
+ 104 |   apiKey: string | null;
+ 105 |   setApiKey: (key: string | null) => void;
+ 106 |   provider: string;
+ 107 |   model: string;
+ 108 |   apiKeys: Record<string, string>;
+ 109 |   availableProviders: Record<string, any>;
+ 110 |   setProvider: (provider: string) => void;
+ 111 |   setModel: (model: string) => void;
+ 112 |   setProviderApiKey: (provider: string, key: string) => Promise<void>;
+ 113 |   loadPersistedKeys: () => Promise<void>;
+ 114 |   loadPersistedState: () => Promise<void>;
+ 115 |   fetchAvailableProviders: () => Promise<void>;
+ 116 |   fallbackProvider: string;
+ 117 |   setFallbackProvider: (provider: string) => void;
+ 118 |   providerBaseUrls: Record<string, string>;
+ 119 |   setProviderBaseUrl: (provider: string, url: string) => void;
+ 120 |   providerModels: Record<string, any[]>;
+ 121 |   fetchProviderModels: (providerId: string) => Promise<void>;
+ 122 |   followUpSuggestions: string[];
+ 123 |   liveThoughts: string;
+ 124 |   abortController: AbortController | null;
+ 125 |   cancelOrchestration: () => void;
+ 126 | 
+ 127 |   // Actions
+ 128 |   setNodes: (nodes: Node[] | ((nds: Node[]) => Node[])) => void;
+ 129 |   setEdges: (edges: Edge[] | ((eds: Edge[]) => Edge[])) => void;
+ 130 |   onNodesChange: OnNodesChange<Node>;
+ 131 |   onEdgesChange: OnEdgesChange;
+ 132 |   onConnect: OnConnect;
+ 133 |   setSelectedNodeId: (id: string | null) => void;
+ 134 |   updateNodeField: (nodeId: string, updates: Partial<CanvasNodeData>) => void;
+ 135 |   addNode: (node: Node) => void;
+ 136 |   deleteNode: (nodeId: string) => void;
+ 137 |   deleteEdge: (edgeId: string) => void;
+ 138 |   addRule: (nodeId: string, rule: string) => void;
+ 139 |   deleteRule: (nodeId: string, ruleIndex: number) => void;
+ 140 |   simulateToolExecution?: never;
+ 141 |   setExecutionState: (state: 'setup' | 'running' | 'paused') => void;
+ 142 |   setIsOrchestrating: (val: boolean) => void;
+ 143 |   setIsThinking: (val: boolean) => void;
+ 144 |   setStatusMessage: (msg: string) => void;
+ 145 |   setChatMessages: (msgs: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
+ 146 |   setAgentTalkLogs: (logs: AgentTalkLog[] | ((prev: AgentTalkLog[]) => AgentTalkLog[])) => void;
+ 147 |   setPendingApproval: (val: PendingApproval | null) => void;
+ 148 | 
+ 149 |   createSession: (prompt: string, mode: 'auto' | 'custom' | 'echohouse') => string;
+ 150 |   forkSession: (sessionId: string) => Promise<string | null>;
+ 151 |   switchSession: (sessionId: string) => void;
+ 152 |   saveCurrentSession: () => void;
+ 153 |   fetchSessions: () => Promise<void>;
+ 154 |   loadSessionFromDb: (sessionId: string) => Promise<void>;
+ 155 |   deleteSessionFromDb: (sessionId: string) => Promise<void>;
+ 156 | 
+ 157 |   triggerSteerOrchestration: (promptText: string, execute?: boolean, mode?: string) => void;
+ 158 |   triggerCustomExecution: () => Promise<void>;
+ 159 |   triggerEchoHouseSimulation: (rounds?: number, tone?: string) => Promise<void>;
+ 160 | }
+ 161 | 
+ 162 | let saveTimeout: any = null;
+ 163 | const debounceSave = (currentSessionId: string, get: any, set: any) => {
+ 164 |   if (saveTimeout) clearTimeout(saveTimeout);
+ 165 |   saveTimeout = setTimeout(async () => {
+ 166 |     // Re-verify the session is still active before saving to prevent stale writes
+ 167 |     const activeId = get().activeSessionId;
+ 168 |     if (activeId !== currentSessionId) return;
+ 169 | 
+ 170 |     let updatedSession: any = null;
+ 171 | 
+ 172 |     set((state: any) => {
+ 173 |       // Only save if the session still exists
+ 174 |       if (!state.sessions[currentSessionId]) return state;
+ 175 | 
+ 176 |       const currentSession = {
+ 177 |         id: currentSessionId,
+ 178 |         title: state.sessions[currentSessionId]?.title || "Chat",
+ 179 |         prompt: state.sessions[currentSessionId]?.prompt || "",
+ 180 |         mode: state.sessions[currentSessionId]?.mode || "auto",
+ 181 |         nodes: state.nodes,
+ 182 |         edges: state.edges,
+ 183 |         chatMessages: state.chatMessages,
+ 184 |         agentTalkLogs: state.agentTalkLogs,
+ 185 |         executionState: state.executionState,
+ 186 |         statusMessage: state.statusMessage,
+ 187 |         followUpSuggestions: state.followUpSuggestions
+ 188 |       };
+ 189 |       updatedSession = currentSession;
+ 190 |       return { sessions: { ...state.sessions, [currentSessionId]: currentSession } };
+ 191 |     });
+ 192 | 
+ 193 |     if (updatedSession) {
+ 194 |       try {
+ 195 |         await fetch("/api/gemini/sessions/save", {
+ 196 |           method: "POST",
+ 197 |           headers: {
+ 198 |             "Content-Type": "application/json",
+ 199 |           },
+ 200 |           body: JSON.stringify({
+ 201 |             session_id: updatedSession.id,
+ 202 |             title: updatedSession.title,
+ 203 |             prompt: updatedSession.prompt,
+ 204 |             mode: updatedSession.mode,
+ 205 |             nodes: updatedSession.nodes,
+ 206 |             edges: updatedSession.edges,
+ 207 |             chat_messages: updatedSession.chatMessages,
+ 208 |             agent_talk_logs: updatedSession.agentTalkLogs,
+ 209 |             execution_state: updatedSession.executionState,
+ 210 |             status_message: updatedSession.statusMessage,
+ 211 |             follow_up_suggestions: updatedSession.followUpSuggestions || [],
+ 212 |           }),
+ 213 |         });
+ 214 |       } catch (e) {
+ 215 |         console.error("Failed to save session to SQLite DB:", e);
+ 216 |       }
+ 217 |     }
+ 218 |   }, 500);
+ 219 | };
+ 220 | 
+ 221 | export const useWorkflowStore = create<WorkflowState>((set, get) => ({
+ 222 |   sessions: {},
+ 223 |   activeSessionId: null,
+ 224 |   nodes: [],
+ 225 |   edges: [],
+ 226 |   selectedNodeId: null,
+ 227 |   executionState: 'setup',
+ 228 |   isOrchestrating: false,
+ 229 |   isThinking: false,
+ 230 |   statusMessage: '',
+ 231 |   chatMessages: [],
+ 232 |   agentTalkLogs: [],
+ 233 |   pendingApproval: null,
+ 234 |   apiKey: null,
+ 235 |   setApiKey: (key) => set({ apiKey: key }),
+ 236 |   provider: "gemini",
+ 237 |   model: "gemini-2.5-flash",
+ 238 |   apiKeys: {},
+ 239 |   availableProviders: {},
+ 240 |   setProvider: (provider) => set({ provider }),
+ 241 |   setModel: (model) => set({ model }),
+ 242 |   setProviderApiKey: async (provider, key) => {
+ 243 |     set((state) => ({ apiKeys: { ...state.apiKeys, [provider]: key } }));
+ 244 |     try {
+ 245 |       if (key) {
+ 246 |         const encrypted = await encryptKey(key);
+ 247 |         await idbSet(`apikey_${provider}`, encrypted);
+ 248 |       } else {
+ 249 |         await idbDel(`apikey_${provider}`);
+ 250 |       }
+ 251 |     } catch (e) {
+ 252 |       console.error(`Failed to encrypt/persist key for provider ${provider}:`, e);
+ 253 |     }
+ 254 |   },
+ 255 |   loadPersistedKeys: async () => {
+ 256 |     try {
+ 257 |       const state = get();
+ 258 |       const providers = ['gemini', 'openai', 'anthropic', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia'];
+ 259 |       const loadedKeys: Record<string, string> = {};
+ 260 |       for (const p of providers) {
+ 261 |         const encrypted = await idbGet<string>(`apikey_${p}`);
+ 262 |         if (encrypted) {
+ 263 |           try {
+ 264 |             const decrypted = await decryptKey(encrypted);
+ 265 |             loadedKeys[p] = decrypted;
+ 266 |           } catch (err) {
+ 267 |             console.error(`Failed to decrypt key for provider ${p}:`, err);
+ 268 |           }
+ 269 |         }
+ 270 |       }
+ 271 |       set({ apiKeys: { ...state.apiKeys, ...loadedKeys } });
+ 272 |     } catch (e) {
+ 273 |       console.error("Failed to load persisted API keys:", e);
+ 274 |     }
+ 275 |   },
+ 276 |   loadPersistedState: async () => {
+ 277 |     try {
+ 278 |       const raw = await idbGet<string>('solospace_workflow_state');
+ 279 |       if (raw) {
+ 280 |         const parsed = JSON.parse(raw);
+ 281 |         set({
+ 282 |           activeSessionId: parsed.activeSessionId ?? null,
+ 283 |           sessions: parsed.sessions ?? {},
+ 284 |           nodes: parsed.nodes ?? [],
+ 285 |           edges: parsed.edges ?? [],
+ 286 |           provider: parsed.provider ?? "gemini",
+ 287 |           model: parsed.model ?? "gemini-2.5-flash",
+ 288 |           fallbackProvider: parsed.fallbackProvider ?? "",
+ 289 |           providerBaseUrls: parsed.providerBaseUrls ?? {},
+ 290 |         });
+ 291 |       }
+ 292 |     } catch (e) {
+ 293 |       console.error("Failed to load persisted state from IndexedDB:", e);
+ 294 |     }
+ 295 |   },
+ 296 |   fetchAvailableProviders: async () => {
+ 297 |     try {
+ 298 |       const resp = await fetch("/api/gemini/providers");
+ 299 |       if (resp.ok) {
+ 300 |         const data = await resp.json();
+ 301 |         set({ availableProviders: data });
+ 302 |       }
+ 303 |     } catch (e) {
+ 304 |       console.error("Failed to fetch available providers", e);
+ 305 |     }
+ 306 |   },
+ 307 |   fallbackProvider: "",
+ 308 |   setFallbackProvider: (provider) => set({ fallbackProvider: provider }),
+ 309 |   providerBaseUrls: {},
+ 310 |   setProviderBaseUrl: (provider, url) => set((state) => ({ providerBaseUrls: { ...state.providerBaseUrls, [provider]: url } })),
+ 311 |   providerModels: {},
+ 312 |   fetchProviderModels: async (providerId: string) => {
+ 313 |     try {
+ 314 |       const state = get();
+ 315 |       const apiKey = state.apiKeys[providerId] || state.apiKey || "";
+ 316 |       const baseUrl = state.providerBaseUrls[providerId] || "";
+ 317 |       const isOllama = providerId === "ollama";
+ 318 |       
+ 319 |       const endpoint = isOllama ? "/api/gemini/ollama" : "/api/gemini/models";
+ 320 |       const method = isOllama ? "GET" : "POST";
+ 321 |       const body = isOllama ? undefined : JSON.stringify({
+ 322 |         provider: providerId,
+ 323 |         api_key: apiKey,
+ 324 |         api_keys: state.apiKeys,
+ 325 |         base_url: baseUrl
+ 326 |       });
+ 327 | 
+ 328 |       const resp = await fetch(endpoint, {
+ 329 |         method,
+ 330 |         headers: { "Content-Type": "application/json" },
+ 331 |         body
+ 332 |       });
+ 333 |       if (resp.ok) {
+ 334 |         const data = await resp.json();
+ 335 |         set((state) => ({
+ 336 |           providerModels: {
+ 337 |             ...state.providerModels,
+ 338 |             [providerId]: data.models || []
+ 339 |           }
+ 340 |         }));
+ 341 |       }
+ 342 |     } catch (e) {
+ 343 |       console.error(`Failed to fetch models for provider ${providerId}`, e);
+ 344 |     }
+ 345 |   },
+ 346 |   followUpSuggestions: [],
+ 347 |   liveThoughts: '',
+ 348 |   abortController: null,
+ 349 |   cancelOrchestration: () => {
+ 350 |     const controller = get().abortController;
+ 351 |     if (controller) {
+ 352 |       controller.abort();
+ 353 |       set({ abortController: null, isOrchestrating: false, isThinking: false });
+ 354 |     }
+ 355 |   },
+ 356 | 
+ 357 |   setNodes: (newNodes) => {
+ 358 |     set((state) => ({
+ 359 |       nodes: typeof newNodes === 'function' ? newNodes(state.nodes) : newNodes
+ 360 |     }));
+ 361 |     get().saveCurrentSession();
+ 362 |   },
+ 363 | 
+ 364 |   setEdges: (newEdges) => {
+ 365 |     set((state) => ({
+ 366 |       edges: typeof newEdges === 'function' ? newEdges(state.edges) : newEdges
+ 367 |     }));
+ 368 |     get().saveCurrentSession();
+ 369 |   },
+ 370 | 
+ 371 |   onNodesChange: (changes) => {
+ 372 |     set((state) => ({
+ 373 |       nodes: applyNodeChanges(changes, state.nodes)
+ 374 |     }));
+ 375 |     get().saveCurrentSession();
+ 376 |   },
+ 377 | 
+ 378 |   onEdgesChange: (changes) => {
+ 379 |     set((state) => ({
+ 380 |       edges: applyEdgeChanges(changes, state.edges)
+ 381 |     }));
+ 382 |     get().saveCurrentSession();
+ 383 |   },
+ 384 | 
+ 385 |   onConnect: (connection) => {
+ 386 |     set((state) => {
+ 387 |       const edge: Edge = {
+ 388 |         ...connection,
+ 389 |         id: `e-${connection.source}-${connection.target}`,
+ 390 |         animated: true,
+ 391 |         type: 'custom',
+ 392 |         style: { stroke: '#06b6d4', strokeWidth: 2 }
+ 393 |       };
+ 394 | 
+ 395 |       // Sync dependency: target node depends on source node
+ 396 |       const updatedNodes = state.nodes.map(node => {
+ 397 |         if (node.id === connection.target) {
+ 398 |           const currentDeps = (node.data as any).dependencies || [];
+ 399 |           if (!currentDeps.includes(connection.source)) {
+ 400 |             return {
+ 401 |               ...node,
+ 402 |               data: { ...node.data, dependencies: [...currentDeps, connection.source] }
+ 403 |             };
+ 404 |           }
+ 405 |         }
+ 406 |         return node;
+ 407 |       });
+ 408 | 
+ 409 |       return { edges: addEdge(edge, state.edges), nodes: updatedNodes };
+ 410 |     });
+ 411 |     get().saveCurrentSession();
+ 412 |   },
+ 413 | 
+ 414 |   setSelectedNodeId: (id) => set({ selectedNodeId: id }),
+ 415 | 
+ 416 |   updateNodeField: (nodeId, updates) => {
+ 417 |     set((state) => ({
+ 418 |       nodes: state.nodes.map((node) => {
+ 419 |         if (node.id === nodeId) {
+ 420 |           return { ...node, data: { ...node.data, ...updates } };
+ 421 |         }
+ 422 |         return node;
+ 423 |       })
+ 424 |     }));
+ 425 |     get().saveCurrentSession();
+ 426 |   },
+ 427 | 
+ 428 |   addNode: (node) => {
+ 429 |     set((state) => ({ nodes: [...state.nodes, node] }));
+ 430 |     get().saveCurrentSession();
+ 431 |   },
+ 432 | 
+ 433 |   deleteNode: (nodeId) => {
+ 434 |     set((state) => ({
+ 435 |       nodes: state.nodes.filter((node) => node.id !== nodeId),
+ 436 |       edges: state.edges.filter((edge) => edge.source !== nodeId && edge.target !== nodeId),
+ 437 |       selectedNodeId: state.selectedNodeId === nodeId ? null : state.selectedNodeId
+ 438 |     }));
+ 439 |     get().saveCurrentSession();
+ 440 |   },
+ 441 | 
+ 442 |   deleteEdge: (edgeId) => {
+ 443 |     set((state) => {
+ 444 |       const edge = state.edges.find(e => e.id === edgeId);
+ 445 |       let updatedNodes = state.nodes;
+ 446 | 
+ 447 |       // Sync dependency: remove source from target's dependencies when edge deleted
+ 448 |       if (edge) {
+ 449 |         updatedNodes = state.nodes.map(node => {
+ 450 |           if (node.id === edge.target) {
+ 451 |             const currentDeps = (node.data as any).dependencies || [];
+ 452 |             return {
+ 453 |               ...node,
+ 454 |               data: { ...node.data, dependencies: currentDeps.filter((d: string) => d !== edge.source) }
+ 455 |             };
+ 456 |           }
+ 457 |           return node;
+ 458 |         });
+ 459 |       }
+ 460 | 
+ 461 |       return {
+ 462 |         edges: state.edges.filter(e => e.id !== edgeId),
+ 463 |         nodes: updatedNodes
+ 464 |       };
+ 465 |     });
+ 466 |     get().saveCurrentSession();
+ 467 |   },
+ 468 | 
+ 469 |   addRule: (nodeId, rule) => {
+ 470 |     set((state) => ({
+ 471 |       nodes: state.nodes.map((node) => {
+ 472 |         if (node.id === nodeId) {
+ 473 |           return {
+ 474 |             ...node,
+ 475 |             data: { ...node.data, rules: [...((node.data as any).rules || []), rule] }
+ 476 |           };
+ 477 |         }
+ 478 |         return node;
+ 479 |       })
+ 480 |     }));
+ 481 |     get().saveCurrentSession();
+ 482 |   },
+ 483 | 
+ 484 |   deleteRule: (nodeId, ruleIndex) => {
+ 485 |     set((state) => ({
+ 486 |       nodes: state.nodes.map((node) => {
+ 487 |         if (node.id === nodeId) {
+ 488 |           return {
+ 489 |             ...node,
+ 490 |             data: {
+ 491 |               ...node.data,
+ 492 |               rules: ((node.data as any).rules || []).filter((_: any, idx: number) => idx !== ruleIndex)
+ 493 |             }
+ 494 |           };
+ 495 |         }
+ 496 |         return node;
+ 497 |       })
+ 498 |     }));
+ 499 |     get().saveCurrentSession();
+ 500 |   },
+ 501 | 
+ 502 |   // (simulateToolExecution removed — backend runs real tools)
+ 503 | 
+ 504 |   // State modifiers
+ 505 |   setExecutionState: (state) => {
+ 506 |     set({ executionState: state });
+ 507 |     get().saveCurrentSession();
+ 508 |   },
+ 509 |   setIsOrchestrating: (val) => set({ isOrchestrating: val }),
+ 510 |   setIsThinking: (val) => set({ isThinking: val }),
+ 511 |   setStatusMessage: (msg) => {
+ 512 |     set({ statusMessage: msg });
+ 513 |     get().saveCurrentSession();
+ 514 |   },
+ 515 |   setChatMessages: (msgs) => {
+ 516 |     set((state) => ({
+ 517 |       chatMessages: typeof msgs === 'function' ? msgs(state.chatMessages) : msgs
+ 518 |     }));
+ 519 |     get().saveCurrentSession();
+ 520 |   },
+ 521 |   setAgentTalkLogs: (logs) => {
+ 522 |     set((state) => ({
+ 523 |       agentTalkLogs: typeof logs === 'function' ? logs(state.agentTalkLogs) : logs
+ 524 |     }));
+ 525 |     get().saveCurrentSession();
+ 526 |   },
+ 527 |   setPendingApproval: (val) => set({ pendingApproval: val }),
+ 528 | 
+ 529 |   createSession: (prompt, mode) => {
+ 530 |     const ctrl = get().abortController;
+ 531 |     if (ctrl) ctrl.abort();
+ 532 | 
+ 533 |     const sessionId = Date.now().toString();
+ 534 |     const newSession: ChatSession = {
+ 535 |       id: sessionId,
+ 536 |       title: prompt.length > 40 ? prompt.substring(0, 40) + "..." : prompt,
+ 537 |       prompt: prompt,
+ 538 |       mode: mode,
+ 539 |       nodes: [],
+ 540 |       edges: [],
+ 541 |       chatMessages: [],
+ 542 |       agentTalkLogs: [],
+ 543 |       executionState: "setup",
+ 544 |       statusMessage: "",
+ 545 |       followUpSuggestions: []
+ 546 |     };
+ 547 | 
+ 548 |     set((state) => ({
+ 549 |       sessions: { ...state.sessions, [sessionId]: newSession },
+ 550 |       activeSessionId: sessionId,
+ 551 |       nodes: [],
+ 552 |       edges: [],
+ 553 |       chatMessages: [],
+ 554 |       agentTalkLogs: [],
+ 555 |       executionState: "setup",
+ 556 |       statusMessage: "",
+ 557 |       followUpSuggestions: [],
+ 558 |       isOrchestrating: false,
+ 559 |       isThinking: false,
+ 560 |       liveThoughts: "",
+ 561 |       pendingApproval: null,
+ 562 |       selectedNodeId: null,
+ 563 |       abortController: null
+ 564 |     }));
+ 565 | 
+ 566 |     return sessionId;
+ 567 |   },
+ 568 | 
+ 569 |   forkSession: async (sessionId) => {
+ 570 |     const sourceSession = get().sessions[sessionId];
+ 571 |     if (!sourceSession) return null;
+ 572 | 
+ 573 |     const newSessionId = `forked-${Date.now()}`;
+ 574 |     const newTitle = `${sourceSession.title} (Fork)`;
+ 575 |     
+ 576 |     const newSession: ChatSession = {
+ 577 |       id: newSessionId,
+ 578 |       title: newTitle,
+ 579 |       prompt: sourceSession.prompt,
+ 580 |       mode: sourceSession.mode,
+ 581 |       nodes: JSON.parse(JSON.stringify(sourceSession.nodes || [])),
+ 582 |       edges: JSON.parse(JSON.stringify(sourceSession.edges || [])),
+ 583 |       chatMessages: JSON.parse(JSON.stringify(sourceSession.chatMessages || [])),
+ 584 |       agentTalkLogs: JSON.parse(JSON.stringify(sourceSession.agentTalkLogs || [])),
+ 585 |       executionState: sourceSession.executionState || "setup",
+ 586 |       statusMessage: sourceSession.statusMessage || "",
+ 587 |       followUpSuggestions: sourceSession.followUpSuggestions || []
+ 588 |     };
+ 589 | 
+ 590 |     set((state) => ({
+ 591 |       sessions: { ...state.sessions, [newSessionId]: newSession },
+ 592 |       activeSessionId: newSessionId,
+ 593 |       nodes: newSession.nodes,
+ 594 |       edges: newSession.edges,
+ 595 |       chatMessages: newSession.chatMessages,
+ 596 |       agentTalkLogs: newSession.agentTalkLogs,
+ 597 |       executionState: newSession.executionState,
+ 598 |       statusMessage: newSession.statusMessage,
+ 599 |       followUpSuggestions: newSession.followUpSuggestions,
+ 600 |       selectedNodeId: null
+ 601 |     }));
+ 602 | 
+ 603 |     try {
+ 604 |       await fetch("/api/gemini/sessions/save", {
+ 605 |         method: "POST",
+ 606 |         headers: { "Content-Type": "application/json" },
+ 607 |         body: JSON.stringify({
+ 608 |           session_id: newSession.id,
+ 609 |           title: newSession.title,
+ 610 |           prompt: newSession.prompt,
+ 611 |           mode: newSession.mode,
+ 612 |           nodes: newSession.nodes,
+ 613 |           edges: newSession.edges,
+ 614 |           chat_messages: newSession.chatMessages,
+ 615 |           agent_talk_logs: newSession.agentTalkLogs,
+ 616 |           execution_state: newSession.executionState,
+ 617 |           status_message: newSession.statusMessage,
+ 618 |           follow_up_suggestions: newSession.followUpSuggestions,
+ 619 |         }),
+ 620 |       });
+ 621 |     } catch (e) {
+ 622 |       console.error("Failed to save forked session to DB", e);
+ 623 |     }
+ 624 | 
+ 625 |     return newSessionId;
+ 626 |   },
+ 627 | 
+ 628 |   switchSession: (sessionId) => {
+ 629 |     const ctrl = get().abortController;
+ 630 |     if (ctrl) ctrl.abort();
+ 631 | 
+ 632 |     const currentSessionId = get().activeSessionId;
+ 633 |     if (currentSessionId) {
+ 634 |       const currentSession: ChatSession = {
+ 635 |         id: currentSessionId,
+ 636 |         title: get().sessions[currentSessionId]?.title || "Chat",
+ 637 |         prompt: get().sessions[currentSessionId]?.prompt || "",
+ 638 |         mode: get().sessions[currentSessionId]?.mode || "auto",
+ 639 |         nodes: get().nodes,
+ 640 |         edges: get().edges,
+ 641 |         chatMessages: get().chatMessages,
+ 642 |         agentTalkLogs: get().agentTalkLogs,
+ 643 |         executionState: get().executionState,
+ 644 |         statusMessage: get().statusMessage,
+ 645 |         followUpSuggestions: get().followUpSuggestions
+ 646 |       };
+ 647 |       set((state) => ({
+ 648 |         sessions: { ...state.sessions, [currentSessionId]: currentSession }
+ 649 |       }));
+ 650 |     }
+ 651 | 
+ 652 |     const newSession = get().sessions[sessionId];
+ 653 |     if (newSession) {
+ 654 |       set({
+ 655 |         activeSessionId: sessionId,
+ 656 |         nodes: newSession.nodes,
+ 657 |         edges: newSession.edges,
+ 658 |         chatMessages: newSession.chatMessages,
+ 659 |         agentTalkLogs: newSession.agentTalkLogs,
+ 660 |         executionState: newSession.executionState,
+ 661 |         statusMessage: "",
+ 662 |         followUpSuggestions: [],
+ 663 |         selectedNodeId: null,
+ 664 |         isOrchestrating: false,
+ 665 |         isThinking: false,
+ 666 |         liveThoughts: "",
+ 667 |         pendingApproval: null,
+ 668 |         abortController: null
+ 669 |       });
+ 670 |     }
+ 671 |   },
+ 672 | 
+ 673 |   saveCurrentSession: () => {
+ 674 |     const currentSessionId = get().activeSessionId;
+ 675 |     if (!currentSessionId) return;
+ 676 |     debounceSave(currentSessionId, get, set);
+ 677 |   },
+ 678 | 
+ 679 |   fetchSessions: async () => {
+ 680 |     try {
+ 681 |       const response = await fetch("/api/gemini/sessions");
+ 682 |       if (response.ok) {
+ 683 |         const list = await response.json();
+ 684 |         const updatedSessions: Record<string, ChatSession> = { ...get().sessions };
+ 685 |         for (const s of list) {
+ 686 |           if (!updatedSessions[s.session_id]) {
+ 687 |             updatedSessions[s.session_id] = {
+ 688 |               id: s.session_id,
+ 689 |               title: s.title,
+ 690 |               prompt: s.prompt,
+ 691 |               mode: s.mode,
+ 692 |               nodes: [],
+ 693 |               edges: [],
+ 694 |               chatMessages: [],
+ 695 |               agentTalkLogs: [],
+ 696 |               executionState: s.execution_state,
+ 697 |               statusMessage: s.status_message,
+ 698 |               followUpSuggestions: []
+ 699 |             };
+ 700 |           }
+ 701 |         }
+ 702 |         set({ sessions: updatedSessions });
+ 703 |       }
+ 704 |     } catch (e) {
+ 705 |       console.error("Failed to fetch sessions from DB", e);
+ 706 |     }
+ 707 |   },
+ 708 | 
+ 709 |   loadSessionFromDb: async (sessionId: string) => {
+ 710 |     const ctrl = get().abortController;
+ 711 |     if (ctrl) ctrl.abort();
+ 712 | 
+ 713 |     try {
+ 714 |       const response = await fetch(`/api/gemini/sessions/${sessionId}`);
+ 715 |       if (response.ok) {
+ 716 |         const fullSession = await response.json();
+ 717 |         const session: ChatSession = {
+ 718 |           id: fullSession.id,
+ 719 |           title: fullSession.title,
+ 720 |           prompt: fullSession.prompt,
+ 721 |           mode: fullSession.mode,
+ 722 |           nodes: fullSession.nodes,
+ 723 |           edges: fullSession.edges,
+ 724 |           chatMessages: fullSession.chatMessages,
+ 725 |           agentTalkLogs: fullSession.agentTalkLogs,
+ 726 |           executionState: fullSession.executionState,
+ 727 |           statusMessage: fullSession.statusMessage,
+ 728 |           followUpSuggestions: fullSession.followUpSuggestions
+ 729 |         };
+ 730 |         
+ 731 |         set((state) => ({
+ 732 |           sessions: { ...state.sessions, [sessionId]: session },
+ 733 |           activeSessionId: sessionId,
+ 734 |           nodes: session.nodes,
+ 735 |           edges: session.edges,
+ 736 |           chatMessages: session.chatMessages,
+ 737 |           agentTalkLogs: session.agentTalkLogs,
+ 738 |           executionState: session.executionState,
+ 739 |           statusMessage: "",
+ 740 |           followUpSuggestions: [],
+ 741 |           selectedNodeId: null,
+ 742 |           isOrchestrating: false,
+ 743 |           isThinking: false,
+ 744 |           liveThoughts: "",
+ 745 |           pendingApproval: null,
+ 746 |           abortController: null
+ 747 |         }));
+ 748 |       }
+ 749 |     } catch (e) {
+ 750 |       console.error("Failed to load session from DB", e);
+ 751 |     }
+ 752 |   },
+ 753 | 
+ 754 |   deleteSessionFromDb: async (sessionId: string) => {
+ 755 |     // Abort orchestration if deleting the currently active session
+ 756 |     if (get().activeSessionId === sessionId) {
+ 757 |       const ctrl = get().abortController;
+ 758 |       if (ctrl) ctrl.abort();
+ 759 |     }
+ 760 | 
+ 761 |     try {
+ 762 |       const response = await fetch(`/api/gemini/sessions/${sessionId}`, {
+ 763 |         method: "DELETE"
+ 764 |       });
+ 765 |       if (response.ok) {
+ 766 |         set((state) => {
+ 767 |           const updated = { ...state.sessions };
+ 768 |           delete updated[sessionId];
+ 769 |           const newActiveId = state.activeSessionId === sessionId ? null : state.activeSessionId;
+ 770 |           return {
+ 771 |             sessions: updated,
+ 772 |             activeSessionId: newActiveId,
+ 773 |             abortController: state.activeSessionId === sessionId ? null : state.abortController,
+ 774 |             isOrchestrating: state.activeSessionId === sessionId ? false : state.isOrchestrating,
+ 775 |             isThinking: state.activeSessionId === sessionId ? false : state.isThinking,
+ 776 |             ...(newActiveId ? {} : {
+ 777 |               nodes: [],
+ 778 |               edges: [],
+ 779 |               chatMessages: [],
+ 780 |               agentTalkLogs: [],
+ 781 |               executionState: "setup",
+ 782 |               statusMessage: "",
+ 783 |               followUpSuggestions: []
+ 784 |             })
+ 785 |           };
+ 786 |         });
+ 787 |       }
+ 788 |     } catch (e) {
+ 789 |       console.error("Failed to delete session", e);
+ 790 |     }
+ 791 |   },
+ 792 | 
+ 793 |   triggerSteerOrchestration: async (promptText, execute = true, mode) => {
+ 794 |     if (!promptText.trim()) return;
+ 795 | 
+ 796 |     // Abort any active orchestration
+ 797 |     const currentController = get().abortController;
+ 798 |     if (currentController) {
+ 799 |       currentController.abort();
+ 800 |     }
+ 801 | 
+ 802 |     const controller = new AbortController();
+ 803 | 
+ 804 |     const preExistingNodes = [...get().nodes];
+ 805 |     const preExistingEdges = [...get().edges];
+ 806 | 
+ 807 |     const chatMsgs = get().chatMessages;
+ 808 |     const lastMsg = chatMsgs[chatMsgs.length - 1];
+ 809 |     const isDuplicate = lastMsg && lastMsg.sender === "user" && lastMsg.text === promptText;
+ 810 | 
+ 811 |     const userMsg: ChatMessage = {
+ 812 |       id: Date.now().toString(),
+ 813 |       sender: "user",
+ 814 |       text: promptText,
+ 815 |       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+ 816 |     };
+ 817 | 
+ 818 |     set((state) => ({
+ 819 |       chatMessages: isDuplicate ? state.chatMessages : [...state.chatMessages, userMsg],
+ 820 |       isOrchestrating: true,
+ 821 |       isThinking: true,
+ 822 |       statusMessage: "",
+ 823 |       liveThoughts: "",
+ 824 |       agentTalkLogs: [],
+ 825 |       followUpSuggestions: [],
+ 826 |       abortController: controller
+ 827 |     }));
+ 828 |     get().saveCurrentSession();
+ 829 | 
+ 830 |     // Create target AI message placeholder
+ 831 |     const aiMsgId = (Date.now() + 1).toString();
+ 832 |     set((state) => ({
+ 833 |       chatMessages: [
+ 834 |         ...state.chatMessages,
+ 835 |         {
+ 836 |           id: aiMsgId,
+ 837 |           sender: "ai",
+ 838 |           text: "",
+ 839 |           thinkingSummary: "",
+ 840 |           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+ 841 |         }
+ 842 |       ]
+ 843 |     }));
+ 844 |     get().saveCurrentSession();
+ 845 | 
+ 846 |     try {
+ 847 |       const response = await fetch("/api/gemini/orchestrate", {
+ 848 |         method: "POST",
+ 849 |         headers: { "Content-Type": "application/json" },
+ 850 |         body: JSON.stringify({
+ 851 |           prompt: promptText,
+ 852 |           history: get().chatMessages
+ 853 |             .filter(m => m.id !== aiMsgId) // Exclude current empty prompt placeholder
+ 854 |             .map(m => ({ sender: m.sender, text: m.text })),
+ 855 |           api_key: get().apiKeys[get().provider] || get().apiKey || "",
+ 856 |           api_keys: get().apiKeys,
+ 857 |           session_id: get().activeSessionId || "",
+ 858 |           execute_agents: execute,
+ 859 |           provider: get().provider,
+ 860 |           model: get().model,
+ 861 |           fallback_provider: get().fallbackProvider || null,
+ 862 |           base_url: get().providerBaseUrls[get().provider] || null,
+ 863 |           existing_nodes: preExistingNodes,
+ 864 |           existing_edges: preExistingEdges,
+ 865 |           mode: mode || (execute ? "auto" : "custom")
+ 866 |         }),
+ 867 |         signal: controller.signal
+ 868 |       });
+ 869 | 
+ 870 |       if (!response.ok) {
+ 871 |         const errData = await response.json().catch(() => ({ detail: "Orchestration failed." }));
+ 872 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
+ 873 |       }
+ 874 | 
+ 875 |       let assistantResponse = "";
+ 876 |       let thinkingSummary = "";
+ 877 | 
+ 878 |       const handlers = {
+ 879 |         onText: (token: string) => {
+ 880 |           assistantResponse += token;
+ 881 |           set((state) => ({
+ 882 |             isThinking: false,
+ 883 |             chatMessages: state.chatMessages.map(m =>
+ 884 |               m.id === aiMsgId ? { ...m, text: assistantResponse } : m
+ 885 |             )
+ 886 |           }));
+ 887 |         },
+ 888 |         onThinking: (thought: string) => {
+ 889 |           thinkingSummary += thought;
+ 890 |           set((state) => ({
+ 891 |             liveThoughts: thinkingSummary,
+ 892 |             chatMessages: state.chatMessages.map(m =>
+ 893 |               m.id === aiMsgId ? { ...m, thinkingSummary } : m
+ 894 |             )
+ 895 |           }));
+ 896 |         },
+ 897 |         onStatus: (msg: string) => set({ statusMessage: msg }),
+ 898 |         onMetadata: (meta: Record<string, any>) => {
+ 899 |           const { nodes: mergedNodes, edges: mergedEdges } = mergeCanvasState(
+ 900 |             preExistingNodes, preExistingEdges,
+ 901 |             meta.nodes || [], meta.edges || []
+ 902 |           );
+ 903 |           set({ nodes: mergedNodes, edges: mergedEdges, agentTalkLogs: meta.agent_talk || [], followUpSuggestions: meta.follow_up_suggestions || [] });
+ 904 |           // If plan-only mode (execute=false), mark as paused so Proceed button appears
+ 905 |           if (!execute && (meta.nodes || []).length > 0) {
+ 906 |             set({ executionState: 'paused' });
  907 |           }
- 908 |         },
- 909 |         onToolApproval: (approval: Record<string, any>) => set({ pendingApproval: approval as any }),
- 910 |         onDone: () => {},
- 911 |         onError: (err: Error) => { throw err; },
- 912 |       };
- 913 | 
- 914 |       await parseSSEStream(response, handlers, controller.signal);
- 915 | 
- 916 |       if (!assistantResponse) {
- 917 |         const fallbackMsg = "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again.";
- 918 |         set((state) => ({
- 919 |           chatMessages: state.chatMessages.map(m =>
- 920 |             m.id === aiMsgId ? { ...m, text: fallbackMsg } : m
- 921 |           )
- 922 |         }));
- 923 |       }
- 924 | 
- 925 |       set({ abortController: null });
- 926 |       get().saveCurrentSession();
- 927 |     } catch (err: any) {
- 928 |       if (err.name === 'AbortError') {
- 929 |         console.log("Steer Orchestration manually aborted.");
- 930 |         set((state) => ({
- 931 |           chatMessages: state.chatMessages.map(m =>
- 932 |             m.id === aiMsgId && !m.text ? { ...m, text: "*Generation stopped by user.*" } : m
- 933 |           )
- 934 |         }));
- 935 |       } else {
- 936 |         console.error("Steer Orchestration stream error:", err);
- 937 |         const errorMsg = `**Connection Error.**\n\n${err.message || "Failed to parse stream event source. Check backend logs."}`;
- 938 |         set((state) => ({
- 939 |           chatMessages: state.chatMessages.map(m =>
- 940 |             m.id === aiMsgId ? { ...m, text: errorMsg } : m
- 941 |           ),
- 942 |           nodes: [],
- 943 |           edges: [],
- 944 |           followUpSuggestions: []
- 945 |         }));
- 946 |       }
- 947 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
- 948 |       get().saveCurrentSession();
- 949 |     } finally {
- 950 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
- 951 |       get().saveCurrentSession();
- 952 |     }
- 953 |   },
- 954 | 
- 955 |   triggerCustomExecution: async () => {
- 956 |     const currentController = get().abortController;
- 957 |     if (currentController) {
- 958 |       currentController.abort();
- 959 |     }
- 960 | 
- 961 |     const controller = new AbortController();
- 962 | 
- 963 |     const preExistingNodes = [...get().nodes];
- 964 |     const preExistingEdges = [...get().edges];
+ 908 |           const talk = meta.agent_talk || [];
+ 909 |           if (talk.length > 0) {
+ 910 |             const latest = talk[talk.length - 1];
+ 911 |             set({ statusMessage: `⚙️ **${latest.senderName}** completed — ${latest.text?.substring(0, 80) ?? ''}${(latest.text?.length ?? 0) > 80 ? '...' : ''}` });
+ 912 |           }
+ 913 |         },
+ 914 |         onToolApproval: (approval: Record<string, any>) => set({ pendingApproval: approval as any }),
+ 915 |         onDone: () => {},
+ 916 |         onError: (err: Error) => { throw err; },
+ 917 |       };
+ 918 | 
+ 919 |       await parseSSEStream(response, handlers, controller.signal);
+ 920 | 
+ 921 |       if (!assistantResponse) {
+ 922 |         const fallbackMsg = "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again.";
+ 923 |         set((state) => ({
+ 924 |           chatMessages: state.chatMessages.map(m =>
+ 925 |             m.id === aiMsgId ? { ...m, text: fallbackMsg } : m
+ 926 |           )
+ 927 |         }));
+ 928 |       }
+ 929 | 
+ 930 |       set({ abortController: null });
+ 931 |       get().saveCurrentSession();
+ 932 |     } catch (err: any) {
+ 933 |       if (err.name === 'AbortError') {
+ 934 |         console.log("Steer Orchestration manually aborted.");
+ 935 |         set((state) => ({
+ 936 |           chatMessages: state.chatMessages.map(m =>
+ 937 |             m.id === aiMsgId && !m.text ? { ...m, text: "*Generation stopped by user.*" } : m
+ 938 |           )
+ 939 |         }));
+ 940 |       } else {
+ 941 |         console.error("Steer Orchestration stream error:", err);
+ 942 |         const errorMsg = `**Connection Error.**\n\n${err.message || "Failed to parse stream event source. Check backend logs."}`;
+ 943 |         set((state) => ({
+ 944 |           chatMessages: state.chatMessages.map(m =>
+ 945 |             m.id === aiMsgId ? { ...m, text: errorMsg } : m
+ 946 |           ),
+ 947 |           nodes: [],
+ 948 |           edges: [],
+ 949 |           followUpSuggestions: []
+ 950 |         }));
+ 951 |       }
+ 952 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
+ 953 |       get().saveCurrentSession();
+ 954 |     } finally {
+ 955 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
+ 956 |       get().saveCurrentSession();
+ 957 |     }
+ 958 |   },
+ 959 | 
+ 960 |   triggerCustomExecution: async () => {
+ 961 |     const currentController = get().abortController;
+ 962 |     if (currentController) {
+ 963 |       currentController.abort();
+ 964 |     }
  965 | 
- 966 |     const sessionId = get().activeSessionId;
- 967 |     if (!sessionId) return;
- 968 | 
- 969 |     const prompt = get().chatMessages.findLast(m => m.sender === 'user')?.text || "";
+ 966 |     const controller = new AbortController();
+ 967 | 
+ 968 |     const preExistingNodes = [...get().nodes];
+ 969 |     const preExistingEdges = [...get().edges];
  970 | 
- 971 |     set((state) => ({
- 972 |       isOrchestrating: true,
- 973 |       isThinking: true,
- 974 |       statusMessage: "Running custom orchestration loop...",
- 975 |       liveThoughts: "",
- 976 |       agentTalkLogs: [],
- 977 |       followUpSuggestions: [],
- 978 |       abortController: controller
- 979 |     }));
- 980 |     get().saveCurrentSession();
- 981 | 
- 982 |     const aiMsgId = Date.now().toString();
- 983 |     set((state) => ({
- 984 |       chatMessages: [
- 985 |         ...state.chatMessages,
- 986 |         {
- 987 |           id: aiMsgId,
- 988 |           sender: "ai",
- 989 |           text: "",
- 990 |           thinkingSummary: "",
- 991 |           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
- 992 |         }
- 993 |       ]
- 994 |     }));
- 995 |     get().saveCurrentSession();
- 996 | 
- 997 |     try {
- 998 |       const response = await fetch("/api/gemini/execute_custom", {
- 999 |         method: "POST",
-1000 |         headers: { "Content-Type": "application/json" },
-1001 |         body: JSON.stringify({
-1002 |           session_id: sessionId,
-1003 |           prompt: prompt,
-1004 |           history: get().chatMessages
-1005 |             .filter(m => m.id !== aiMsgId)
-1006 |             .map(m => ({ sender: m.sender, text: m.text })),
-1007 |           api_key: get().apiKeys[get().provider] || get().apiKey || "",
-1008 |           api_keys: get().apiKeys,
-1009 |           nodes: get().nodes,
-1010 |           edges: get().edges,
-1011 |           provider: get().provider,
-1012 |           model: get().model,
-1013 |           fallback_provider: get().fallbackProvider || null,
-1014 |           base_url: get().providerBaseUrls[get().provider] || null
-1015 |         }),
-1016 |         signal: controller.signal
-1017 |       });
-1018 | 
-1019 |       if (!response.ok) {
-1020 |         const errData = await response.json().catch(() => ({ detail: "Execution failed." }));
-1021 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
-1022 |       }
+ 971 |     const sessionId = get().activeSessionId;
+ 972 |     if (!sessionId) return;
+ 973 | 
+ 974 |     const prompt = get().chatMessages.findLast(m => m.sender === 'user')?.text || "";
+ 975 | 
+ 976 |     set((state) => ({
+ 977 |       isOrchestrating: true,
+ 978 |       isThinking: true,
+ 979 |       statusMessage: "Running custom orchestration loop...",
+ 980 |       liveThoughts: "",
+ 981 |       agentTalkLogs: [],
+ 982 |       followUpSuggestions: [],
+ 983 |       abortController: controller
+ 984 |     }));
+ 985 |     get().saveCurrentSession();
+ 986 | 
+ 987 |     const aiMsgId = Date.now().toString();
+ 988 |     set((state) => ({
+ 989 |       chatMessages: [
+ 990 |         ...state.chatMessages,
+ 991 |         {
+ 992 |           id: aiMsgId,
+ 993 |           sender: "ai",
+ 994 |           text: "",
+ 995 |           thinkingSummary: "",
+ 996 |           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+ 997 |         }
+ 998 |       ]
+ 999 |     }));
+1000 |     get().saveCurrentSession();
+1001 | 
+1002 |     try {
+1003 |       const response = await fetch("/api/gemini/execute_custom", {
+1004 |         method: "POST",
+1005 |         headers: { "Content-Type": "application/json" },
+1006 |         body: JSON.stringify({
+1007 |           session_id: sessionId,
+1008 |           prompt: prompt,
+1009 |           history: get().chatMessages
+1010 |             .filter(m => m.id !== aiMsgId)
+1011 |             .map(m => ({ sender: m.sender, text: m.text })),
+1012 |           api_key: get().apiKeys[get().provider] || get().apiKey || "",
+1013 |           api_keys: get().apiKeys,
+1014 |           nodes: get().nodes,
+1015 |           edges: get().edges,
+1016 |           provider: get().provider,
+1017 |           model: get().model,
+1018 |           fallback_provider: get().fallbackProvider || null,
+1019 |           base_url: get().providerBaseUrls[get().provider] || null
+1020 |         }),
+1021 |         signal: controller.signal
+1022 |       });
 1023 | 
-1024 |       const reader = response.body?.getReader();
-1025 |       const decoder = new TextDecoder();
-1026 |       if (!reader) throw new Error("No response stream body reader.");
-1027 | 
-1028 |       let assistantResponse = "";
-1029 |       let thinkingSummary = "";
-1030 | 
-1031 |       const customHandlers = {
-1032 |         onText: (token: string) => {
-1033 |           assistantResponse += token;
-1034 |           set((state) => ({
-1035 |             isThinking: false,
-1036 |             chatMessages: state.chatMessages.map(m =>
-1037 |               m.id === aiMsgId ? { ...m, text: assistantResponse } : m
-1038 |             )
-1039 |           }));
-1040 |         },
-1041 |         onThinking: (thought: string) => {
-1042 |           thinkingSummary += thought;
-1043 |           set((state) => ({
-1044 |             liveThoughts: thinkingSummary,
-1045 |             chatMessages: state.chatMessages.map(m =>
-1046 |               m.id === aiMsgId ? { ...m, thinkingSummary } : m
-1047 |             )
-1048 |           }));
-1049 |         },
-1050 |         onStatus: (msg: string) => set({ statusMessage: msg }),
-1051 |         onMetadata: (meta: Record<string, any>) => {
-1052 |           const { nodes: mergedNodes, edges: mergedEdges } = mergeCanvasState(
-1053 |             preExistingNodes, preExistingEdges,
-1054 |             meta.nodes || [], meta.edges || []
-1055 |           );
-1056 |           set({ nodes: mergedNodes, edges: mergedEdges, agentTalkLogs: meta.agent_talk || [], followUpSuggestions: meta.follow_up_suggestions || [] });
-1057 |           const talk = meta.agent_talk || [];
-1058 |           if (talk.length > 0) {
-1059 |             const latest = talk[talk.length - 1];
-1060 |             set({ statusMessage: `⚙️ **${latest.senderName}** completed — ${latest.text?.substring(0, 80) ?? ''}${(latest.text?.length ?? 0) > 80 ? '...' : ''}` });
-1061 |           }
-1062 |         },
-1063 |         onToolApproval: (approval: Record<string, any>) => set({ pendingApproval: approval as any }),
-1064 |         onDone: () => {},
-1065 |         onError: (err: Error) => { throw err; },
-1066 |       };
-1067 | 
-1068 |       await parseSSEStream(response, customHandlers, controller.signal);
-1069 | 
-1070 |       if (!assistantResponse) {
-1071 |         const fallbackMsg = "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again.";
-1072 |         set((state) => ({
-1073 |           chatMessages: state.chatMessages.map(m =>
-1074 |             m.id === aiMsgId ? { ...m, text: fallbackMsg } : m
-1075 |           )
-1076 |         }));
-1077 |       }
-1078 | 
-1079 |       set({ abortController: null });
-1080 |       get().saveCurrentSession();
-1081 |     } catch (err: any) {
-1082 |       if (err.name === 'AbortError') {
-1083 |         console.log("Steer Orchestration manually aborted.");
-1084 |         set((state) => ({
-1085 |           chatMessages: state.chatMessages.map(m =>
-1086 |             m.id === aiMsgId && !m.text ? { ...m, text: "*Generation stopped by user.*" } : m
-1087 |           )
-1088 |         }));
-1089 |       } else {
-1090 |         console.error("Steer Orchestration stream error:", err);
-1091 |         const errorMsg = `**Connection Error.**\n\n${err.message || "Failed to parse stream event source. Check backend logs."}`;
-1092 |         set((state) => ({
-1093 |           chatMessages: state.chatMessages.map(m =>
-1094 |             m.id === aiMsgId ? { ...m, text: errorMsg } : m
-1095 |           ),
-1096 |           nodes: [],
-1097 |           edges: [],
-1098 |           followUpSuggestions: []
-1099 |         }));
-1100 |       }
-1101 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
-1102 |       get().saveCurrentSession();
-1103 |     } finally {
-1104 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
-1105 |       get().saveCurrentSession();
-1106 |     }
-1107 |   },
-1108 | 
-1109 |   triggerEchoHouseSimulation: async () => {
-1110 |     const activeSessionId = get().activeSessionId;
-1111 |     if (!activeSessionId) return;
-1112 | 
-1113 |     const selfNode = get().nodes.find(n => (n.data as any).echohouseRole === "self");
-1114 |     if (!selfNode) return;
-1115 |     const problemText = (selfNode.data as any).echohouseProblem || "";
-1116 | 
-1117 |     const cast = get().nodes
-1118 |       .filter(n => (n.data as any).isEchoHouseAgent === true)
-1119 |       .map(n => ({
-1120 |         inferred_name: n.data.name,
-1121 |         role: (n.data as any).echohouseRole || "",
-1122 |         inferred_problem: (n.data as any).echohouseProblem || "",
-1123 |         is_self: (n.data as any).echohouseRole === "self"
-1124 |       }));
-1125 | 
-1126 |     // Abort any active orchestration
-1127 |     const currentController = get().abortController;
-1128 |     if (currentController) {
-1129 |       currentController.abort();
-1130 |     }
-1131 | 
-1132 |     const controller = new AbortController();
-1133 | 
-1134 |     set({
-1135 |       isOrchestrating: true,
-1136 |       isThinking: true,
-1137 |       statusMessage: "Initializing social simulation...",
-1138 |       liveThoughts: "",
-1139 |       agentTalkLogs: [],
-1140 |       followUpSuggestions: [],
-1141 |       abortController: controller
-1142 |     });
-1143 |     get().saveCurrentSession();
-1144 | 
-1145 |     try {
-1146 |       const activeProv = get().provider;
-1147 |       const apiKey = get().apiKeys[activeProv] || get().apiKey || "";
-1148 |       const response = await fetch("/api/gemini/echohouse/simulate", {
-1149 |         method: "POST",
-1150 |         headers: { "Content-Type": "application/json" },
-1151 |         body: JSON.stringify({
-1152 |           session_id: activeSessionId,
-1153 |           problem_text: problemText,
-1154 |           cast: cast,
-1155 |           provider: activeProv,
-1156 |           model: get().model,
-1157 |           api_key: apiKey,
-1158 |           api_keys: get().apiKeys,
-1159 |           base_url: get().providerBaseUrls[activeProv] || null
-1160 |         }),
-1161 |         signal: controller.signal
-1162 |       });
-1163 | 
-1164 |       if (!response.ok) {
-1165 |         const errData = await response.json().catch(() => ({ detail: "Simulation failed." }));
-1166 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
-1167 |       }
-1168 | 
-1169 |       let currentStreamingMsgId = "";
-1170 |       let currentText = "";
-1171 | 
-1172 |       const handlers = {
-1173 |         onText: (token: string) => {
-1174 |           if (!currentStreamingMsgId) return;
-1175 |           currentText += token;
-1176 |           set((state) => ({
-1177 |             isThinking: false,
-1178 |             chatMessages: state.chatMessages.map(m =>
-1179 |               m.id === currentStreamingMsgId ? { ...m, text: currentText } : m
-1180 |             )
-1181 |           }));
-1182 |         },
-1183 |         onThinking: () => {},
-1184 |         onStatus: (msg: string) => set({ statusMessage: msg }),
-1185 |         onMetadata: (meta: Record<string, any>) => {
-1186 |           if (meta.active_speaker) {
-1187 |             const isSelf = meta.active_speaker === "You (Self)" || (meta.active_speaker || "").toLowerCase() === "self";
-1188 |             const newMsgId = `echo-msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-1189 |             
-1190 |             const newMsg: ChatMessage = {
-1191 |               id: newMsgId,
-1192 |               sender: isSelf ? "user" : "ai",
-1193 |               text: "",
-1194 |               speakerName: meta.active_speaker,
-1195 |               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-1196 |             };
-1197 | 
-1198 |             set((state) => ({
-1199 |               chatMessages: [...state.chatMessages, newMsg]
-1200 |             }));
-1201 | 
-1202 |             currentStreamingMsgId = newMsgId;
-1203 |             currentText = "";
-1204 |           }
-1205 |         },
-1206 |         onToolApproval: () => {},
-1207 |         onDone: () => {},
-1208 |         onError: (err: Error) => { throw err; },
-1209 |       };
-1210 | 
-1211 |       await parseSSEStream(response, handlers, controller.signal);
-1212 |       set({ abortController: null });
-1213 |       get().saveCurrentSession();
-1214 |     } catch (err: any) {
-1215 |       if (err.name === 'AbortError') {
-1216 |         console.log("EchoHouse simulation manually aborted.");
-1217 |       } else {
-1218 |         console.error("EchoHouse simulation stream error:", err);
-1219 |       }
-1220 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
-1221 |       get().saveCurrentSession();
-1222 |     } finally {
-1223 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
-1224 |       get().saveCurrentSession();
-1225 |     }
-1226 |   }
-1227 | }));
-1228 | 
-1229 | let persistTimeout: any = null;
-1230 | useWorkflowStore.subscribe((state) => {
-1231 |   if (typeof window === 'undefined') return;
-1232 |   if (persistTimeout) clearTimeout(persistTimeout);
-1233 |   persistTimeout = setTimeout(async () => {
-1234 |     try {
-1235 |       const stateToPersist = {
-1236 |         activeSessionId: state.activeSessionId,
-1237 |         sessions: state.sessions,
-1238 |         nodes: state.nodes,
-1239 |         edges: state.edges,
-1240 |         provider: state.provider,
-1241 |         model: state.model,
-1242 |         fallbackProvider: state.fallbackProvider,
-1243 |         providerBaseUrls: state.providerBaseUrls,
-1244 |       };
-1245 |       await idbSet('solospace_workflow_state', JSON.stringify(stateToPersist));
-1246 |     } catch (e) {
-1247 |       console.error("Failed to persist state to IndexedDB:", e);
-1248 |     }
-1249 |   }, 500);
-1250 | });
-1251 |
+1024 |       if (!response.ok) {
+1025 |         const errData = await response.json().catch(() => ({ detail: "Execution failed." }));
+1026 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
+1027 |       }
+1028 | 
+1029 |       const reader = response.body?.getReader();
+1030 |       const decoder = new TextDecoder();
+1031 |       if (!reader) throw new Error("No response stream body reader.");
+1032 | 
+1033 |       let assistantResponse = "";
+1034 |       let thinkingSummary = "";
+1035 | 
+1036 |       const customHandlers = {
+1037 |         onText: (token: string) => {
+1038 |           assistantResponse += token;
+1039 |           set((state) => ({
+1040 |             isThinking: false,
+1041 |             chatMessages: state.chatMessages.map(m =>
+1042 |               m.id === aiMsgId ? { ...m, text: assistantResponse } : m
+1043 |             )
+1044 |           }));
+1045 |         },
+1046 |         onThinking: (thought: string) => {
+1047 |           thinkingSummary += thought;
+1048 |           set((state) => ({
+1049 |             liveThoughts: thinkingSummary,
+1050 |             chatMessages: state.chatMessages.map(m =>
+1051 |               m.id === aiMsgId ? { ...m, thinkingSummary } : m
+1052 |             )
+1053 |           }));
+1054 |         },
+1055 |         onStatus: (msg: string) => set({ statusMessage: msg }),
+1056 |         onMetadata: (meta: Record<string, any>) => {
+1057 |           const { nodes: mergedNodes, edges: mergedEdges } = mergeCanvasState(
+1058 |             preExistingNodes, preExistingEdges,
+1059 |             meta.nodes || [], meta.edges || []
+1060 |           );
+1061 |           set({ nodes: mergedNodes, edges: mergedEdges, agentTalkLogs: meta.agent_talk || [], followUpSuggestions: meta.follow_up_suggestions || [] });
+1062 |           const talk = meta.agent_talk || [];
+1063 |           if (talk.length > 0) {
+1064 |             const latest = talk[talk.length - 1];
+1065 |             set({ statusMessage: `⚙️ **${latest.senderName}** completed — ${latest.text?.substring(0, 80) ?? ''}${(latest.text?.length ?? 0) > 80 ? '...' : ''}` });
+1066 |           }
+1067 |         },
+1068 |         onToolApproval: (approval: Record<string, any>) => set({ pendingApproval: approval as any }),
+1069 |         onDone: () => {},
+1070 |         onError: (err: Error) => { throw err; },
+1071 |       };
+1072 | 
+1073 |       await parseSSEStream(response, customHandlers, controller.signal);
+1074 | 
+1075 |       if (!assistantResponse) {
+1076 |         const fallbackMsg = "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again.";
+1077 |         set((state) => ({
+1078 |           chatMessages: state.chatMessages.map(m =>
+1079 |             m.id === aiMsgId ? { ...m, text: fallbackMsg } : m
+1080 |           )
+1081 |         }));
+1082 |       }
+1083 | 
+1084 |       set({ abortController: null });
+1085 |       get().saveCurrentSession();
+1086 |     } catch (err: any) {
+1087 |       if (err.name === 'AbortError') {
+1088 |         console.log("Steer Orchestration manually aborted.");
+1089 |         set((state) => ({
+1090 |           chatMessages: state.chatMessages.map(m =>
+1091 |             m.id === aiMsgId && !m.text ? { ...m, text: "*Generation stopped by user.*" } : m
+1092 |           )
+1093 |         }));
+1094 |       } else {
+1095 |         console.error("Steer Orchestration stream error:", err);
+1096 |         const errorMsg = `**Connection Error.**\n\n${err.message || "Failed to parse stream event source. Check backend logs."}`;
+1097 |         set((state) => ({
+1098 |           chatMessages: state.chatMessages.map(m =>
+1099 |             m.id === aiMsgId ? { ...m, text: errorMsg } : m
+1100 |           ),
+1101 |           nodes: [],
+1102 |           edges: [],
+1103 |           followUpSuggestions: []
+1104 |         }));
+1105 |       }
+1106 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
+1107 |       get().saveCurrentSession();
+1108 |     } finally {
+1109 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
+1110 |       get().saveCurrentSession();
+1111 |     }
+1112 |   },
+1113 | 
+1114 |   triggerEchoHouseSimulation: async (rounds = 3, tone = "realistic") => {
+1115 |     const activeSessionId = get().activeSessionId;
+1116 |     if (!activeSessionId) return;
+1117 | 
+1118 |     const selfNode = get().nodes.find(n => (n.data as any).echohouseRole === "self");
+1119 |     if (!selfNode) return;
+1120 |     const problemText = (selfNode.data as any).echohouseProblem || "";
+1121 | 
+1122 |     const cast = get().nodes
+1123 |       .filter(n => (n.data as any).isEchoHouseAgent === true)
+1124 |       .map(n => ({
+1125 |         inferred_name: n.data.name,
+1126 |         role: (n.data as any).echohouseRole || "",
+1127 |         inferred_problem: (n.data as any).echohouseProblem || "",
+1128 |         is_self: (n.data as any).echohouseRole === "self"
+1129 |       }));
+1130 | 
+1131 |     // Abort any active orchestration
+1132 |     const currentController = get().abortController;
+1133 |     if (currentController) {
+1134 |       currentController.abort();
+1135 |     }
+1136 | 
+1137 |     const controller = new AbortController();
+1138 | 
+1139 |     set({
+1140 |       isOrchestrating: true,
+1141 |       isThinking: true,
+1142 |       statusMessage: "Initializing social simulation...",
+1143 |       liveThoughts: "",
+1144 |       agentTalkLogs: [],
+1145 |       followUpSuggestions: [],
+1146 |       abortController: controller
+1147 |     });
+1148 |     get().saveCurrentSession();
+1149 | 
+1150 |     try {
+1151 |       const activeProv = get().provider;
+1152 |       const apiKey = get().apiKeys[activeProv] || get().apiKey || "";
+1153 |       const response = await fetch("/api/gemini/echohouse/simulate", {
+1154 |         method: "POST",
+1155 |         headers: { "Content-Type": "application/json" },
+1156 |         body: JSON.stringify({
+1157 |           session_id: activeSessionId,
+1158 |           problem_text: problemText,
+1159 |           cast: cast,
+1160 |           provider: activeProv,
+1161 |           model: get().model,
+1162 |           api_key: apiKey,
+1163 |           api_keys: get().apiKeys,
+1164 |           base_url: get().providerBaseUrls[activeProv] || null,
+1165 |           rounds: rounds,
+1166 |           tone: tone
+1167 |         }),
+1168 |         signal: controller.signal
+1169 |       });
+1170 | 
+1171 |       if (!response.ok) {
+1172 |         const errData = await response.json().catch(() => ({ detail: "Simulation failed." }));
+1173 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
+1174 |       }
+1175 | 
+1176 |       let currentStreamingMsgId = "";
+1177 |       let currentText = "";
+1178 |       let simulationTextAccum = "";
+1179 | 
+1180 |       const handlers = {
+1181 |         onText: (token: string) => {
+1182 |           if (!currentStreamingMsgId) return;
+1183 |           currentText += token;
+1184 |           simulationTextAccum += token;
+1185 |           set((state) => ({
+1186 |             isThinking: false,
+1187 |             chatMessages: state.chatMessages.map(m =>
+1188 |               m.id === currentStreamingMsgId ? { ...m, text: currentText } : m
+1189 |             )
+1190 |           }));
+1191 |         },
+1192 |         onThinking: () => {},
+1193 |         onStatus: (msg: string) => {
+1194 |           set({ statusMessage: msg });
+1195 |           // Detect round start and inject a divider message
+1196 |           const roundMatch = msg.match(/Orchestrating Round (\d+) of social simulation/);
+1197 |           if (roundMatch) {
+1198 |             const roundNum = roundMatch[1];
+1199 |             const dividerId = `divider-round-${roundNum}-${Date.now()}`;
+1200 |             const dividerMsg: ChatMessage = {
+1201 |               id: dividerId,
+1202 |               sender: 'divider',
+1203 |               text: `Round ${roundNum}`,
+1204 |               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+1205 |             };
+1206 |             set((state) => ({ chatMessages: [...state.chatMessages, dividerMsg] }));
+1207 |             currentStreamingMsgId = "";
+1208 |             currentText = "";
+1209 |           }
+1210 |         },
+1211 |         onMetadata: (meta: Record<string, any>) => {
+1212 |           if (meta.active_speaker) {
+1213 |             // Inject insight divider before the insight speaker
+1214 |             if (meta.active_speaker === "insight") {
+1215 |               const insightDividerId = `divider-insight-${Date.now()}`;
+1216 |               const insightDivider: ChatMessage = {
+1217 |                 id: insightDividerId,
+1218 |                 sender: 'divider',
+1219 |                 text: 'Therapeutic Insight',
+1220 |                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+1221 |               };
+1222 |               set((state) => ({ chatMessages: [...state.chatMessages, insightDivider] }));
+1223 |             }
+1224 | 
+1225 |             const isSelf = meta.active_speaker === "You (Self)" || (meta.active_speaker || "").toLowerCase() === "self";
+1226 |             const newMsgId = `echo-msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+1227 | 
+1228 |             const newMsg: ChatMessage = {
+1229 |               id: newMsgId,
+1230 |               sender: meta.active_speaker === "insight" ? 'ai' : (isSelf ? 'user' : 'ai'),
+1231 |               text: "",
+1232 |               speakerName: meta.active_speaker,
+1233 |               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+1234 |             };
+1235 | 
+1236 |             set((state) => ({
+1237 |               chatMessages: [...state.chatMessages, newMsg]
+1238 |             }));
+1239 | 
+1240 |             currentStreamingMsgId = newMsgId;
+1241 |             currentText = "";
+1242 |           }
+1243 |         },
+1244 |         onToolApproval: () => {},
+1245 |         onDone: () => {},
+1246 |         onError: (err: Error) => { throw err; },
+1247 |       };
+1248 | 
+1249 |       await parseSSEStream(response, handlers, controller.signal);
+1250 |       set({ abortController: null });
+1251 |       get().saveCurrentSession();
+1252 | 
+1253 |       // Fetch actionable takeaways after simulation completes
+1254 |       try {
+1255 |         const takeawaysResp = await fetch("/api/gemini/echohouse/takeaways", {
+1256 |           method: "POST",
+1257 |           headers: { "Content-Type": "application/json" },
+1258 |           body: JSON.stringify({
+1259 |             simulation_text: simulationTextAccum,
+1260 |             problem_text: problemText,
+1261 |             provider: activeProv,
+1262 |             model: get().model,
+1263 |             api_key: apiKey,
+1264 |             api_keys: get().apiKeys,
+1265 |             base_url: get().providerBaseUrls[activeProv] || null
+1266 |           })
+1267 |         });
+1268 |         if (takeawaysResp.ok) {
+1269 |           const { takeaways } = await takeawaysResp.json();
+1270 |           if (Array.isArray(takeaways) && takeaways.length > 0) {
+1271 |             const takeawaysMsgId = `echo-takeaways-${Date.now()}`;
+1272 |             const takeawaysMsg: ChatMessage = {
+1273 |               id: takeawaysMsgId,
+1274 |               sender: 'ai',
+1275 |               text: '',
+1276 |               speakerName: 'takeaways',
+1277 |               takeaways: takeaways,
+1278 |               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+1279 |             };
+1280 |             set((state) => ({ chatMessages: [...state.chatMessages, takeawaysMsg] }));
+1281 |             get().saveCurrentSession();
+1282 |           }
+1283 |         }
+1284 |       } catch (e) {
+1285 |         console.error("Failed to fetch EchoHouse takeaways:", e);
+1286 |       }
+1287 |     } catch (err: any) {
+1288 |       if (err.name === 'AbortError') {
+1289 |         console.log("EchoHouse simulation manually aborted.");
+1290 |       } else {
+1291 |         console.error("EchoHouse simulation stream error:", err);
+1292 |       }
+1293 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
+1294 |       get().saveCurrentSession();
+1295 |     } finally {
+1296 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
+1297 |       get().saveCurrentSession();
+1298 |     }
+1299 |   }
+1300 | }));
+1301 | 
+1302 | let persistTimeout: any = null;
+1303 | useWorkflowStore.subscribe((state) => {
+1304 |   if (typeof window === 'undefined') return;
+1305 |   if (persistTimeout) clearTimeout(persistTimeout);
+1306 |   persistTimeout = setTimeout(async () => {
+1307 |     try {
+1308 |       const stateToPersist = {
+1309 |         activeSessionId: state.activeSessionId,
+1310 |         sessions: state.sessions,
+1311 |         nodes: state.nodes,
+1312 |         edges: state.edges,
+1313 |         provider: state.provider,
+1314 |         model: state.model,
+1315 |         fallbackProvider: state.fallbackProvider,
+1316 |         providerBaseUrls: state.providerBaseUrls,
+1317 |       };
+1318 |       await idbSet('solospace_workflow_state', JSON.stringify(stateToPersist));
+1319 |     } catch (e) {
+1320 |       console.error("Failed to persist state to IndexedDB:", e);
+1321 |     }
+1322 |   }, 500);
+1323 | });
+1324 |
 ```
 
 ### File: `Frontend/tests/crypto.test.ts`

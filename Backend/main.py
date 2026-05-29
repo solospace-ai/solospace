@@ -161,6 +161,18 @@ class EchoHouseSimulateRequest(BaseModel):
     api_key: Optional[str] = None
     api_keys: Optional[Dict[str, str]] = None
     base_url: Optional[str] = None
+    rounds: int = 3
+    tone: str = "realistic"
+
+
+class EchoHouseTakeawaysRequest(BaseModel):
+    simulation_text: str
+    problem_text: str
+    provider: str = "gemini"
+    model: Optional[str] = None
+    api_key: Optional[str] = None
+    api_keys: Optional[Dict[str, str]] = None
+    base_url: Optional[str] = None
 
 
 # ─── Health Check ─────────────────────────────────────────────────────
@@ -201,7 +213,9 @@ async def orchestrate(req: OrchestrateRequest):
     - COMPLEX → full multi-agent DAG planning
     """
     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
-    if not api_key:
+    from providers import get_provider_config as _get_cfg
+    _is_local = _get_cfg(req.provider).get("is_local", False)
+    if not api_key and not _is_local:
         raise HTTPException(status_code=400, detail="API key required.")
 
     # Jailbreak check
@@ -369,7 +383,8 @@ async def orchestrate(req: OrchestrateRequest):
 async def execute_custom(req: ExecuteCustomRequest):
     """Execute a user-customized node canvas directly."""
     api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
-    if not api_key:
+    from providers import get_provider_config as _get_cfg
+    if not api_key and not _get_cfg(req.provider).get("is_local", False):
         raise HTTPException(status_code=400, detail="API key required.")
 
     return StreamingResponse(
@@ -494,7 +509,7 @@ async def test_agent_route(req: TestAgentRequest):
     try:
         response = await call_provider(
             provider=req.provider,
-            model=req.node.get("data", {}).get("model") or "gemini-2.5-flash",
+            model=req.node.get("data", {}).get("model") or provider_config.get("default_model", "llama3"),
             api_key=api_key,
             messages=[{"role": "user", "content": test_prompt}],
             system_prompt=node.get("data", {}).get("systemPrompt", "You are a test agent."),
@@ -527,11 +542,12 @@ async def echohouse_init(req: EchoHouseInitRequest):
         "- inferred_name (string): Name of the person (e.g. \"You (Self)\", \"Sarah\", \"Dad\")\n"
         "- role (string): Their relation/role (e.g. \"self\", \"friend\", \"father\")\n"
         "- inferred_problem (string): What this person likely thinks/feels about the situation (their perspective)\n"
+        "- emotional_core (string): One sentence describing the deepest emotional need or fear driving this person's behavior. Example: \"Needs to feel respected and not dismissed.\"\n"
         "- is_self (boolean): True if it represents the user, False otherwise.\n\n"
         "Example JSON output:\n"
         "[\n"
-        "  {\"inferred_name\": \"You (Self)\", \"role\": \"self\", \"inferred_problem\": \"I feel stuck and overwhelmed.\", \"is_self\": true},\n"
-        "  {\"inferred_name\": \"Mom\", \"role\": \"mother\", \"inferred_problem\": \"She thinks I'm not trying hard enough.\", \"is_self\": false}\n"
+        "  {\"inferred_name\": \"You (Self)\", \"role\": \"self\", \"inferred_problem\": \"I feel stuck and overwhelmed.\", \"emotional_core\": \"Needs to feel heard and understood.\", \"is_self\": true},\n"
+        "  {\"inferred_name\": \"Mom\", \"role\": \"mother\", \"inferred_problem\": \"She thinks I'm not trying hard enough.\", \"emotional_core\": \"Fears losing connection with her child.\", \"is_self\": false}\n"
         "]"
     )
     
@@ -558,6 +574,7 @@ async def echohouse_init(req: EchoHouseInitRequest):
                         "inferred_name": str(item["inferred_name"]),
                         "role": str(item["role"]),
                         "inferred_problem": str(item.get("inferred_problem", "")),
+                        "emotional_core": str(item.get("emotional_core", "")),
                         "is_self": bool(item.get("is_self", False))
                     })
             if validated_cast:
@@ -601,10 +618,66 @@ async def echohouse_simulate(req: EchoHouseSimulateRequest):
             model=model,
             api_key=api_key,
             api_keys=req.api_keys,
-            base_url=req.base_url
+            base_url=req.base_url,
+            rounds=req.rounds,
+            tone=req.tone
         ),
         media_type="text/event-stream"
     )
+
+
+@app.post("/echohouse/takeaways")
+async def echohouse_takeaways(req: EchoHouseTakeawaysRequest):
+    api_key = resolve_api_key(req.provider, req.api_key, req.api_keys)
+    from providers import PROVIDERS, call_provider, extract_json_from_text
+    is_local = PROVIDERS.get(req.provider.lower(), {}).get("is_local", False)
+    if not api_key and not is_local:
+        raise HTTPException(status_code=400, detail="API key required.")
+
+    model = req.model or PROVIDERS.get(req.provider.lower(), {}).get("default_model")
+
+    system_prompt = (
+        "You are a concise therapeutic coach. Given the simulation text and problem below, "
+        "output EXACTLY a JSON array of 3 strings. Each string is a specific, actionable step "
+        "written in second person (\"You could...\", \"Try...\", \"Next time...\"). "
+        "Each string must be under 25 words. Do NOT output generic advice. Be behavioral and specific. "
+        "Output raw JSON only, no markdown fences. Example: "
+        '["Try stating one boundary out loud before the next family call.", '
+        '"Write down one thing you felt but did not say, then say it to a mirror.", '
+        '"Ask directly for what you need rather than waiting for others to notice."]'
+    )
+
+    user_prompt = (
+        f"Problem: {req.problem_text}\n\n"
+        f"Simulation transcript:\n{req.simulation_text[:6000]}"
+    )
+
+    try:
+        response = await call_provider(
+            provider=req.provider,
+            model=model,
+            api_key=api_key,
+            messages=[{"role": "user", "content": user_prompt}],
+            system_prompt=system_prompt,
+            temperature=0.5,
+            timeout=15.0,
+            api_keys=req.api_keys,
+            base_url=req.base_url
+        )
+        takeaways = extract_json_from_text(response)
+        if isinstance(takeaways, list) and len(takeaways) >= 1:
+            result = [str(t) for t in takeaways[:3]]
+            while len(result) < 3:
+                result.append("Reflect on what you truly need from this relationship.")
+            return {"takeaways": result}
+    except Exception as e:
+        print(f"[EchoHouse Takeaways Error] {e}")
+
+    return {"takeaways": [
+        "Notice one moment this week where you held back, and speak up instead.",
+        "Write down what you wish the other person understood about your perspective.",
+        "Before the next difficult interaction, state your need clearly to yourself first."
+    ]}
 
 
 @app.get("/ollama/models")

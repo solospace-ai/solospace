@@ -11,7 +11,9 @@ async def run_echohouse_simulation(
     model: Optional[str] = None,
     api_key: Optional[str] = None,
     api_keys: Optional[Dict[str, str]] = None,
-    base_url: Optional[str] = None
+    base_url: Optional[str] = None,
+    rounds: int = 3,
+    tone: str = "realistic"
 ) -> AsyncGenerator[str, None]:
     """
     Orchestrates a multi-turn social simulation where agents act as real-life people.
@@ -19,7 +21,8 @@ async def run_echohouse_simulation(
     """
     history: List[Dict[str, str]] = []
     
-    rounds = 3
+    rounds = max(1, min(5, rounds))
+    tone_label = tone.lower().strip() if tone else "realistic"
     for r in range(rounds):
         yield f"event: status\ndata: {json.dumps(f'Orchestrating Round {r + 1} of social simulation...')}\n\n"
         
@@ -30,9 +33,12 @@ async def run_echohouse_simulation(
             is_self = agent.get("is_self", False)
             
             # Embody specific character via system prompt
+            emotional_core = agent.get("emotional_core", "")
+            emotional_core_line = f"\nYour deepest emotional driver in this situation is: \"{emotional_core}\"." if emotional_core else ""
             system_prompt = f"""You are {name}, whose role in the user's life is: {role}.
 The user has described their core problem: "{problem_text}".
 From your perspective, the situation is: "{problem}".
+{emotional_core_line}
 
 You are participating in a social dynamics simulation. Respond authentically as this person would.
 STRICT GUIDELINES:
@@ -42,6 +48,7 @@ STRICT GUIDELINES:
 - Reference the user (Self) and other people by name.
 - Keep your turn relatively short and punchy (around 2-4 sentences), as in a real conversation.
 - Output ONLY the raw conversational speech of {name}. Do NOT prefix with your name or role in the response (e.g., do NOT write "{name}: ..."). Just output the speech itself.
+- Respond in a {tone_label} manner, authentic to who this person is.
 """
 
             messages = []

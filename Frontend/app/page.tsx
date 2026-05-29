@@ -90,6 +90,14 @@ function SolospaceContent() {
 
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
 
+  // EchoHouse guided intake state
+  const [echoStep, setEchoStep] = useState<1 | 2 | 3>(1);
+  const [echoSituation, setEchoSituation] = useState("");
+  const [echoFocus, setEchoFocus] = useState("");
+  const [echoCast, setEchoCast] = useState<any[]>([]);
+  const [isLoadingCast, setIsLoadingCast] = useState(false);
+  const [editingCastIdx, setEditingCastIdx] = useState<number | null>(null);
+
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -145,6 +153,120 @@ function SolospaceContent() {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
+
+  // Reset EchoHouse intake when session changes
+  useEffect(() => {
+    if (isEchoHouseMode) {
+      setEchoStep(1);
+      setEchoSituation("");
+      setEchoFocus("");
+      setEchoCast([]);
+      setEditingCastIdx(null);
+    }
+  }, [activeSessionId]);
+
+  const fetchEchoCast = async (situationText: string, focusText: string) => {
+    setIsLoadingCast(true);
+    try {
+      const activeProv = useWorkflowStore.getState().provider;
+      const apiKey = useWorkflowStore.getState().apiKeys[activeProv] || useWorkflowStore.getState().apiKey || "";
+      const resp = await fetch("/api/gemini/echohouse/init", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          problem_text: `${situationText}\n\nFocus: ${focusText}`,
+          provider: activeProv,
+          model: useWorkflowStore.getState().model,
+          api_key: apiKey,
+          api_keys: useWorkflowStore.getState().apiKeys,
+          base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null
+        })
+      });
+      if (resp.ok) {
+        const castData = await resp.json();
+        if (Array.isArray(castData)) {
+          setEchoCast(castData);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to fetch cast:", e);
+    } finally {
+      setIsLoadingCast(false);
+    }
+  };
+
+  const beginEchoHouseSimulation = () => {
+    const selfMember = echoCast.find(m => m.is_self || m.role === "self");
+    const selfNode = {
+      id: "self-node",
+      type: "custom",
+      position: { x: 300, y: 200 },
+      data: {
+        name: selfMember?.inferred_name || "You (Self)",
+        tag: "SELF",
+        icon: "bot",
+        objective: echoSituation.length > 120 ? echoSituation.substring(0, 120) + "..." : echoSituation,
+        systemPrompt: "You are the user themselves, experiencing this problem from the inside.",
+        status: "IDLE" as const,
+        enabled: true,
+        isEchoHouseAgent: true,
+        echohouseRole: "self",
+        echohouseProblem: echoSituation,
+        emotional_core: selfMember?.emotional_core || "",
+        rules: [],
+        dependencies: [],
+        tools: [],
+        toolPermissions: {},
+        temp: 0.7,
+        logic: 70,
+        empathy: 50,
+        priority: 5,
+        toolLogs: [],
+        personality: "",
+        senderId: "self-node"
+      }
+    };
+    const nodesList: any[] = [selfNode];
+    echoCast.forEach((member: any, idx: number) => {
+      if (member.is_self || member.role === "self") return;
+      const angle = (idx * 2 * Math.PI) / Math.max(echoCast.length - 1, 1);
+      const x = 300 + Math.cos(angle) * 250;
+      const y = 200 + Math.sin(angle) * 200;
+      nodesList.push({
+        id: `echo-agent-${idx}-${Date.now()}`,
+        type: "custom",
+        position: { x: Math.max(50, x), y: Math.max(50, y) },
+        data: {
+          name: member.inferred_name,
+          tag: member.role.toUpperCase().replace(/\s+/g, "_"),
+          icon: "science",
+          objective: `Provide perspective as ${member.inferred_name} (${member.role}).`,
+          systemPrompt: `You are ${member.inferred_name}, whose role in the user's life is ${member.role}. From your perspective about their situation: ${member.inferred_problem}`,
+          status: "IDLE" as const,
+          enabled: true,
+          isEchoHouseAgent: true,
+          echohouseRole: member.role,
+          echohouseProblem: member.inferred_problem,
+          emotional_core: member.emotional_core || "",
+          rules: [],
+          dependencies: [],
+          tools: [],
+          toolPermissions: {},
+          temp: 0.8,
+          logic: 70,
+          empathy: 50,
+          priority: 5,
+          toolLogs: [],
+          personality: "",
+          senderId: `echo-agent-${idx}-${Date.now()}`
+        }
+      });
+    });
+    setNodes(nodesList);
+    setEdges([]);
+    setWorkspaceState("active");
+    setCurrentTab("arena");
+  };
 
   const startOrchestration = async (promptText: string) => {
     if (!promptText.trim()) return;
@@ -256,11 +378,17 @@ function SolospaceContent() {
     }
 
     setWorkspaceState("active");
-    setCurrentTab("chat");
     let sessionId = activeSessionId;
     if (!sessionId) sessionId = createSession(promptText, executionMode);
     setExecutionState("running");
-    triggerSteerOrchestration(promptText, executionMode !== "custom", executionMode);
+    if (executionMode === "custom") {
+      setCurrentTab("arena");
+      triggerSteerOrchestration(promptText, false, "custom");
+      // executionState will be set to "paused" by the store after the plan arrives
+    } else {
+      setCurrentTab("chat");
+      triggerSteerOrchestration(promptText, true, "auto");
+    }
     setUserQuery("");
   };
 
@@ -415,22 +543,18 @@ function SolospaceContent() {
         </header>
 
         <div className="flex-1 relative overflow-hidden">
-          {workspaceState === "home" && (
+          {workspaceState === "home" && !isEchoHouseMode && (
             <div className="absolute inset-0 flex flex-col justify-between overflow-y-auto custom-scrollbar">
               <div />
               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
                 <div className="text-center mb-10 space-y-2 select-none">
-                  <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">
-                    {isEchoHouseMode ? "What is your problem in life?" : "What's on your mind?"}
-                  </h1>
-                  <p className="text-sm text-neutral-400 font-sans">
-                    {isEchoHouseMode ? "Describe your struggle below to initialize the simulation." : "Ask anything. Get a real, complete answer instantly."}
-                  </p>
+                  <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">What&apos;s on your mind?</h1>
+                  <p className="text-sm text-neutral-400 font-sans">Ask anything. Get a real, complete answer instantly.</p>
                 </div>
                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
                   <div className="flex items-center gap-3">
                     <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
-                    <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder={isEchoHouseMode ? "What is your problem in life?" : "Describe your idea, problem, or question..."} className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
+                    <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder="Describe your idea, problem, or question..." className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
                     <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim()} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
                   </div>
                 </div>
@@ -441,6 +565,170 @@ function SolospaceContent() {
                 </div>
               </div>
               <div />
+            </div>
+          )}
+
+          {workspaceState === "home" && isEchoHouseMode && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto custom-scrollbar px-6 py-12">
+              <div className="w-full max-w-xl space-y-8">
+                {/* Step indicator */}
+                <div className="flex items-center gap-2 select-none">
+                  {[1, 2, 3].map((s) => (
+                    <div key={s} className="flex items-center gap-2">
+                      <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-mono font-bold transition-all ${echoStep >= s ? 'bg-white text-black' : 'bg-neutral-800 text-neutral-500'}`}>{s}</div>
+                      {s < 3 && <div className={`w-8 h-px transition-all ${echoStep > s ? 'bg-white' : 'bg-neutral-800'}`} />}
+                    </div>
+                  ))}
+                  <span className="text-[10px] font-mono text-neutral-500 ml-2 uppercase tracking-wider">
+                    {echoStep === 1 ? 'Situation' : echoStep === 2 ? 'Focus' : 'Cast Review'}
+                  </span>
+                </div>
+
+                {/* Step 1 — Situation */}
+                {echoStep === 1 && (
+                  <div className="space-y-4">
+                    <div className="space-y-1">
+                      <h1 className="text-2xl font-bold text-white tracking-tight">Describe the situation you are navigating.</h1>
+                      <p className="text-xs text-neutral-500 font-sans">Write freely. This is private. The more specific, the more useful the simulation.</p>
+                    </div>
+                    <textarea
+                      rows={6}
+                      value={echoSituation}
+                      onChange={(e) => setEchoSituation(e.target.value)}
+                      placeholder="My manager keeps dismissing my ideas in meetings. Last week they took credit for a suggestion I made and..."
+                      className="w-full bg-neutral-950 border border-[#1f1f1f] rounded-2xl p-4 text-sm text-neutral-200 outline-none placeholder:text-neutral-700 focus:border-neutral-600 resize-none leading-relaxed transition-colors custom-scrollbar"
+                    />
+                    <button
+                      onClick={() => { if (echoSituation.trim()) setEchoStep(2); }}
+                      disabled={!echoSituation.trim()}
+                      className="w-full py-3 bg-white text-black font-semibold text-sm rounded-2xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
+                    >
+                      Continue
+                    </button>
+                  </div>
+                )}
+
+                {/* Step 2 — Focus */}
+                {echoStep === 2 && (
+                  <div className="space-y-4">
+                    <div className="space-y-1">
+                      <h1 className="text-2xl font-bold text-white tracking-tight">What do you want from this simulation?</h1>
+                      <p className="text-xs text-neutral-500 font-sans">Select the focus that best fits your goal.</p>
+                    </div>
+                    <div className="space-y-2">
+                      {[
+                        "Understand why this keeps happening",
+                        "Prepare for a difficult conversation",
+                        "Process feelings about a past event"
+                      ].map((option) => (
+                        <button
+                          key={option}
+                          onClick={() => setEchoFocus(option)}
+                          className={`w-full text-left px-4 py-3 rounded-xl border text-sm transition-all cursor-pointer ${echoFocus === option ? 'border-white bg-white/[0.06] text-white font-semibold' : 'border-[#1f1f1f] text-neutral-400 hover:border-neutral-600 hover:text-white'}`}
+                        >
+                          {option}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => setEchoStep(1)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
+                      <button
+                        onClick={async () => {
+                          if (echoFocus.trim()) {
+                            setEchoStep(3);
+                            await fetchEchoCast(echoSituation, echoFocus);
+                          }
+                        }}
+                        disabled={!echoFocus.trim()}
+                        className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
+                      >
+                        {isLoadingCast ? "Inferring cast..." : "Next"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Step 3 — Cast Review */}
+                {echoStep === 3 && (
+                  <div className="space-y-4">
+                    <div className="space-y-1">
+                      <h1 className="text-2xl font-bold text-white tracking-tight">Review the cast.</h1>
+                      <p className="text-xs text-neutral-500 font-sans">These are the people who will participate in the simulation. Edit, remove, or add as needed.</p>
+                    </div>
+                    {isLoadingCast ? (
+                      <div className="flex items-center justify-center py-12">
+                        <div className="w-5 h-5 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
+                        <span className="text-xs text-neutral-500 ml-3 font-mono">Inferring cast...</span>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {echoCast.map((member, idx) => (
+                          <div key={idx} className="bg-neutral-950 border border-[#1f1f1f] rounded-xl p-3 space-y-2">
+                            {editingCastIdx === idx ? (
+                              <div className="space-y-2">
+                                <input
+                                  type="text"
+                                  value={member.inferred_name}
+                                  onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_name: e.target.value } : m))}
+                                  className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
+                                  placeholder="Name"
+                                />
+                                <input
+                                  type="text"
+                                  value={member.role}
+                                  onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, role: e.target.value } : m))}
+                                  className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
+                                  placeholder="Role"
+                                />
+                                <textarea
+                                  value={member.inferred_problem}
+                                  rows={2}
+                                  onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_problem: e.target.value } : m))}
+                                  className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2.5 text-xs text-white outline-none focus:border-neutral-500 resize-none"
+                                  placeholder="Their perspective..."
+                                />
+                                <button onClick={() => setEditingCastIdx(null)} className="text-[10px] font-mono text-neutral-400 hover:text-white cursor-pointer">Done</button>
+                              </div>
+                            ) : (
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-semibold text-white">{member.inferred_name}</span>
+                                    <span className="text-[9px] font-mono text-neutral-500 uppercase tracking-wider">{member.role}</span>
+                                  </div>
+                                  <p className="text-[11px] text-neutral-500 leading-relaxed mt-0.5 line-clamp-2">{member.inferred_problem}</p>
+                                </div>
+                                {!member.is_self && (
+                                  <div className="flex gap-1 shrink-0">
+                                    <button onClick={() => setEditingCastIdx(idx)} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><Pencil className="w-3 h-3" /></button>
+                                    <button onClick={() => setEchoCast(prev => prev.filter((_, i) => i !== idx))} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><X className="w-3 h-3" /></button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        <button
+                          onClick={() => setEchoCast(prev => [...prev, { inferred_name: "New Person", role: "acquaintance", inferred_problem: "Enter their perspective...", emotional_core: "", is_self: false }])}
+                          className="w-full py-2.5 border border-dashed border-[#1f1f1f] rounded-xl text-xs text-neutral-500 hover:text-white hover:border-neutral-600 transition-all cursor-pointer"
+                        >
+                          Add Person
+                        </button>
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <button onClick={() => setEchoStep(2)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
+                      <button
+                        onClick={beginEchoHouseSimulation}
+                        disabled={isLoadingCast || echoCast.filter(m => !m.is_self).length === 0}
+                        className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
+                      >
+                        Begin Simulation
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -464,13 +752,19 @@ function SolospaceContent() {
                           </div>
                         ) : (
                           chatMessages.map((msg, msgIdx) => (
-                            <motion.div key={msg.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={`flex w-full ${msg.sender === "user" ? "justify-end" : "justify-start"}`}>
-                              {msg.sender === "user" ? (
+                            <motion.div key={msg.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={`flex w-full ${msg.sender === "divider" ? "justify-center" : msg.sender === "user" ? "justify-end" : "justify-start"}`}>
+                              {msg.sender === "divider" ? (
+                                <div className="w-full flex items-center gap-4 my-4 select-none">
+                                  <div className="h-px flex-1 bg-[#1f1f1f]" />
+                                  <span className="text-[10px] font-mono text-neutral-500 tracking-wider uppercase">{msg.text}</span>
+                                  <div className="h-px flex-1 bg-[#1f1f1f]" />
+                                </div>
+                              ) : msg.sender === "user" ? (
                                 <div className="flex flex-col items-end space-y-1 max-w-[72%] group">
                                   {msg.speakerName && (
                                     <span className="text-[10px] font-mono text-neutral-500 mr-2">{msg.speakerName}</span>
                                   )}
-                                  <div className="rounded-3xl px-5 py-3 bg-[#2f2f2f] text-neutral-100 text-sm leading-relaxed"><p className="whitespace-pre-wrap">{msg.text}</p></div>
+                                  <div className={`rounded-3xl px-5 py-3 text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'bg-neutral-800' : 'bg-[#2f2f2f]'}`}><p className="whitespace-pre-wrap">{msg.text}</p></div>
                                   <div className="flex items-center gap-3 mt-1.5 text-neutral-500 select-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 mr-2">
                                     <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
                                       {copiedMsgId === msg.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
@@ -484,32 +778,43 @@ function SolospaceContent() {
                                 </div>
                               ) : (
                                 <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
-                                  {msg.speakerName === "insight" && (
-                                    <div className="w-full flex items-center gap-4 my-6">
-                                      <div className="h-px flex-1 bg-[#1f1f1f]" />
-                                      <span className="text-[10px] font-mono text-neutral-500 tracking-wider uppercase">Simulation Analysis</span>
-                                      <div className="h-px flex-1 bg-[#1f1f1f]" />
-                                    </div>
-                                  )}
-                                  {msg.speakerName && msg.speakerName !== "insight" && (
+                                  {msg.speakerName && msg.speakerName !== "insight" && msg.speakerName !== "takeaways" && (
                                     <span className="text-[10px] font-mono text-neutral-500 ml-1">{msg.speakerName}</span>
                                   )}
-                                  <div className="w-full text-neutral-100 text-sm leading-relaxed px-1 py-2">
-                                    {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
-                                    {msg.text && (!isOrchestrating || msgIdx !== chatMessages.length - 1) && (
-                                      <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
-                                        <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
-                                          {copiedMsgId === msg.id ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400 font-medium">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
-                                        </button>
-                                        {!isEchoHouseMode && msgIdx === chatMessages.length - 1 && !isOrchestrating && (
-                                          <button onClick={handleRegenerate} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
-                                            <RefreshCw className="w-3.5 h-3.5" />
-                                            <span>Regenerate</span>
+                                  {msg.speakerName === "takeaways" && msg.takeaways ? (
+                                    <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 space-y-3 mt-2">
+                                      <span className="text-[10px] font-mono text-neutral-400 uppercase tracking-wider font-bold block">What you can try</span>
+                                      <ol className="space-y-2">
+                                        {msg.takeaways.map((item, ti) => (
+                                          <li key={ti} className="flex gap-2.5 text-xs text-neutral-300 leading-relaxed">
+                                            <span className="font-mono text-neutral-600 shrink-0">{ti + 1}.</span>
+                                            <span>{item}</span>
+                                          </li>
+                                        ))}
+                                      </ol>
+                                    </div>
+                                  ) : msg.speakerName === "insight" ? (
+                                    <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+                                      {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
+                                    </div>
+                                  ) : (
+                                    <div className={`w-full text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'rounded-2xl px-4 py-3 bg-neutral-900' : 'px-1 py-2'}`}>
+                                      {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
+                                      {msg.text && (!isOrchestrating || msgIdx !== chatMessages.length - 1) && (
+                                        <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
+                                          <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
+                                            {copiedMsgId === msg.id ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400 font-medium">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
                                           </button>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
+                                          {!isEchoHouseMode && msgIdx === chatMessages.length - 1 && !isOrchestrating && (
+                                            <button onClick={handleRegenerate} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
+                                              <RefreshCw className="w-3.5 h-3.5" />
+                                              <span>Regenerate</span>
+                                            </button>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
                                   {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && nodes.length > 0 && (
                                     <div className="flex gap-3 mt-4 select-none">
                                       <button onClick={() => setCurrentTab("arena")} className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max">

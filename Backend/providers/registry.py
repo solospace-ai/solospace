@@ -239,6 +239,9 @@ async def call_provider(
     adapter = cloned_config.get("adapter", "openai")
     wants_json = json_schema is not None or json_schema_hint is not None
 
+    if cloned_config.get("is_local", False):
+        timeout = max(timeout, 120.0)
+
     async def _call():
         if adapter == "gemini":
             return await _call_gemini(cloned_config, resolved_model, resolved_key, messages, system_prompt,
@@ -318,6 +321,9 @@ async def stream_provider(
         raise Exception(f"API key missing for provider {provider}")
 
     adapter = cloned_config.get("adapter", "openai")
+
+    if cloned_config.get("is_local", False):
+        timeout = max(timeout, 120.0)
 
     async def _stream():
         if adapter == "gemini":

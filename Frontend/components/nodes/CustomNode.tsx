@@ -139,6 +139,12 @@ export const CustomNode = ({ id, data, selected }: NodeProps & { data: CanvasNod
         'backdrop-blur-sm',
         // Shadow
         'shadow-[0_4px_32px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.04)]',
+        // EchoHouse left border
+        data.isEchoHouseAgent
+          ? (data.echohouseRole === 'self'
+              ? 'border-l-2 border-l-white'
+              : 'border-l-2 border-l-neutral-600')
+          : '',
         statusRing,
       ].join(' ')}
     >
@@ -158,7 +164,7 @@ export const CustomNode = ({ id, data, selected }: NodeProps & { data: CanvasNod
       <StatusBadge status={data.status ?? ''} enabled={isEnabled} />
 
       {/* Floating action bar */}
-      {hovered && isEnabled && (
+      {hovered && isEnabled && !data.isEchoHouseAgent && (
         <div className="absolute -top-9 left-1/2 -translate-x-1/2 z-30 flex items-center gap-0.5 px-1 py-0.5 rounded-xl bg-neutral-900/95 border border-white/[0.07] shadow-xl backdrop-blur-sm animate-in fade-in zoom-in-95 duration-100">
           <button
             id={`node-edit-${id}`}
@@ -249,9 +255,15 @@ export const CustomNode = ({ id, data, selected }: NodeProps & { data: CanvasNod
                 <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
               )}
             </div>
-            <span className="text-[7.5px] font-mono text-neutral-500 uppercase tracking-widest leading-none mt-0.5 block">
-              {data.tag ?? 'AGENT'}
-            </span>
+            {data.isEchoHouseAgent ? (
+              <span className="text-[7.5px] font-mono text-neutral-500 leading-none mt-0.5 block">
+                {data.echohouseRole}
+              </span>
+            ) : (
+              <span className="text-[7.5px] font-mono text-neutral-500 uppercase tracking-widest leading-none mt-0.5 block">
+                {data.tag ?? 'AGENT'}
+              </span>
+            )}
           </div>
         </div>
 

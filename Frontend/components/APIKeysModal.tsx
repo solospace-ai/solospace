@@ -175,7 +175,7 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
       const resp = await fetch("/api/gemini/ollama");
       if (resp.ok) {
         const data = await resp.json();
-        if (data.ollama_available) {
+        if (data.ollama_available || (Array.isArray(data.models) && data.models.length > 0)) {
           setOllamaStatus('available');
         } else {
           setOllamaStatus('unavailable');
@@ -307,6 +307,7 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
   
   // Custom or local providers require base URL
   const isCustomOrLocal = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || selectedProvider === 'custom' || currentProviderInfo.is_custom || currentProviderInfo.is_local;
+  const isLocalProvider = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || !!currentProviderInfo.is_local;
 
   return (
     <motion.div
@@ -537,46 +538,52 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
           </div>
 
           {/* Connection Test pipeline */}
-          <div className="pt-2">
-            <button
-              type="button"
-              onClick={handleTestConnection}
-              disabled={isTesting || (!apiKeyInput && selectedProvider !== "ollama" && selectedProvider !== "lmstudio")}
-              className="w-full py-2 bg-neutral-900 hover:bg-neutral-800 border border-[#1f1f1f] text-neutral-300 hover:text-white font-bold rounded-xl text-xs font-mono transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-20 disabled:scale-100"
-            >
-              {isTesting ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Testing Pipeline...
-                </>
-              ) : (
-                "Test Connection"
-              )}
-            </button>
+          {isLocalProvider ? (
+            <div className="p-3 bg-neutral-950/40 border border-[#1f1f1f] rounded-xl text-[10px] text-neutral-400 font-mono leading-normal">
+              ℹ️ Local models run directly on your machine and do not require API connection testing.
+            </div>
+          ) : (
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={handleTestConnection}
+                disabled={isTesting || (!apiKeyInput && selectedProvider !== "ollama" && selectedProvider !== "lmstudio")}
+                className="w-full py-2 bg-neutral-900 hover:bg-neutral-800 border border-[#1f1f1f] text-neutral-300 hover:text-white font-bold rounded-xl text-xs font-mono transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-20 disabled:scale-100"
+              >
+                {isTesting ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Testing Pipeline...
+                  </>
+                ) : (
+                  "Test Connection"
+                )}
+              </button>
 
-            {/* Test Connection Results */}
-            <AnimatePresence>
-              {testResult.status !== 'idle' && (
-                <motion.div
-                  initial={{ opacity: 0, y: 5 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 5 }}
-                  className={`mt-3 flex items-start gap-2.5 p-3 rounded-xl text-[10px] leading-normal font-mono border ${
-                    testResult.status === 'success'
-                      ? 'bg-emerald-950/20 border-emerald-950/30 text-emerald-400'
-                      : 'bg-rose-950/20 border-rose-950/30 text-rose-400'
-                  }`}
-                >
-                  {testResult.status === 'success' ? (
-                    <Check className="w-4 h-4 shrink-0 text-emerald-500 mt-0.5" />
-                  ) : (
-                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
-                  )}
-                  <span className="whitespace-pre-wrap">{testResult.message}</span>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+              {/* Test Connection Results */}
+              <AnimatePresence>
+                {testResult.status !== 'idle' && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 5 }}
+                    className={`mt-3 flex items-start gap-2.5 p-3 rounded-xl text-[10px] leading-normal font-mono border ${
+                      testResult.status === 'success'
+                        ? 'bg-emerald-950/20 border-emerald-950/30 text-emerald-400'
+                        : 'bg-rose-950/20 border-rose-950/30 text-rose-400'
+                    }`}
+                  >
+                    {testResult.status === 'success' ? (
+                      <Check className="w-4 h-4 shrink-0 text-emerald-500 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
+                    )}
+                    <span className="whitespace-pre-wrap">{testResult.message}</span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
 
           {/* 6. Save and Cancel Buttons */}
           <div className="pt-4 flex gap-3 border-t border-[#141414]">

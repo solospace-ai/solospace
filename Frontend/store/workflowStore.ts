@@ -48,11 +48,12 @@ export interface CanvasNodeData {
 
 export interface ChatMessage {
   id: string;
-  sender: 'user' | 'ai';
+  sender: 'user' | 'ai' | 'divider';
   text: string;
   thinkingSummary?: string;
   timestamp: string;
   speakerName?: string;
+  takeaways?: string[];
 }
 
 export interface AgentTalkLog {
@@ -155,7 +156,7 @@ export interface WorkflowState {
 
   triggerSteerOrchestration: (promptText: string, execute?: boolean, mode?: string) => void;
   triggerCustomExecution: () => Promise<void>;
-  triggerEchoHouseSimulation: () => Promise<void>;
+  triggerEchoHouseSimulation: (rounds?: number, tone?: string) => Promise<void>;
 }
 
 let saveTimeout: any = null;
@@ -900,6 +901,10 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
             meta.nodes || [], meta.edges || []
           );
           set({ nodes: mergedNodes, edges: mergedEdges, agentTalkLogs: meta.agent_talk || [], followUpSuggestions: meta.follow_up_suggestions || [] });
+          // If plan-only mode (execute=false), mark as paused so Proceed button appears
+          if (!execute && (meta.nodes || []).length > 0) {
+            set({ executionState: 'paused' });
+          }
           const talk = meta.agent_talk || [];
           if (talk.length > 0) {
             const latest = talk[talk.length - 1];
@@ -1106,7 +1111,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     }
   },
 
-  triggerEchoHouseSimulation: async () => {
+  triggerEchoHouseSimulation: async (rounds = 3, tone = "realistic") => {
     const activeSessionId = get().activeSessionId;
     if (!activeSessionId) return;
 
@@ -1156,7 +1161,9 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           model: get().model,
           api_key: apiKey,
           api_keys: get().apiKeys,
-          base_url: get().providerBaseUrls[activeProv] || null
+          base_url: get().providerBaseUrls[activeProv] || null,
+          rounds: rounds,
+          tone: tone
         }),
         signal: controller.signal
       });
@@ -1168,11 +1175,13 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
 
       let currentStreamingMsgId = "";
       let currentText = "";
+      let simulationTextAccum = "";
 
       const handlers = {
         onText: (token: string) => {
           if (!currentStreamingMsgId) return;
           currentText += token;
+          simulationTextAccum += token;
           set((state) => ({
             isThinking: false,
             chatMessages: state.chatMessages.map(m =>
@@ -1181,15 +1190,44 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           }));
         },
         onThinking: () => {},
-        onStatus: (msg: string) => set({ statusMessage: msg }),
+        onStatus: (msg: string) => {
+          set({ statusMessage: msg });
+          // Detect round start and inject a divider message
+          const roundMatch = msg.match(/Orchestrating Round (\d+) of social simulation/);
+          if (roundMatch) {
+            const roundNum = roundMatch[1];
+            const dividerId = `divider-round-${roundNum}-${Date.now()}`;
+            const dividerMsg: ChatMessage = {
+              id: dividerId,
+              sender: 'divider',
+              text: `Round ${roundNum}`,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            };
+            set((state) => ({ chatMessages: [...state.chatMessages, dividerMsg] }));
+            currentStreamingMsgId = "";
+            currentText = "";
+          }
+        },
         onMetadata: (meta: Record<string, any>) => {
           if (meta.active_speaker) {
+            // Inject insight divider before the insight speaker
+            if (meta.active_speaker === "insight") {
+              const insightDividerId = `divider-insight-${Date.now()}`;
+              const insightDivider: ChatMessage = {
+                id: insightDividerId,
+                sender: 'divider',
+                text: 'Therapeutic Insight',
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              };
+              set((state) => ({ chatMessages: [...state.chatMessages, insightDivider] }));
+            }
+
             const isSelf = meta.active_speaker === "You (Self)" || (meta.active_speaker || "").toLowerCase() === "self";
             const newMsgId = `echo-msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-            
+
             const newMsg: ChatMessage = {
               id: newMsgId,
-              sender: isSelf ? "user" : "ai",
+              sender: meta.active_speaker === "insight" ? 'ai' : (isSelf ? 'user' : 'ai'),
               text: "",
               speakerName: meta.active_speaker,
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -1211,6 +1249,41 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       await parseSSEStream(response, handlers, controller.signal);
       set({ abortController: null });
       get().saveCurrentSession();
+
+      // Fetch actionable takeaways after simulation completes
+      try {
+        const takeawaysResp = await fetch("/api/gemini/echohouse/takeaways", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            simulation_text: simulationTextAccum,
+            problem_text: problemText,
+            provider: activeProv,
+            model: get().model,
+            api_key: apiKey,
+            api_keys: get().apiKeys,
+            base_url: get().providerBaseUrls[activeProv] || null
+          })
+        });
+        if (takeawaysResp.ok) {
+          const { takeaways } = await takeawaysResp.json();
+          if (Array.isArray(takeaways) && takeaways.length > 0) {
+            const takeawaysMsgId = `echo-takeaways-${Date.now()}`;
+            const takeawaysMsg: ChatMessage = {
+              id: takeawaysMsgId,
+              sender: 'ai',
+              text: '',
+              speakerName: 'takeaways',
+              takeaways: takeaways,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            };
+            set((state) => ({ chatMessages: [...state.chatMessages, takeawaysMsg] }));
+            get().saveCurrentSession();
+          }
+        }
+      } catch (e) {
+        console.error("Failed to fetch EchoHouse takeaways:", e);
+      }
     } catch (err: any) {
       if (err.name === 'AbortError') {
         console.log("EchoHouse simulation manually aborted.");

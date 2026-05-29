@@ -80,9 +80,14 @@ export default function FlowArena({ onProceed }: { onProceed?: () => void }) {
   const [formRole, setFormRole] = useState("");
   const [formProblem, setFormProblem] = useState("");
 
+  // EchoHouse simulation controls
+  const [echoRounds, setEchoRounds] = useState(3);
+  const [echoTone, setEchoTone] = useState<"Realistic" | "Compassionate" | "Confrontational">("Realistic");
+  const [isControlsOpen, setIsControlsOpen] = useState(false);
+
   const handleEchoHouseProceed = async () => {
     if (onProceed) onProceed();
-    await useWorkflowStore.getState().triggerEchoHouseSimulation();
+    await useWorkflowStore.getState().triggerEchoHouseSimulation(echoRounds, echoTone.toLowerCase());
   };
 
   const handleNormalProceed = async () => {
@@ -415,10 +420,55 @@ export default function FlowArena({ onProceed }: { onProceed?: () => void }) {
         {/* EchoHouse instructional panel */}
         {isEchoHouseMode && (
           <Panel position="top-right" className="!right-4 !top-16 select-none z-20">
-            <div className="bg-[#0d0d0d]/92 border border-[#1f1f1f] rounded-xl p-4 backdrop-blur-md shadow-xl w-72">
+            <div className="bg-[#0d0d0d]/92 border border-[#1f1f1f] rounded-xl p-4 backdrop-blur-md shadow-xl w-72 space-y-3">
               <p className="text-xs text-neutral-300 leading-relaxed font-sans">
                 Add the people in your life — give each one a name, their role, and what they think about your situation. Then click Proceed to begin the simulation.
               </p>
+              <div className="border-t border-[#1f1f1f] pt-3">
+                <button
+                  onClick={() => setIsControlsOpen(!isControlsOpen)}
+                  className="w-full flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-neutral-500 hover:text-neutral-300 transition-colors cursor-pointer"
+                >
+                  <span>Simulation Settings</span>
+                  <span className={`transition-transform duration-200 ${isControlsOpen ? 'rotate-180' : ''}`}>&#8964;</span>
+                </button>
+                {isControlsOpen && (
+                  <div className="mt-3 space-y-3">
+                    <div className="space-y-1.5">
+                      <span className="text-[9px] font-mono uppercase tracking-wider text-neutral-600 font-bold block">Rounds</span>
+                      <div className="flex gap-1">
+                        {[1, 2, 3, 4, 5].map((n) => (
+                          <button
+                            key={n}
+                            onClick={() => setEchoRounds(n)}
+                            className={`w-8 h-8 rounded-lg text-xs font-semibold font-mono transition-all cursor-pointer ${
+                              echoRounds === n ? 'bg-white text-black' : 'bg-neutral-900 text-neutral-400 hover:text-white border border-[#1f1f1f]'
+                            }`}
+                          >
+                            {n}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <span className="text-[9px] font-mono uppercase tracking-wider text-neutral-600 font-bold block">Tone</span>
+                      <div className="flex gap-1 flex-wrap">
+                        {(['Realistic', 'Compassionate', 'Confrontational'] as const).map((t) => (
+                          <button
+                            key={t}
+                            onClick={() => setEchoTone(t)}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-mono transition-all cursor-pointer ${
+                              echoTone === t ? 'bg-white text-black font-semibold' : 'bg-neutral-900 text-neutral-400 hover:text-white border border-[#1f1f1f]'
+                            }`}
+                          >
+                            {t}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </Panel>
         )}
@@ -444,7 +494,7 @@ export default function FlowArena({ onProceed }: { onProceed?: () => void }) {
             </Panel>
           )
         ) : (
-          nodes.length > 0 && executionState !== "running" && (
+          nodes.length > 0 && executionState !== "running" && !isOrchestrating && (
             <Panel position="top-center" className="!top-4 z-20">
               <button
                 onClick={handleNormalProceed}
