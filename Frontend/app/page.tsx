@@ -295,8 +295,8 @@ function SolospaceContent() {
     echoCast.forEach((member: any, idx: number) => {
       if (member.is_self || member.role === "self") return;
       const angle = (idx * 2 * Math.PI) / Math.max(echoCast.length - 1, 1);
-      const x = 300 + Math.cos(angle) * 250;
-      const y = 200 + Math.sin(angle) * 200;
+      const x = 300 + Math.cos(angle) * 280;
+      const y = 200 + Math.sin(angle) * 260;
       nodesList.push({
         id: `echo-agent-${idx}-${Date.now()}`,
         type: "custom",
@@ -380,6 +380,10 @@ function SolospaceContent() {
       setNodes([selfNode]);
       setEdges([]);
 
+      if (executionMode === "custom") {
+        return;
+      }
+
       try {
         const activeProv = useWorkflowStore.getState().provider;
         const apiKey = useWorkflowStore.getState().apiKeys[activeProv] || useWorkflowStore.getState().apiKey || "";
@@ -403,8 +407,8 @@ function SolospaceContent() {
             if (member.is_self || member.role === "self") return;
             
             const angle = (idx * 2 * Math.PI) / (suggestedCast.length - 1 || 1);
-            const x = 300 + Math.cos(angle) * 250;
-            const y = 200 + Math.sin(angle) * 200;
+            const x = 300 + Math.cos(angle) * 280;
+            const y = 200 + Math.sin(angle) * 260;
             
             nodesList.push({
               id: `echo-agent-${idx}-${Date.now()}`,

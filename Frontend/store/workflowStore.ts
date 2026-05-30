@@ -968,10 +968,15 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       const handlers = {
         onText: (token: string) => {
           assistantResponse += token;
+          let displayText = assistantResponse;
+          if (assistantResponse.includes("Circular dependency")) {
+            displayText = "⚠️ Circular Dependency Detected — One or more agents are connected in a loop (e.g., Agent A → Agent B → Agent A). Please open the Flow tab and remove the arrow(s) that create a loop. Each agent must have a clear start with no backwards connections.";
+            assistantResponse = displayText;
+          }
           set((state) => ({
             isThinking: false,
             chatMessages: state.chatMessages.map(m =>
-              m.id === aiMsgId ? { ...m, text: assistantResponse } : m
+              m.id === aiMsgId ? { ...m, text: displayText } : m
             )
           }));
         },
@@ -1133,10 +1138,15 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       const customHandlers = {
         onText: (token: string) => {
           assistantResponse += token;
+          let displayText = assistantResponse;
+          if (assistantResponse.includes("Circular dependency")) {
+            displayText = "⚠️ Circular Dependency Detected — One or more agents are connected in a loop (e.g., Agent A → Agent B → Agent A). Please open the Flow tab and remove the arrow(s) that create a loop. Each agent must have a clear start with no backwards connections.";
+            assistantResponse = displayText;
+          }
           set((state) => ({
             isThinking: false,
             chatMessages: state.chatMessages.map(m =>
-              m.id === aiMsgId ? { ...m, text: assistantResponse } : m
+              m.id === aiMsgId ? { ...m, text: displayText } : m
             )
           }));
         },

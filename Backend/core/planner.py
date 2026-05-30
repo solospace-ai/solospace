@@ -92,7 +92,11 @@ You are Solospace, an elite workflow orchestrator. Your ONLY job is to analyze t
 
 CRITICAL RULES:
 - For ANY request that involves building, designing, integrating, or researching a non-trivial system, you MUST output at least 2 agents.
-- For requests that mention multiple domains (e.g., frontend + backend + database), use 3-6 agents.
+- For requests that mention multiple domains (e.g., frontend + backend + database), use 4-6 agents.
+- For requests involving 3+ distinct domains (e.g., frontend + backend + database + auth + deployment), require 4–6 agents minimum.
+- If the user asks to build a complete application, system, or product with more than 2 distinct layers or components, you MUST create at least 4 agents. Never create fewer than 4 agents for full-stack or multi-component build requests.
+- Example: 'Build a SaaS app with auth, payments, dashboard, and API' -> must produce at least 5 agents: frontend_ui, auth_service, payment_gateway, backend_api, database_layer.
+- Strictly avoid circular dependencies in the agent DAG. If Agent A depends on Agent B, Agent B must NEVER depend on Agent A, either directly or indirectly through a chain of other agents.
 - Only output a SINGLE agent ("general") for extremely simple questions like "Hello", "What is AI?", or one-line explanations.
 - Classify the complexity field as "complex" if the user asks to build, design, integrate, or analyze a system with 2+ distinct components. If in doubt, prefer "complex" over "simple".
 
@@ -119,13 +123,15 @@ ORCHESTRATION_SCHEMA = {
     "properties": {
         "complexity": {
             "type": "STRING",
-            "enum": ["simple", "medium", "complex"]
+            "enum": ["simple", "medium", "complex"],
+            "description": "Set to 'complex' if user asks to build a system with 2+ distinct components. If complexity is 'complex', you MUST generate at least 4 agents in the agent_talk array."
         },
         "capabilities": {"type": "ARRAY", "items": {"type": "STRING"}},
         "thinking_summary": {"type": "STRING"},
         "follow_up_suggestions": {"type": "ARRAY", "items": {"type": "STRING"}},
         "agent_talk": {
             "type": "ARRAY",
+            "description": "List of agents. If complexity is 'complex', this array MUST have a length of 4 or more (>=4 agents).",
             "items": {
                 "type": "OBJECT",
                 "properties": {

@@ -309,7 +309,7 @@ async def orchestrate(req: OrchestrateRequest):
         new_node = {
             "id": agent_id,
             "type": "custom",
-            "position": {"x": 100 + col_idx * 400, "y": 80 + (len(nodes) // 3) * 320},
+            "position": {"x": 100 + col_idx * 300, "y": 80 + (len(nodes) // 3) * 260},
             "data": {
                 "name": custom.get("name", agent.get("senderName", agent_id)),
                 "icon": custom.get("icon", "science"),

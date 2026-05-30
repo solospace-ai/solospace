@@ -32,7 +32,7 @@ const edgeTypes = {
 const getLayoutedElements = (nodes: Node[], edges: Edge[]) => {
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
-  dagreGraph.setGraph({ rankdir: 'LR', nodesep: 200, ranksep: 250 });
+  dagreGraph.setGraph({ rankdir: 'LR', nodesep: 150, ranksep: 180 });
 
   nodes.forEach((node) => {
     dagreGraph.setNode(node.id, { width: 256, height: 220 });
@@ -44,8 +44,8 @@ const getLayoutedElements = (nodes: Node[], edges: Edge[]) => {
 
   dagre.layout(dagreGraph);
 
-  const scaleX = 1.5;
-  const scaleY = 1.5;
+  const scaleX = 1.2;
+  const scaleY = 1.2;
 
   const layoutedNodes = nodes.map((node) => {
     const nodeWithPosition = dagreGraph.node(node.id);
@@ -76,8 +76,22 @@ export default function FlowArena({ onProceed }: { onProceed?: () => void }) {
   const setSelectedNodeId = useWorkflowStore((s) => s.setSelectedNodeId);
   const isOrchestrating = useWorkflowStore((s) => s.isOrchestrating);
   const executionState = useWorkflowStore((s) => s.executionState);
+  const chatMessages = useWorkflowStore((s) => s.chatMessages);
   
   const isEchoHouseMode = useWorkflowStore((s) => s.activeSessionId ? s.sessions[s.activeSessionId]?.mode === 'echohouse' : false);
+
+  const lastMsg = chatMessages[chatMessages.length - 1];
+  const hasCircularDependencyError = lastMsg && lastMsg.sender === "ai" && lastMsg.text.includes("Circular dependency");
+
+  const [showBanner, setShowBanner] = useState(false);
+
+  useEffect(() => {
+    if (hasCircularDependencyError && !isOrchestrating) {
+      setShowBanner(true);
+    } else {
+      setShowBanner(false);
+    }
+  }, [hasCircularDependencyError, isOrchestrating]);
 
   // EchoHouse creation form state
   const [isEchoHouseCreateFormOpen, setIsEchoHouseCreateFormOpen] = useState(false);
@@ -213,20 +227,21 @@ export default function FlowArena({ onProceed }: { onProceed?: () => void }) {
   };
 
   const applyLayout = useCallback(() => {
-    if (nodes.length === 0) return;
+    if (nodes.length === 0 || isEchoHouseMode) return;
     const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
     setNodes(layoutedNodes);
-  }, [nodes, edges, setNodes]);
+  }, [nodes, edges, setNodes, isEchoHouseMode]);
 
   // Layout nodes once initially when loaded and whenever node count increases
   useEffect(() => {
+    if (isEchoHouseMode) return; // Skip auto-layout for EchoHouse mode
     if (nodes.length > prevNodeCount.current && nodes.length > 0) {
       const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
       setNodes(layoutedNodes);
       setInitialLayoutDone(true);
     }
     prevNodeCount.current = nodes.length;
-  }, [nodes, edges, setNodes]);
+  }, [nodes, edges, setNodes, isEchoHouseMode]);
 
   // Reset layout state if node length changes back to 0 (new chat)
   useEffect(() => {
@@ -306,6 +321,17 @@ export default function FlowArena({ onProceed }: { onProceed?: () => void }) {
 
   return (
     <div className="w-full h-full flex-1 relative bg-black">
+      {showBanner && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-red-950/95 border border-red-800 text-red-200 rounded-full px-4 py-2 text-xs backdrop-blur-md shadow-xl max-w-lg text-center select-none font-sans">
+          <span>⚠️ Your agent graph has a loop — check the Flow tab and remove any arrows that point backwards.</span>
+          <button
+            onClick={() => setShowBanner(false)}
+            className="ml-2 hover:text-white transition-colors cursor-pointer text-red-400 font-bold font-mono text-[11px]"
+          >
+            ✕
+          </button>
+        </div>
+      )}
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -371,13 +397,15 @@ export default function FlowArena({ onProceed }: { onProceed?: () => void }) {
             <Maximize className="w-3.5 h-3.5" />
           </button>
 
-          <button 
-            onClick={applyLayout}
-            className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 cursor-pointer"
-            title="Auto Layout Graph"
-          >
-            <LayoutGrid className="w-3.5 h-3.5" />
-          </button>
+          {!isEchoHouseMode && (
+            <button 
+              onClick={applyLayout}
+              className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 cursor-pointer"
+              title="Auto Layout Graph"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+            </button>
+          )}
 
           <button 
             onClick={isEchoHouseMode ? () => setIsEchoHouseCreateFormOpen(true) : handleAddAgentNode}
@@ -385,7 +413,7 @@ export default function FlowArena({ onProceed }: { onProceed?: () => void }) {
             title={isEchoHouseMode ? "Add Person" : "Add Custom Agent Node"}
           >
             <PlusCircle className="w-3.5 h-3.5 text-white" />
-            <span className="font-semibold pr-1">Node</span>
+            <span className="font-semibold pr-1">{isEchoHouseMode ? "Add Person" : "Add Agent"}</span>
           </button>
 
           <button

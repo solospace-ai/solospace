@@ -1,10 +1,10 @@
 # Full Project Context
 
-> Generated: 2026-05-30T16:57:40.858Z
+> Generated: 2026-05-30T18:44:53.524Z
 > Mode: Full Project
 > Files: 68
-> Total Lines: 11,147
-> Total Size: 438.0 KB
+> Total Lines: 11,195
+> Total Size: 441.4 KB
 > Directories: 34
 
 ---
@@ -778,7 +778,7 @@ SoloSpace/
 
 ### File: `Backend/core/planner.py`
 
-> 310 lines | 12.1 KB
+> 316 lines | 13.1 KB
 
 ```python
   1 | """
@@ -875,222 +875,228 @@ SoloSpace/
  92 | 
  93 | CRITICAL RULES:
  94 | - For ANY request that involves building, designing, integrating, or researching a non-trivial system, you MUST output at least 2 agents.
- 95 | - For requests that mention multiple domains (e.g., frontend + backend + database), use 3-6 agents.
- 96 | - Only output a SINGLE agent ("general") for extremely simple questions like "Hello", "What is AI?", or one-line explanations.
- 97 | - Classify the complexity field as "complex" if the user asks to build, design, integrate, or analyze a system with 2+ distinct components. If in doubt, prefer "complex" over "simple".
- 98 | 
- 99 | AGENT CREATION:
-100 | You can use any senderId, not only the built-in list. Define custom agents freely.
-101 | Every agent MUST have:
-102 | - senderId: a unique short identifier (e.g., "frontend_ui", "payment_gateway", "data_analyst").
-103 | - senderName: a human readable name.
-104 | - senderIcon: "code", "science", or "trending_up".
-105 | - text: what this agent will contribute.
-106 | - objective: specific goal for this agent.
-107 | - systemPrompt: detailed instructions for the agent.
-108 | - rules: 2-3 specific constraints.
-109 | - dependencies: list of other agent ids this agent needs.
-110 | - tools: choose from ["Web Search", "Memory", "Code Executor", "Browser", "API Connector"].
-111 | 
-112 | DEDUPLICATION:
-113 | If existing agents are provided in context, do NOT recreate agents with the same senderId or role.
-114 | Only create complementary agents that add genuinely NEW capabilities.
-115 | """
-116 | 
-117 | ORCHESTRATION_SCHEMA = {
-118 |     "type": "OBJECT",
-119 |     "properties": {
-120 |         "complexity": {
-121 |             "type": "STRING",
-122 |             "enum": ["simple", "medium", "complex"]
-123 |         },
-124 |         "capabilities": {"type": "ARRAY", "items": {"type": "STRING"}},
-125 |         "thinking_summary": {"type": "STRING"},
-126 |         "follow_up_suggestions": {"type": "ARRAY", "items": {"type": "STRING"}},
-127 |         "agent_talk": {
-128 |             "type": "ARRAY",
-129 |             "items": {
-130 |                 "type": "OBJECT",
-131 |                 "properties": {
-132 |                     "senderId": {"type": "STRING"},
-133 |                     "senderName": {"type": "STRING"},
-134 |                     "senderIcon": {"type": "STRING"},
-135 |                     "text": {"type": "STRING"},
-136 |                     "objective": {"type": "STRING"},
-137 |                     "systemPrompt": {"type": "STRING"},
-138 |                     "rules": {"type": "ARRAY", "items": {"type": "STRING"}},
-139 |                     "dependencies": {"type": "ARRAY", "items": {"type": "STRING"}},
-140 |                     "tools": {"type": "ARRAY", "items": {"type": "STRING"}},
-141 |                     "custom_template": {
-142 |                         "type": "OBJECT",
-143 |                         "properties": {
-144 |                             "name": {"type": "STRING"},
-145 |                             "icon": {"type": "STRING"},
-146 |                             "tag": {"type": "STRING"},
-147 |                             "temp": {"type": "NUMBER"},
-148 |                             "logic": {"type": "INTEGER"},
-149 |                             "col": {"type": "INTEGER"},
-150 |                         },
-151 |                         "required": ["name", "icon", "tag", "temp", "logic", "col"],
-152 |                     },
-153 |                 },
-154 |                 "required": [
-155 |                     "senderId", "senderName", "senderIcon", "text",
-156 |                     "objective", "systemPrompt", "rules", "dependencies", "tools"
-157 |                 ],
-158 |             },
-159 |         },
-160 |     },
-161 |     "required": ["complexity", "capabilities", "thinking_summary", "agent_talk", "follow_up_suggestions"],
-162 | }
-163 | 
-164 | AGENT_TURN_SCHEMA = {
-165 |     "type": "OBJECT",
-166 |     "properties": {
-167 |         "thought": {"type": "STRING"},
-168 |         "action": {
-169 |             "type": "STRING",
-170 |             "enum": [
-171 |                 "none", "web_search", "execute_code", "api_call",
-172 |                 "query_memory", "store_memory", "send_message",
-173 |                 "browse_web", "analyze_image", "read_file"
-174 |             ],
-175 |         },
-176 |         "action_input": {"type": "STRING"},
-177 |         "final_answer": {"type": "STRING"},
-178 |     },
-179 |     "required": ["thought", "action"],
-180 | }
-181 | 
-182 | RESPONSE_SYSTEM_INSTRUCTION = """
-183 | You are Solospace, an elite assistant.
-184 | Your job is to produce a clean, direct response to the user's prompt using the provided context.
-185 | 
-186 | STRICT RULES — NEVER VIOLATE:
-187 | - Do NOT include any preamble, header, or status line such as "[Agent processing...]", "Synthesizing...", "From the agent team:", or similar.
-188 | - Do NOT mention agents, sub-tasks, specialists, orchestration, or internal workflow mechanics.
-189 | - Begin your response immediately and directly with the answer.
-190 | - Use clean, well-structured markdown only when it genuinely helps the user.
-191 | - For conversational messages (e.g. greetings), reply naturally and concisely without any structure.
-192 | """
-193 | 
-194 | # ─── Default Fallback Plan ────────────────────────────────────────────
-195 | 
-196 | DEFAULT_PLAN = {
-197 |     "complexity": "simple",
-198 |     "capabilities": [],
-199 |     "thinking_summary": "System defaulted to general mode.",
-200 |     "agent_talk": [
-201 |         {
-202 |             "senderId": "general",
-203 |             "senderName": "General Assistant",
-204 |             "senderIcon": "bot",
-205 |             "text": "Standing by to process your request.",
-206 |             "objective": "Process user requests with precise analysis.",
-207 |             "systemPrompt": "You are Solospace core.",
-208 |             "rules": ["Be descriptive"],
-209 |             "dependencies": [],
-210 |             "tools": ["Web Search", "Memory"],
-211 |         }
-212 |     ],
-213 |     "follow_up_suggestions": [
-214 |         "Can you elaborate?",
-215 |         "Show me a detailed implementation example.",
-216 |     ],
-217 | }
-218 | 
-219 | 
-220 | async def generate_plan(
-221 |     messages: List[Dict[str, str]],
-222 |     provider: str,
-223 |     model: Optional[str],
-224 |     api_key: str,
-225 |     api_keys: Optional[Dict[str, str]] = None,
-226 |     base_url: Optional[str] = None,
-227 |     fallback_provider: Optional[str] = None,
-228 |     backup_api_keys: Optional[List[str]] = None,
-229 | ) -> Dict[str, Any]:
-230 |     """
-231 |     Call the planning LLM to generate an agent plan.
-232 |     Returns DEFAULT_PLAN on failure.
-233 |     """
-234 |     try:
-235 |         plan = await call_provider_json(
-236 |             provider=provider,
-237 |             model=model,
-238 |             api_key=api_key,
-239 |             messages=messages,
-240 |             system_prompt=ORCHESTRATOR_SYSTEM_INSTRUCTION,
-241 |             temperature=0.2,
-242 |             json_schema=ORCHESTRATION_SCHEMA,
-243 |             timeout=20.0,
-244 |             fallback_provider=fallback_provider,
-245 |             api_keys=api_keys,
-246 |             base_url=base_url,
-247 |             backup_api_keys=backup_api_keys,
-248 |         )
-249 |         return plan
-250 |     except Exception as e:
-251 |         print(f"[PLANNER] Planning failed: {e}")
-252 |         return DEFAULT_PLAN.copy()
-253 | 
-254 | 
-255 | async def summarize_history(
-256 |     history: List[Dict[str, str]],
-257 |     provider: str,
-258 |     api_key: str,
-259 |     api_keys: Optional[Dict[str, str]] = None,
-260 |     base_url: Optional[str] = None,
-261 |     backup_api_keys: Optional[List[str]] = None,
-262 | ) -> List[Dict[str, str]]:
-263 |     """
-264 |     If history is long (greater than 6 turns / 12 messages), summarize the oldest messages
-265 |     and replace them with a single system summary context message to save tokens.
-266 |     """
-267 |     if len(history) <= 12:
-268 |         return history
-269 | 
-270 |     # Divide history into parts to summarize and parts to keep
-271 |     to_summarize = history[:-6]
-272 |     to_keep = history[-6:]
-273 | 
-274 |     # Prepare summary prompt
-275 |     convo_text = ""
-276 |     for msg in to_summarize:
-277 |         role = msg.get("role", "user")
-278 |         content = msg.get("content", "")
-279 |         convo_text += f"{role.upper()}: {content}\n"
-280 | 
-281 |     summary_prompt = f"Summarize the following chat history conversation concisely in one paragraph, capturing key decisions, user goals, and state of execution:\n\n{convo_text}"
-282 |     
-283 |     from core.planner import _FAST_ROUTER_MODELS
-284 |     from providers import call_provider
-285 |     
-286 |     fast_model = _FAST_ROUTER_MODELS.get(provider)
-287 |     
-288 |     try:
-289 |         summary_text = await call_provider(
-290 |             provider=provider,
-291 |             model=fast_model,
-292 |             api_key=api_key,
-293 |             messages=[{"role": "user", "content": summary_prompt}],
-294 |             system_prompt="You are a precise summarization assistant.",
-295 |             temperature=0.3,
-296 |             timeout=8.0,
-297 |             api_keys=api_keys,
-298 |             base_url=base_url,
-299 |             backup_api_keys=backup_api_keys,
-300 |         )
-301 |         summary_msg = {
-302 |             "role": "user",
-303 |             "content": f"[SYSTEM: Summary of previous conversation history: {summary_text}]"
-304 |         }
-305 |         return [summary_msg] + to_keep
-306 |     except Exception as e:
-307 |         print(f"[CONTEXT WINDOWING] Summarization failed: {e}. Returning original history.")
-308 |         return history
-309 | 
-310 |
+ 95 | - For requests that mention multiple domains (e.g., frontend + backend + database), use 4-6 agents.
+ 96 | - For requests involving 3+ distinct domains (e.g., frontend + backend + database + auth + deployment), require 4–6 agents minimum.
+ 97 | - If the user asks to build a complete application, system, or product with more than 2 distinct layers or components, you MUST create at least 4 agents. Never create fewer than 4 agents for full-stack or multi-component build requests.
+ 98 | - Example: 'Build a SaaS app with auth, payments, dashboard, and API' -> must produce at least 5 agents: frontend_ui, auth_service, payment_gateway, backend_api, database_layer.
+ 99 | - Strictly avoid circular dependencies in the agent DAG. If Agent A depends on Agent B, Agent B must NEVER depend on Agent A, either directly or indirectly through a chain of other agents.
+100 | - Only output a SINGLE agent ("general") for extremely simple questions like "Hello", "What is AI?", or one-line explanations.
+101 | - Classify the complexity field as "complex" if the user asks to build, design, integrate, or analyze a system with 2+ distinct components. If in doubt, prefer "complex" over "simple".
+102 | 
+103 | AGENT CREATION:
+104 | You can use any senderId, not only the built-in list. Define custom agents freely.
+105 | Every agent MUST have:
+106 | - senderId: a unique short identifier (e.g., "frontend_ui", "payment_gateway", "data_analyst").
+107 | - senderName: a human readable name.
+108 | - senderIcon: "code", "science", or "trending_up".
+109 | - text: what this agent will contribute.
+110 | - objective: specific goal for this agent.
+111 | - systemPrompt: detailed instructions for the agent.
+112 | - rules: 2-3 specific constraints.
+113 | - dependencies: list of other agent ids this agent needs.
+114 | - tools: choose from ["Web Search", "Memory", "Code Executor", "Browser", "API Connector"].
+115 | 
+116 | DEDUPLICATION:
+117 | If existing agents are provided in context, do NOT recreate agents with the same senderId or role.
+118 | Only create complementary agents that add genuinely NEW capabilities.
+119 | """
+120 | 
+121 | ORCHESTRATION_SCHEMA = {
+122 |     "type": "OBJECT",
+123 |     "properties": {
+124 |         "complexity": {
+125 |             "type": "STRING",
+126 |             "enum": ["simple", "medium", "complex"],
+127 |             "description": "Set to 'complex' if user asks to build a system with 2+ distinct components. If complexity is 'complex', you MUST generate at least 4 agents in the agent_talk array."
+128 |         },
+129 |         "capabilities": {"type": "ARRAY", "items": {"type": "STRING"}},
+130 |         "thinking_summary": {"type": "STRING"},
+131 |         "follow_up_suggestions": {"type": "ARRAY", "items": {"type": "STRING"}},
+132 |         "agent_talk": {
+133 |             "type": "ARRAY",
+134 |             "description": "List of agents. If complexity is 'complex', this array MUST have a length of 4 or more (>=4 agents).",
+135 |             "items": {
+136 |                 "type": "OBJECT",
+137 |                 "properties": {
+138 |                     "senderId": {"type": "STRING"},
+139 |                     "senderName": {"type": "STRING"},
+140 |                     "senderIcon": {"type": "STRING"},
+141 |                     "text": {"type": "STRING"},
+142 |                     "objective": {"type": "STRING"},
+143 |                     "systemPrompt": {"type": "STRING"},
+144 |                     "rules": {"type": "ARRAY", "items": {"type": "STRING"}},
+145 |                     "dependencies": {"type": "ARRAY", "items": {"type": "STRING"}},
+146 |                     "tools": {"type": "ARRAY", "items": {"type": "STRING"}},
+147 |                     "custom_template": {
+148 |                         "type": "OBJECT",
+149 |                         "properties": {
+150 |                             "name": {"type": "STRING"},
+151 |                             "icon": {"type": "STRING"},
+152 |                             "tag": {"type": "STRING"},
+153 |                             "temp": {"type": "NUMBER"},
+154 |                             "logic": {"type": "INTEGER"},
+155 |                             "col": {"type": "INTEGER"},
+156 |                         },
+157 |                         "required": ["name", "icon", "tag", "temp", "logic", "col"],
+158 |                     },
+159 |                 },
+160 |                 "required": [
+161 |                     "senderId", "senderName", "senderIcon", "text",
+162 |                     "objective", "systemPrompt", "rules", "dependencies", "tools"
+163 |                 ],
+164 |             },
+165 |         },
+166 |     },
+167 |     "required": ["complexity", "capabilities", "thinking_summary", "agent_talk", "follow_up_suggestions"],
+168 | }
+169 | 
+170 | AGENT_TURN_SCHEMA = {
+171 |     "type": "OBJECT",
+172 |     "properties": {
+173 |         "thought": {"type": "STRING"},
+174 |         "action": {
+175 |             "type": "STRING",
+176 |             "enum": [
+177 |                 "none", "web_search", "execute_code", "api_call",
+178 |                 "query_memory", "store_memory", "send_message",
+179 |                 "browse_web", "analyze_image", "read_file"
+180 |             ],
+181 |         },
+182 |         "action_input": {"type": "STRING"},
+183 |         "final_answer": {"type": "STRING"},
+184 |     },
+185 |     "required": ["thought", "action"],
+186 | }
+187 | 
+188 | RESPONSE_SYSTEM_INSTRUCTION = """
+189 | You are Solospace, an elite assistant.
+190 | Your job is to produce a clean, direct response to the user's prompt using the provided context.
+191 | 
+192 | STRICT RULES — NEVER VIOLATE:
+193 | - Do NOT include any preamble, header, or status line such as "[Agent processing...]", "Synthesizing...", "From the agent team:", or similar.
+194 | - Do NOT mention agents, sub-tasks, specialists, orchestration, or internal workflow mechanics.
+195 | - Begin your response immediately and directly with the answer.
+196 | - Use clean, well-structured markdown only when it genuinely helps the user.
+197 | - For conversational messages (e.g. greetings), reply naturally and concisely without any structure.
+198 | """
+199 | 
+200 | # ─── Default Fallback Plan ────────────────────────────────────────────
+201 | 
+202 | DEFAULT_PLAN = {
+203 |     "complexity": "simple",
+204 |     "capabilities": [],
+205 |     "thinking_summary": "System defaulted to general mode.",
+206 |     "agent_talk": [
+207 |         {
+208 |             "senderId": "general",
+209 |             "senderName": "General Assistant",
+210 |             "senderIcon": "bot",
+211 |             "text": "Standing by to process your request.",
+212 |             "objective": "Process user requests with precise analysis.",
+213 |             "systemPrompt": "You are Solospace core.",
+214 |             "rules": ["Be descriptive"],
+215 |             "dependencies": [],
+216 |             "tools": ["Web Search", "Memory"],
+217 |         }
+218 |     ],
+219 |     "follow_up_suggestions": [
+220 |         "Can you elaborate?",
+221 |         "Show me a detailed implementation example.",
+222 |     ],
+223 | }
+224 | 
+225 | 
+226 | async def generate_plan(
+227 |     messages: List[Dict[str, str]],
+228 |     provider: str,
+229 |     model: Optional[str],
+230 |     api_key: str,
+231 |     api_keys: Optional[Dict[str, str]] = None,
+232 |     base_url: Optional[str] = None,
+233 |     fallback_provider: Optional[str] = None,
+234 |     backup_api_keys: Optional[List[str]] = None,
+235 | ) -> Dict[str, Any]:
+236 |     """
+237 |     Call the planning LLM to generate an agent plan.
+238 |     Returns DEFAULT_PLAN on failure.
+239 |     """
+240 |     try:
+241 |         plan = await call_provider_json(
+242 |             provider=provider,
+243 |             model=model,
+244 |             api_key=api_key,
+245 |             messages=messages,
+246 |             system_prompt=ORCHESTRATOR_SYSTEM_INSTRUCTION,
+247 |             temperature=0.2,
+248 |             json_schema=ORCHESTRATION_SCHEMA,
+249 |             timeout=20.0,
+250 |             fallback_provider=fallback_provider,
+251 |             api_keys=api_keys,
+252 |             base_url=base_url,
+253 |             backup_api_keys=backup_api_keys,
+254 |         )
+255 |         return plan
+256 |     except Exception as e:
+257 |         print(f"[PLANNER] Planning failed: {e}")
+258 |         return DEFAULT_PLAN.copy()
+259 | 
+260 | 
+261 | async def summarize_history(
+262 |     history: List[Dict[str, str]],
+263 |     provider: str,
+264 |     api_key: str,
+265 |     api_keys: Optional[Dict[str, str]] = None,
+266 |     base_url: Optional[str] = None,
+267 |     backup_api_keys: Optional[List[str]] = None,
+268 | ) -> List[Dict[str, str]]:
+269 |     """
+270 |     If history is long (greater than 6 turns / 12 messages), summarize the oldest messages
+271 |     and replace them with a single system summary context message to save tokens.
+272 |     """
+273 |     if len(history) <= 12:
+274 |         return history
+275 | 
+276 |     # Divide history into parts to summarize and parts to keep
+277 |     to_summarize = history[:-6]
+278 |     to_keep = history[-6:]
+279 | 
+280 |     # Prepare summary prompt
+281 |     convo_text = ""
+282 |     for msg in to_summarize:
+283 |         role = msg.get("role", "user")
+284 |         content = msg.get("content", "")
+285 |         convo_text += f"{role.upper()}: {content}\n"
+286 | 
+287 |     summary_prompt = f"Summarize the following chat history conversation concisely in one paragraph, capturing key decisions, user goals, and state of execution:\n\n{convo_text}"
+288 |     
+289 |     from core.planner import _FAST_ROUTER_MODELS
+290 |     from providers import call_provider
+291 |     
+292 |     fast_model = _FAST_ROUTER_MODELS.get(provider)
+293 |     
+294 |     try:
+295 |         summary_text = await call_provider(
+296 |             provider=provider,
+297 |             model=fast_model,
+298 |             api_key=api_key,
+299 |             messages=[{"role": "user", "content": summary_prompt}],
+300 |             system_prompt="You are a precise summarization assistant.",
+301 |             temperature=0.3,
+302 |             timeout=8.0,
+303 |             api_keys=api_keys,
+304 |             base_url=base_url,
+305 |             backup_api_keys=backup_api_keys,
+306 |         )
+307 |         summary_msg = {
+308 |             "role": "user",
+309 |             "content": f"[SYSTEM: Summary of previous conversation history: {summary_text}]"
+310 |         }
+311 |         return [summary_msg] + to_keep
+312 |     except Exception as e:
+313 |         print(f"[CONTEXT WINDOWING] Summarization failed: {e}. Returning original history.")
+314 |         return history
+315 | 
+316 |
 ```
 
 ### File: `Backend/core/synthesizer.py`
@@ -4475,7 +4481,7 @@ SoloSpace/
 309 |         new_node = {
 310 |             "id": agent_id,
 311 |             "type": "custom",
-312 |             "position": {"x": 100 + col_idx * 400, "y": 80 + (len(nodes) // 3) * 320},
+312 |             "position": {"x": 100 + col_idx * 300, "y": 80 + (len(nodes) // 3) * 260},
 313 |             "data": {
 314 |                 "name": custom.get("name", agent.get("senderName", agent_id)),
 315 |                 "icon": custom.get("icon", "science"),
@@ -5905,7 +5911,7 @@ SoloSpace/
 
 ### File: `Frontend/app/page.tsx`
 
-> 1086 lines | 66.8 KB
+> 1090 lines | 66.9 KB
 
 ```tsx
    1 | 'use client';
@@ -6205,8 +6211,8 @@ SoloSpace/
  295 |     echoCast.forEach((member: any, idx: number) => {
  296 |       if (member.is_self || member.role === "self") return;
  297 |       const angle = (idx * 2 * Math.PI) / Math.max(echoCast.length - 1, 1);
- 298 |       const x = 300 + Math.cos(angle) * 250;
- 299 |       const y = 200 + Math.sin(angle) * 200;
+ 298 |       const x = 300 + Math.cos(angle) * 280;
+ 299 |       const y = 200 + Math.sin(angle) * 260;
  300 |       nodesList.push({
  301 |         id: `echo-agent-${idx}-${Date.now()}`,
  302 |         type: "custom",
@@ -6290,710 +6296,714 @@ SoloSpace/
  380 |       setNodes([selfNode]);
  381 |       setEdges([]);
  382 | 
- 383 |       try {
- 384 |         const activeProv = useWorkflowStore.getState().provider;
- 385 |         const apiKey = useWorkflowStore.getState().apiKeys[activeProv] || useWorkflowStore.getState().apiKey || "";
- 386 |         const resp = await fetch("/api/gemini/echohouse/init", {
- 387 |           method: "POST",
- 388 |           headers: { "Content-Type": "application/json" },
- 389 |           body: JSON.stringify({
- 390 |             problem_text: promptText,
- 391 |             provider: activeProv,
- 392 |             model: useWorkflowStore.getState().model,
- 393 |             api_key: apiKey,
- 394 |             api_keys: useWorkflowStore.getState().apiKeys,
- 395 |             base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null,
- 396 |             backup_api_keys: useWorkflowStore.getState().backupApiKeys[activeProv] || []
- 397 |           })
- 398 |         });
- 399 |         if (resp.ok) {
- 400 |           const suggestedCast = await resp.json();
- 401 |           const nodesList = [selfNode];
- 402 |           suggestedCast.forEach((member: any, idx: number) => {
- 403 |             if (member.is_self || member.role === "self") return;
- 404 |             
- 405 |             const angle = (idx * 2 * Math.PI) / (suggestedCast.length - 1 || 1);
- 406 |             const x = 300 + Math.cos(angle) * 250;
- 407 |             const y = 200 + Math.sin(angle) * 200;
+ 383 |       if (executionMode === "custom") {
+ 384 |         return;
+ 385 |       }
+ 386 | 
+ 387 |       try {
+ 388 |         const activeProv = useWorkflowStore.getState().provider;
+ 389 |         const apiKey = useWorkflowStore.getState().apiKeys[activeProv] || useWorkflowStore.getState().apiKey || "";
+ 390 |         const resp = await fetch("/api/gemini/echohouse/init", {
+ 391 |           method: "POST",
+ 392 |           headers: { "Content-Type": "application/json" },
+ 393 |           body: JSON.stringify({
+ 394 |             problem_text: promptText,
+ 395 |             provider: activeProv,
+ 396 |             model: useWorkflowStore.getState().model,
+ 397 |             api_key: apiKey,
+ 398 |             api_keys: useWorkflowStore.getState().apiKeys,
+ 399 |             base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null,
+ 400 |             backup_api_keys: useWorkflowStore.getState().backupApiKeys[activeProv] || []
+ 401 |           })
+ 402 |         });
+ 403 |         if (resp.ok) {
+ 404 |           const suggestedCast = await resp.json();
+ 405 |           const nodesList = [selfNode];
+ 406 |           suggestedCast.forEach((member: any, idx: number) => {
+ 407 |             if (member.is_self || member.role === "self") return;
  408 |             
- 409 |             nodesList.push({
- 410 |               id: `echo-agent-${idx}-${Date.now()}`,
- 411 |               type: "custom",
- 412 |               position: { x: Math.max(50, x), y: Math.max(50, y) },
- 413 |               data: {
- 414 |                 name: member.inferred_name,
- 415 |                 tag: member.role.toUpperCase().replace(/\s+/g, "_"),
- 416 |                 icon: "science",
- 417 |                 objective: `Provide perspective as ${member.inferred_name} (${member.role}).`,
- 418 |                 systemPrompt: `You are ${member.inferred_name}, whose role in the user's life is ${member.role}. From your perspective about their situation: ${member.inferred_problem}`,
- 419 |                 status: "IDLE" as const,
- 420 |                 enabled: true,
- 421 |                 isEchoHouseAgent: true,
- 422 |                 echohouseRole: member.role,
- 423 |                 echohouseProblem: member.inferred_problem,
- 424 |                 rules: [],
- 425 |                 dependencies: [],
- 426 |                 tools: [],
- 427 |                 toolPermissions: {},
- 428 |                 temp: 0.8,
- 429 |                 logic: 70,
- 430 |                 empathy: 50,
- 431 |                 priority: 5,
- 432 |                 toolLogs: [],
- 433 |                 personality: "",
- 434 |                 senderId: `echo-agent-${idx}-${Date.now()}`
- 435 |               }
- 436 |             });
- 437 |           });
- 438 |           setNodes(nodesList);
- 439 |         }
- 440 |       } catch (e) {
- 441 |         console.error("Failed to suggest cast:", e);
- 442 |       }
- 443 |       return;
- 444 |     }
- 445 | 
- 446 |     setWorkspaceState("active");
- 447 |     let sessionId = activeSessionId;
- 448 |     if (!sessionId) sessionId = createSession(promptText, executionMode);
- 449 |     setExecutionState("running");
- 450 |     if (executionMode === "custom") {
- 451 |       setCurrentTab("arena");
- 452 |       triggerSteerOrchestration(promptText, false, "custom");
- 453 |       // executionState will be set to "paused" by the store after the plan arrives
- 454 |     } else {
- 455 |       setCurrentTab("chat");
- 456 |       triggerSteerOrchestration(promptText, true, "auto");
- 457 |     }
- 458 |     setUserQuery("");
- 459 |   };
- 460 | 
- 461 |   const handleRegenerate = () => {
- 462 |     const lastAIIdx = chatMessages.findLastIndex(m => m.sender === "ai");
- 463 |     if (lastAIIdx === -1) return;
- 464 |     
- 465 |     const lastUserMsg = chatMessages.slice(0, lastAIIdx).findLast(m => m.sender === "user");
- 466 |     if (!lastUserMsg) return;
- 467 | 
- 468 |     setChatMessages((prev) => prev.slice(0, lastAIIdx));
- 469 |     startOrchestration(lastUserMsg.text);
- 470 |   };
+ 409 |             const angle = (idx * 2 * Math.PI) / (suggestedCast.length - 1 || 1);
+ 410 |             const x = 300 + Math.cos(angle) * 280;
+ 411 |             const y = 200 + Math.sin(angle) * 260;
+ 412 |             
+ 413 |             nodesList.push({
+ 414 |               id: `echo-agent-${idx}-${Date.now()}`,
+ 415 |               type: "custom",
+ 416 |               position: { x: Math.max(50, x), y: Math.max(50, y) },
+ 417 |               data: {
+ 418 |                 name: member.inferred_name,
+ 419 |                 tag: member.role.toUpperCase().replace(/\s+/g, "_"),
+ 420 |                 icon: "science",
+ 421 |                 objective: `Provide perspective as ${member.inferred_name} (${member.role}).`,
+ 422 |                 systemPrompt: `You are ${member.inferred_name}, whose role in the user's life is ${member.role}. From your perspective about their situation: ${member.inferred_problem}`,
+ 423 |                 status: "IDLE" as const,
+ 424 |                 enabled: true,
+ 425 |                 isEchoHouseAgent: true,
+ 426 |                 echohouseRole: member.role,
+ 427 |                 echohouseProblem: member.inferred_problem,
+ 428 |                 rules: [],
+ 429 |                 dependencies: [],
+ 430 |                 tools: [],
+ 431 |                 toolPermissions: {},
+ 432 |                 temp: 0.8,
+ 433 |                 logic: 70,
+ 434 |                 empathy: 50,
+ 435 |                 priority: 5,
+ 436 |                 toolLogs: [],
+ 437 |                 personality: "",
+ 438 |                 senderId: `echo-agent-${idx}-${Date.now()}`
+ 439 |               }
+ 440 |             });
+ 441 |           });
+ 442 |           setNodes(nodesList);
+ 443 |         }
+ 444 |       } catch (e) {
+ 445 |         console.error("Failed to suggest cast:", e);
+ 446 |       }
+ 447 |       return;
+ 448 |     }
+ 449 | 
+ 450 |     setWorkspaceState("active");
+ 451 |     let sessionId = activeSessionId;
+ 452 |     if (!sessionId) sessionId = createSession(promptText, executionMode);
+ 453 |     setExecutionState("running");
+ 454 |     if (executionMode === "custom") {
+ 455 |       setCurrentTab("arena");
+ 456 |       triggerSteerOrchestration(promptText, false, "custom");
+ 457 |       // executionState will be set to "paused" by the store after the plan arrives
+ 458 |     } else {
+ 459 |       setCurrentTab("chat");
+ 460 |       triggerSteerOrchestration(promptText, true, "auto");
+ 461 |     }
+ 462 |     setUserQuery("");
+ 463 |   };
+ 464 | 
+ 465 |   const handleRegenerate = () => {
+ 466 |     const lastAIIdx = chatMessages.findLastIndex(m => m.sender === "ai");
+ 467 |     if (lastAIIdx === -1) return;
+ 468 |     
+ 469 |     const lastUserMsg = chatMessages.slice(0, lastAIIdx).findLast(m => m.sender === "user");
+ 470 |     if (!lastUserMsg) return;
  471 | 
- 472 |   const handleAddRule = () => {
- 473 |     if (!newRuleText.trim() || !selectedNodeId) return;
- 474 |     addRule(selectedNodeId, newRuleText.trim());
- 475 |     setNewRuleText("");
- 476 |   };
- 477 | 
- 478 |   const activeNodeDetail = nodes.find(n => n.id === selectedNodeId) as any;
- 479 | 
- 480 |   const ModeSelector = () => (
- 481 |     <div className="flex items-center gap-1 bg-neutral-900/40 rounded-full p-0.5 border border-[#1f1f1f]">
- 482 |       <button onClick={() => setExecutionMode("auto")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "auto" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Smart</button>
- 483 |       <button onClick={() => setExecutionMode("custom")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "custom" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Custom</button>
- 484 |     </div>
- 485 |   );
- 486 | 
- 487 |   const handleFileAttach = () => {
- 488 |     const input = document.createElement("input");
- 489 |     input.type = "file";
- 490 |     input.accept = ".txt,.md,.json,.csv,.py,.js,.ts,.tsx,.html,.css,.yaml,.yml,.xml,.ini,.cfg,.pdf,.jpg,.png";
- 491 |     input.onchange = (e: any) => {
- 492 |       const file = e.target.files?.[0];
- 493 |       if (!file) return;
- 494 |       const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
- 495 |       if (['.txt', '.md', '.json', '.csv', '.py', '.js', '.ts', '.tsx', '.html', '.css', '.yaml', '.yml', '.xml', '.ini', '.cfg'].includes(ext)) {
- 496 |         const reader = new FileReader();
- 497 |         reader.onload = (ev) => setUserQuery((prev) => prev + `\n[Attached: ${file.name}]\n${ev.target?.result as string}\n`);
- 498 |         reader.readAsText(file);
- 499 |       }
- 500 |     };
- 501 |     input.click();
- 502 |   };
- 503 | 
- 504 |   return (
- 505 |     <div className="flex h-screen w-full bg-black text-[#f5f5f5] overflow-hidden font-sans">
- 506 |       <aside onClick={() => { if (!isSidebarExpanded) setIsSidebarExpanded(true); }} className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-30 select-none cursor-pointer ${isSidebarExpanded ? "w-64 cursor-default" : "w-[60px]"}`}>
- 507 |         <div className="flex items-center gap-3 h-16 border-b border-[#1f1f1f] px-4 justify-between">
- 508 |           {isSidebarExpanded ? (
- 509 |             <div className="flex items-center gap-2.5">
- 510 |               <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
- 511 |               <h1 className="text-sm font-bold text-white tracking-tight leading-none">Solospace</h1>
- 512 |             </div>
- 513 |           ) : (
- 514 |             <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center mx-auto"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
- 515 |           )}
- 516 |           {isSidebarExpanded && <button onClick={(e) => { e.stopPropagation(); setIsSidebarExpanded(false); }} className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>}
- 517 |         </div>
- 518 | 
- 519 |         <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto custom-scrollbar">
- 520 |           <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); useWorkflowStore.getState().abortController?.abort(); setWorkspaceState("home"); setUserQuery(""); useWorkflowStore.setState({ activeSessionId: null, nodes: [], edges: [], chatMessages: [], agentTalkLogs: [], executionState: "setup", statusMessage: "", isThinking: false, isOrchestrating: false, liveThoughts: "", pendingApproval: null, followUpSuggestions: [], abortController: null }); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
- 521 |             <SquarePlus className="w-5 h-5 stroke-[1.8]" />
- 522 |             {isSidebarExpanded && <span className="text-xs font-semibold">New Chat</span>}
- 523 |           </button>
- 524 | 
- 525 |           <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsSecretOpen(true); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
- 526 |             <Key className="w-5 h-5 stroke-[1.8]" />
- 527 |             {isSidebarExpanded && <span className="text-xs font-semibold">API Keys</span>}
- 528 |           </button>
- 529 | 
- 530 |           {/* Templates Section */}
- 531 |           <div className="pt-2 select-none">
- 532 |             {isSidebarExpanded ? (
- 533 |               <>
- 534 |                 <button
- 535 |                   onClick={(e) => { e.stopPropagation(); setIsTemplatesExpanded(!isTemplatesExpanded); }}
- 536 |                   className="w-full flex items-center justify-between px-3 py-1.5 text-neutral-600 hover:text-neutral-400 cursor-pointer"
- 537 |                 >
- 538 |                   <span className="text-[10px] font-bold uppercase tracking-widest font-mono">Templates</span>
- 539 |                   <ChevronRight className={`w-3.5 h-3.5 transition-transform duration-200 ${isTemplatesExpanded ? "rotate-90" : ""}`} />
- 540 |                 </button>
- 541 |                 {isTemplatesExpanded && (
- 542 |                   <button
- 543 |                     onClick={(e) => {
- 544 |                       e.stopPropagation();
- 545 |                       createSession("EchoHouse Simulation", "echohouse");
- 546 |                       setWorkspaceState("active");
- 547 |                       setCurrentTab("chat");
- 548 |                     }}
- 549 |                     className="w-full flex items-center rounded-lg transition-all duration-150 py-2.5 px-3 gap-3 hover:bg-neutral-900 text-neutral-200 cursor-pointer"
- 550 |                   >
- 551 |                     <Globe className="w-5 h-5 stroke-[1.8]" />
- 552 |                     <span className="text-xs font-semibold">EchoHouse</span>
- 553 |                   </button>
- 554 |                 )}
- 555 |               </>
- 556 |             ) : (
- 557 |               <button
- 558 |                 onClick={() => {
- 559 |                   createSession("EchoHouse Simulation", "echohouse");
- 560 |                   setWorkspaceState("active");
- 561 |                   setCurrentTab("chat");
- 562 |                 }}
- 563 |                 className="w-full flex items-center justify-center rounded-lg transition-all duration-150 py-2.5 hover:bg-neutral-900 text-neutral-400 cursor-pointer"
- 564 |                 title="EchoHouse Template"
- 565 |               >
- 566 |                 <Globe className="w-5 h-5 stroke-[1.8]" />
- 567 |               </button>
- 568 |             )}
- 569 |           </div>
- 570 | 
- 571 |           {isSidebarExpanded && (
- 572 |             <div className="pt-6 space-y-2 select-none">
- 573 |               <div className="flex items-center gap-1.5 px-3"><History className="w-3.5 h-3.5 text-neutral-600" /><span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest font-mono">Recents</span></div>
- 574 |               <div className="space-y-1 max-h-[220px] overflow-y-auto custom-scrollbar">
- 575 |                 {Object.values(sessions).length === 0 ? <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span> : (
- 576 |                   Object.values(sessions).reverse().map((s) => (
- 577 |                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
- 578 |                       <button disabled={isLoadingSession} onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsLoadingSession(true); try { await loadSessionFromDb(s.id); setWorkspaceState("active"); setCurrentTab("chat"); } catch (err) { console.error(err); } finally { setIsLoadingSession(false); } } }} className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${activeSessionId === s.id ? "text-white font-bold" : "text-neutral-500 hover:text-white"}`} title={s.prompt}>{s.mode === 'echohouse' ? `${s.title} [Echo]` : s.title}</button>
- 579 |                       <button onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); if (confirm(`Delete "${s.title}"?`)) await deleteSessionFromDb(s.id); } }} className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
- 580 |                     </div>
- 581 |                   ))
- 582 |                 )}
- 583 |               </div>
- 584 |             </div>
- 585 |           )}
- 586 |         </nav>
- 587 |       </aside>
- 588 | 
- 589 |       <main onClick={() => { if (isSidebarExpanded && window.innerWidth < 768) setIsSidebarExpanded(false); }} className="flex-1 flex flex-col min-w-0 bg-[#000000] relative transition-all duration-300">
- 590 |         <header className="flex justify-between items-center w-full px-6 h-16 border-b border-[#141414] shrink-0 z-10 bg-black/85 backdrop-blur-md">
- 591 |           <div className="flex items-center gap-2" />
- 592 |           <div className="flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-[2px] rounded-full select-none">
- 593 |             <button onClick={() => { if (workspaceState !== "home") setCurrentTab("chat"); }} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${currentTab === "chat" || workspaceState === "home" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>Chat</button>
- 594 |             {workspaceState === "active" && (
- 595 |               <button onClick={() => setCurrentTab("arena")} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${currentTab === "arena" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>
- 596 |                 <GitFork className="w-3 h-3" /> Flow {nodes.length > 0 && (
- 597 |                   <span className="ml-1 px-1.5 py-0.5 bg-cyan-500/20 border border-cyan-500/30 rounded text-[9px] font-mono text-cyan-400 font-bold">{nodes.length}</span>
- 598 |                 )}
- 599 |               </button>
- 600 |             )}
- 601 |           </div>
- 602 |           <div className="flex items-center gap-2 select-none">
- 603 |             <button onClick={() => alert("Solospace AI OS")} className="text-neutral-400 hover:text-white p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer"><HelpCircle className="w-4 h-4 stroke-[1.8]" /></button>
- 604 |           </div>
- 605 |         </header>
- 606 | 
- 607 |         <div className="flex-1 relative overflow-hidden">
- 608 |           {workspaceState === "home" && !isEchoHouseMode && (
- 609 |             <div className="absolute inset-0 flex flex-col justify-between overflow-y-auto custom-scrollbar">
- 610 |               <div />
- 611 |               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
- 612 |                 <div className="text-center mb-10 space-y-2 select-none">
- 613 |                   <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">What do you want to build?</h1>
- 614 |                   <p className="text-sm text-neutral-400 font-sans">Multi-agent AI OS · 20+ providers · Real tool execution</p>
- 615 |                 </div>
- 616 |                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
- 617 |                   <div className="flex items-center gap-3">
- 618 |                     <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
- 619 |                     <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder="Ask anything. Be specific. (Enter to send, Shift+Enter for newline)" className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
- 620 |                     <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim()} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
- 621 |                   </div>
- 622 |                 </div>
- 623 |                 <div className="flex items-center gap-3 mt-5 select-none">
- 624 |                   <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">Mode:</span>
- 625 |                   <button onClick={() => setExecutionMode("auto")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "auto" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sparkles className="w-3 h-3 stroke-[2]" /><span>Smart Auto</span></button>
- 626 |                   <button onClick={() => setExecutionMode("custom")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "custom" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sliders className="w-3 h-3" /><span>Custom Agent</span></button>
- 627 |                 </div>
- 628 | 
- 629 |                 {/* EchoHouse Feature Card */}
- 630 |                 <div className="w-full mt-4">
- 631 |                   <button
- 632 |                     onClick={(e) => {
- 633 |                       createSession("EchoHouse Simulation", "echohouse");
- 634 |                       setWorkspaceState("active");
- 635 |                       setCurrentTab("chat");
- 636 |                     }}
- 637 |                     className="w-full p-4 bg-gradient-to-r from-neutral-950 to-neutral-900 border border-neutral-800 hover:border-neutral-600 rounded-2xl text-left transition-all cursor-pointer group"
- 638 |                   >
- 639 |                     <div className="flex items-center gap-3">
- 640 |                       <div className="w-8 h-8 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center justify-center text-base">🌀</div>
- 641 |                       <div className="flex-1 min-w-0">
- 642 |                         <p className="text-xs font-bold text-white">EchoHouse — Social Dynamics Simulator</p>
- 643 |                         <p className="text-[10px] text-neutral-500 mt-0.5">Simulate conversations with people in your life. Get therapeutic insights.</p>
- 644 |                       </div>
- 645 |                       <ArrowRight className="w-4 h-4 text-neutral-600 group-hover:text-white transition-colors shrink-0" />
- 646 |                     </div>
- 647 |                   </button>
- 648 |                 </div>
- 649 | 
- 650 |               </div>
- 651 |               <div />
- 652 |             </div>
- 653 |           )}
- 654 | 
- 655 |           {workspaceState === "home" && isEchoHouseMode && (
- 656 |             <div className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto custom-scrollbar px-6 py-12">
- 657 |               <div className="w-full max-w-xl space-y-8">
- 658 |                 {/* Step indicator */}
- 659 |                 <div className="flex items-center gap-2 select-none">
- 660 |                   {[1, 2, 3].map((s) => (
- 661 |                     <div key={s} className="flex items-center gap-2">
- 662 |                       <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-mono font-bold transition-all ${echoStep >= s ? 'bg-white text-black' : 'bg-neutral-800 text-neutral-500'}`}>{s}</div>
- 663 |                       {s < 3 && <div className={`w-8 h-px transition-all ${echoStep > s ? 'bg-white' : 'bg-neutral-800'}`} />}
- 664 |                     </div>
- 665 |                   ))}
- 666 |                   <span className="text-[10px] font-mono text-neutral-500 ml-2 uppercase tracking-wider">
- 667 |                     {echoStep === 1 ? 'Situation' : echoStep === 2 ? 'Focus' : 'Cast Review'}
- 668 |                   </span>
- 669 |                 </div>
- 670 | 
- 671 |                 {/* Step 1 — Situation */}
- 672 |                 {echoStep === 1 && (
- 673 |                   <div className="space-y-4">
- 674 |                     <div className="space-y-1">
- 675 |                       <h1 className="text-2xl font-bold text-white tracking-tight">Describe the situation you are navigating.</h1>
- 676 |                       <p className="text-xs text-neutral-500 font-sans">Write freely. This is private. The more specific, the more useful the simulation.</p>
- 677 |                     </div>
- 678 |                     <textarea
- 679 |                       rows={6}
- 680 |                       value={echoSituation}
- 681 |                       onChange={(e) => setEchoSituation(e.target.value)}
- 682 |                       placeholder="My manager keeps dismissing my ideas in meetings. Last week they took credit for a suggestion I made and..."
- 683 |                       className="w-full bg-neutral-950 border border-[#1f1f1f] rounded-2xl p-4 text-sm text-neutral-200 outline-none placeholder:text-neutral-700 focus:border-neutral-600 resize-none leading-relaxed transition-colors custom-scrollbar"
- 684 |                     />
- 685 |                     <button
- 686 |                       onClick={() => { if (echoSituation.trim()) setEchoStep(2); }}
- 687 |                       disabled={!echoSituation.trim()}
- 688 |                       className="w-full py-3 bg-white text-black font-semibold text-sm rounded-2xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
- 689 |                     >
- 690 |                       Continue
- 691 |                     </button>
- 692 |                   </div>
- 693 |                 )}
- 694 | 
- 695 |                 {/* Step 2 — Focus */}
- 696 |                 {echoStep === 2 && (
- 697 |                   <div className="space-y-4">
- 698 |                     <div className="space-y-1">
- 699 |                       <h1 className="text-2xl font-bold text-white tracking-tight">What do you want from this simulation?</h1>
- 700 |                       <p className="text-xs text-neutral-500 font-sans">Select the focus that best fits your goal.</p>
- 701 |                     </div>
- 702 |                     <div className="space-y-2">
- 703 |                       {[
- 704 |                         "Understand why this keeps happening",
- 705 |                         "Prepare for a difficult conversation",
- 706 |                         "Process feelings about a past event"
- 707 |                       ].map((option) => (
- 708 |                         <button
- 709 |                           key={option}
- 710 |                           onClick={() => setEchoFocus(option)}
- 711 |                           className={`w-full text-left px-4 py-3 rounded-xl border text-sm transition-all cursor-pointer ${echoFocus === option ? 'border-white bg-white/[0.06] text-white font-semibold' : 'border-[#1f1f1f] text-neutral-400 hover:border-neutral-600 hover:text-white'}`}
- 712 |                         >
- 713 |                           {option}
- 714 |                         </button>
- 715 |                       ))}
- 716 |                     </div>
- 717 |                     <div className="flex gap-2">
- 718 |                       <button onClick={() => setEchoStep(1)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
- 719 |                       <button
- 720 |                         onClick={async () => {
- 721 |                           if (echoFocus.trim()) {
- 722 |                             setEchoStep(3);
- 723 |                             if (executionMode === "auto") {
- 724 |                               await fetchEchoCast(echoSituation, echoFocus);
- 725 |                             } else {
- 726 |                               setEchoCast([]);
- 727 |                             }
- 728 |                           }
- 729 |                         }}
- 730 |                         disabled={!echoFocus.trim()}
- 731 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
- 732 |                       >
- 733 |                         {isLoadingCast ? "Inferring cast..." : "Next"}
- 734 |                       </button>
- 735 |                     </div>
- 736 |                   </div>
- 737 |                 )}
- 738 | 
- 739 |                 {/* Step 3 — Cast Review */}
- 740 |                 {echoStep === 3 && (
- 741 |                   <div className="space-y-4">
- 742 |                     <div className="space-y-1">
- 743 |                       <h1 className="text-2xl font-bold text-white tracking-tight">Review the cast.</h1>
- 744 |                       <p className="text-xs text-neutral-500 font-sans">These are the people who will participate in the simulation. Edit, remove, or add as needed.</p>
- 745 |                     </div>
- 746 |                     {isLoadingCast ? (
- 747 |                       <div className="flex items-center justify-center py-12">
- 748 |                         <div className="w-5 h-5 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
- 749 |                         <span className="text-xs text-neutral-500 ml-3 font-mono">Inferring cast...</span>
- 750 |                       </div>
- 751 |                     ) : (executionMode === "custom" && echoCast.length === 0) ? (
- 752 |                       <p>You are in Custom mode. Add people directly on the canvas after starting the simulation.</p>
- 753 |                     ) : (
- 754 |                       <div className="space-y-2">
- 755 |                         {echoCast.map((member, idx) => (
- 756 |                           <div key={idx} className="bg-neutral-950 border border-[#1f1f1f] rounded-xl p-3 space-y-2">
- 757 |                             {editingCastIdx === idx ? (
- 758 |                               <div className="space-y-2">
- 759 |                                 <input
- 760 |                                   type="text"
- 761 |                                   value={member.inferred_name}
- 762 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_name: e.target.value } : m))}
- 763 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
- 764 |                                   placeholder="Name"
- 765 |                                 />
- 766 |                                 <input
- 767 |                                   type="text"
- 768 |                                   value={member.role}
- 769 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, role: e.target.value } : m))}
- 770 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
- 771 |                                   placeholder="Role"
- 772 |                                 />
- 773 |                                 <textarea
- 774 |                                   value={member.inferred_problem}
- 775 |                                   rows={2}
- 776 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_problem: e.target.value } : m))}
- 777 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2.5 text-xs text-white outline-none focus:border-neutral-500 resize-none"
- 778 |                                   placeholder="Their perspective..."
- 779 |                                 />
- 780 |                                 <button onClick={() => setEditingCastIdx(null)} className="text-[10px] font-mono text-neutral-400 hover:text-white cursor-pointer">Done</button>
- 781 |                               </div>
- 782 |                             ) : (
- 783 |                               <div className="flex items-start justify-between gap-2">
- 784 |                                 <div className="min-w-0 flex-1">
- 785 |                                   <div className="flex items-center gap-2">
- 786 |                                     <span className="text-xs font-semibold text-white">{member.inferred_name}</span>
- 787 |                                     <span className="text-[9px] font-mono text-neutral-500 uppercase tracking-wider">{member.role}</span>
- 788 |                                   </div>
- 789 |                                   <p className="text-[11px] text-neutral-500 leading-relaxed mt-0.5 line-clamp-2">{member.inferred_problem}</p>
- 790 |                                 </div>
- 791 |                                 {!member.is_self && (
- 792 |                                   <div className="flex gap-1 shrink-0">
- 793 |                                     <button onClick={() => setEditingCastIdx(idx)} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><Pencil className="w-3 h-3" /></button>
- 794 |                                     <button onClick={() => setEchoCast(prev => prev.filter((_, i) => i !== idx))} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><X className="w-3 h-3" /></button>
- 795 |                                   </div>
- 796 |                                 )}
- 797 |                               </div>
- 798 |                             )}
- 799 |                           </div>
- 800 |                         ))}
- 801 |                         <button
- 802 |                           onClick={() => setEchoCast(prev => [...prev, { inferred_name: "New Person", role: "acquaintance", inferred_problem: "Enter their perspective...", emotional_core: "", is_self: false }])}
- 803 |                           className="w-full py-2.5 border border-dashed border-[#1f1f1f] rounded-xl text-xs text-neutral-500 hover:text-white hover:border-neutral-600 transition-all cursor-pointer"
- 804 |                         >
- 805 |                           Add Person
- 806 |                         </button>
- 807 |                       </div>
- 808 |                     )}
- 809 |                     <div className="flex gap-2">
- 810 |                       <button onClick={() => setEchoStep(2)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
- 811 |                       <button
- 812 |                         onClick={beginEchoHouseSimulation}
- 813 |                         disabled={isLoadingCast || (executionMode !== "custom" && echoCast.filter(m => !m.is_self).length === 0)}
- 814 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
- 815 |                       >
- 816 |                         Begin Simulation
- 817 |                       </button>
- 818 |                     </div>
- 819 |                   </div>
- 820 |                 )}
- 821 |               </div>
- 822 |             </div>
- 823 |           )}
- 824 | 
- 825 |           {workspaceState === "active" && (
- 826 |             <div className="absolute inset-0 flex">
- 827 |               {currentTab === "chat" && (
- 828 |                 <div className="flex-1 flex flex-col justify-between overflow-hidden bg-black">
- 829 |                   <div ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
- 830 |                     {isLoadingSession ? (
- 831 |                       <div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" /></div>
- 832 |                     ) : (
- 833 |                       <div className="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto space-y-4 select-text">
- 834 |                         {chatMessages.length === 0 ? (
- 835 |                           <div className="flex flex-col items-center justify-center py-20 text-center space-y-2 select-none">
- 836 |                             <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">
- 837 |                               {isEchoHouseMode ? "What is your problem in life?" : "What's on your mind?"}
- 838 |                             </h1>
- 839 |                             <p className="text-sm text-neutral-400 font-sans">
- 840 |                               {isEchoHouseMode ? "Type your struggle below to initialize the simulation." : "Start a conversation to see AI response."}
- 841 |                             </p>
- 842 |                           </div>
- 843 |                         ) : (
- 844 |                           chatMessages.map((msg, msgIdx) => (
- 845 |                             <motion.div key={msg.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={`flex w-full ${msg.sender === "divider" ? "justify-center" : msg.sender === "user" ? "justify-end" : "justify-start"}`}>
- 846 |                               {msg.sender === "divider" ? (
- 847 |                                 <div className="w-full flex items-center gap-4 my-4 select-none">
- 848 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
- 849 |                                   <span className="text-[10px] font-mono text-neutral-500 tracking-wider uppercase">{msg.text}</span>
- 850 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
- 851 |                                 </div>
- 852 |                               ) : msg.sender === "user" ? (
- 853 |                                 <div className="flex flex-col items-end space-y-1 max-w-[72%] group">
- 854 |                                   {msg.speakerName && (
- 855 |                                     <span className="text-[10px] font-mono text-neutral-500 mr-2">{msg.speakerName}</span>
- 856 |                                   )}
- 857 |                                   <div className={`rounded-3xl px-5 py-3 text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'bg-neutral-800' : 'bg-[#2f2f2f]'}`}><p className="whitespace-pre-wrap">{msg.text}</p></div>
- 858 |                                   <div className="flex items-center gap-3 mt-1.5 text-neutral-500 select-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 mr-2">
- 859 |                                     <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
- 860 |                                       {copiedMsgId === msg.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
- 861 |                                       <span>{copiedMsgId === msg.id ? "Copied" : "Copy"}</span>
- 862 |                                     </button>
- 863 |                                     <button onClick={() => { setUserQuery(msg.text); textareaRef.current?.focus(); textareaRef.current?.scrollIntoView({ behavior: "smooth" }); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
- 864 |                                       <Pencil className="w-3 h-3" />
- 865 |                                       <span>Edit</span>
+ 472 |     setChatMessages((prev) => prev.slice(0, lastAIIdx));
+ 473 |     startOrchestration(lastUserMsg.text);
+ 474 |   };
+ 475 | 
+ 476 |   const handleAddRule = () => {
+ 477 |     if (!newRuleText.trim() || !selectedNodeId) return;
+ 478 |     addRule(selectedNodeId, newRuleText.trim());
+ 479 |     setNewRuleText("");
+ 480 |   };
+ 481 | 
+ 482 |   const activeNodeDetail = nodes.find(n => n.id === selectedNodeId) as any;
+ 483 | 
+ 484 |   const ModeSelector = () => (
+ 485 |     <div className="flex items-center gap-1 bg-neutral-900/40 rounded-full p-0.5 border border-[#1f1f1f]">
+ 486 |       <button onClick={() => setExecutionMode("auto")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "auto" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Smart</button>
+ 487 |       <button onClick={() => setExecutionMode("custom")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "custom" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Custom</button>
+ 488 |     </div>
+ 489 |   );
+ 490 | 
+ 491 |   const handleFileAttach = () => {
+ 492 |     const input = document.createElement("input");
+ 493 |     input.type = "file";
+ 494 |     input.accept = ".txt,.md,.json,.csv,.py,.js,.ts,.tsx,.html,.css,.yaml,.yml,.xml,.ini,.cfg,.pdf,.jpg,.png";
+ 495 |     input.onchange = (e: any) => {
+ 496 |       const file = e.target.files?.[0];
+ 497 |       if (!file) return;
+ 498 |       const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+ 499 |       if (['.txt', '.md', '.json', '.csv', '.py', '.js', '.ts', '.tsx', '.html', '.css', '.yaml', '.yml', '.xml', '.ini', '.cfg'].includes(ext)) {
+ 500 |         const reader = new FileReader();
+ 501 |         reader.onload = (ev) => setUserQuery((prev) => prev + `\n[Attached: ${file.name}]\n${ev.target?.result as string}\n`);
+ 502 |         reader.readAsText(file);
+ 503 |       }
+ 504 |     };
+ 505 |     input.click();
+ 506 |   };
+ 507 | 
+ 508 |   return (
+ 509 |     <div className="flex h-screen w-full bg-black text-[#f5f5f5] overflow-hidden font-sans">
+ 510 |       <aside onClick={() => { if (!isSidebarExpanded) setIsSidebarExpanded(true); }} className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-30 select-none cursor-pointer ${isSidebarExpanded ? "w-64 cursor-default" : "w-[60px]"}`}>
+ 511 |         <div className="flex items-center gap-3 h-16 border-b border-[#1f1f1f] px-4 justify-between">
+ 512 |           {isSidebarExpanded ? (
+ 513 |             <div className="flex items-center gap-2.5">
+ 514 |               <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
+ 515 |               <h1 className="text-sm font-bold text-white tracking-tight leading-none">Solospace</h1>
+ 516 |             </div>
+ 517 |           ) : (
+ 518 |             <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center mx-auto"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
+ 519 |           )}
+ 520 |           {isSidebarExpanded && <button onClick={(e) => { e.stopPropagation(); setIsSidebarExpanded(false); }} className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>}
+ 521 |         </div>
+ 522 | 
+ 523 |         <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto custom-scrollbar">
+ 524 |           <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); useWorkflowStore.getState().abortController?.abort(); setWorkspaceState("home"); setUserQuery(""); useWorkflowStore.setState({ activeSessionId: null, nodes: [], edges: [], chatMessages: [], agentTalkLogs: [], executionState: "setup", statusMessage: "", isThinking: false, isOrchestrating: false, liveThoughts: "", pendingApproval: null, followUpSuggestions: [], abortController: null }); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
+ 525 |             <SquarePlus className="w-5 h-5 stroke-[1.8]" />
+ 526 |             {isSidebarExpanded && <span className="text-xs font-semibold">New Chat</span>}
+ 527 |           </button>
+ 528 | 
+ 529 |           <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsSecretOpen(true); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
+ 530 |             <Key className="w-5 h-5 stroke-[1.8]" />
+ 531 |             {isSidebarExpanded && <span className="text-xs font-semibold">API Keys</span>}
+ 532 |           </button>
+ 533 | 
+ 534 |           {/* Templates Section */}
+ 535 |           <div className="pt-2 select-none">
+ 536 |             {isSidebarExpanded ? (
+ 537 |               <>
+ 538 |                 <button
+ 539 |                   onClick={(e) => { e.stopPropagation(); setIsTemplatesExpanded(!isTemplatesExpanded); }}
+ 540 |                   className="w-full flex items-center justify-between px-3 py-1.5 text-neutral-600 hover:text-neutral-400 cursor-pointer"
+ 541 |                 >
+ 542 |                   <span className="text-[10px] font-bold uppercase tracking-widest font-mono">Templates</span>
+ 543 |                   <ChevronRight className={`w-3.5 h-3.5 transition-transform duration-200 ${isTemplatesExpanded ? "rotate-90" : ""}`} />
+ 544 |                 </button>
+ 545 |                 {isTemplatesExpanded && (
+ 546 |                   <button
+ 547 |                     onClick={(e) => {
+ 548 |                       e.stopPropagation();
+ 549 |                       createSession("EchoHouse Simulation", "echohouse");
+ 550 |                       setWorkspaceState("active");
+ 551 |                       setCurrentTab("chat");
+ 552 |                     }}
+ 553 |                     className="w-full flex items-center rounded-lg transition-all duration-150 py-2.5 px-3 gap-3 hover:bg-neutral-900 text-neutral-200 cursor-pointer"
+ 554 |                   >
+ 555 |                     <Globe className="w-5 h-5 stroke-[1.8]" />
+ 556 |                     <span className="text-xs font-semibold">EchoHouse</span>
+ 557 |                   </button>
+ 558 |                 )}
+ 559 |               </>
+ 560 |             ) : (
+ 561 |               <button
+ 562 |                 onClick={() => {
+ 563 |                   createSession("EchoHouse Simulation", "echohouse");
+ 564 |                   setWorkspaceState("active");
+ 565 |                   setCurrentTab("chat");
+ 566 |                 }}
+ 567 |                 className="w-full flex items-center justify-center rounded-lg transition-all duration-150 py-2.5 hover:bg-neutral-900 text-neutral-400 cursor-pointer"
+ 568 |                 title="EchoHouse Template"
+ 569 |               >
+ 570 |                 <Globe className="w-5 h-5 stroke-[1.8]" />
+ 571 |               </button>
+ 572 |             )}
+ 573 |           </div>
+ 574 | 
+ 575 |           {isSidebarExpanded && (
+ 576 |             <div className="pt-6 space-y-2 select-none">
+ 577 |               <div className="flex items-center gap-1.5 px-3"><History className="w-3.5 h-3.5 text-neutral-600" /><span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest font-mono">Recents</span></div>
+ 578 |               <div className="space-y-1 max-h-[220px] overflow-y-auto custom-scrollbar">
+ 579 |                 {Object.values(sessions).length === 0 ? <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span> : (
+ 580 |                   Object.values(sessions).reverse().map((s) => (
+ 581 |                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
+ 582 |                       <button disabled={isLoadingSession} onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsLoadingSession(true); try { await loadSessionFromDb(s.id); setWorkspaceState("active"); setCurrentTab("chat"); } catch (err) { console.error(err); } finally { setIsLoadingSession(false); } } }} className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${activeSessionId === s.id ? "text-white font-bold" : "text-neutral-500 hover:text-white"}`} title={s.prompt}>{s.mode === 'echohouse' ? `${s.title} [Echo]` : s.title}</button>
+ 583 |                       <button onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); if (confirm(`Delete "${s.title}"?`)) await deleteSessionFromDb(s.id); } }} className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+ 584 |                     </div>
+ 585 |                   ))
+ 586 |                 )}
+ 587 |               </div>
+ 588 |             </div>
+ 589 |           )}
+ 590 |         </nav>
+ 591 |       </aside>
+ 592 | 
+ 593 |       <main onClick={() => { if (isSidebarExpanded && window.innerWidth < 768) setIsSidebarExpanded(false); }} className="flex-1 flex flex-col min-w-0 bg-[#000000] relative transition-all duration-300">
+ 594 |         <header className="flex justify-between items-center w-full px-6 h-16 border-b border-[#141414] shrink-0 z-10 bg-black/85 backdrop-blur-md">
+ 595 |           <div className="flex items-center gap-2" />
+ 596 |           <div className="flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-[2px] rounded-full select-none">
+ 597 |             <button onClick={() => { if (workspaceState !== "home") setCurrentTab("chat"); }} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${currentTab === "chat" || workspaceState === "home" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>Chat</button>
+ 598 |             {workspaceState === "active" && (
+ 599 |               <button onClick={() => setCurrentTab("arena")} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${currentTab === "arena" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>
+ 600 |                 <GitFork className="w-3 h-3" /> Flow {nodes.length > 0 && (
+ 601 |                   <span className="ml-1 px-1.5 py-0.5 bg-cyan-500/20 border border-cyan-500/30 rounded text-[9px] font-mono text-cyan-400 font-bold">{nodes.length}</span>
+ 602 |                 )}
+ 603 |               </button>
+ 604 |             )}
+ 605 |           </div>
+ 606 |           <div className="flex items-center gap-2 select-none">
+ 607 |             <button onClick={() => alert("Solospace AI OS")} className="text-neutral-400 hover:text-white p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer"><HelpCircle className="w-4 h-4 stroke-[1.8]" /></button>
+ 608 |           </div>
+ 609 |         </header>
+ 610 | 
+ 611 |         <div className="flex-1 relative overflow-hidden">
+ 612 |           {workspaceState === "home" && !isEchoHouseMode && (
+ 613 |             <div className="absolute inset-0 flex flex-col justify-between overflow-y-auto custom-scrollbar">
+ 614 |               <div />
+ 615 |               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
+ 616 |                 <div className="text-center mb-10 space-y-2 select-none">
+ 617 |                   <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">What do you want to build?</h1>
+ 618 |                   <p className="text-sm text-neutral-400 font-sans">Multi-agent AI OS · 20+ providers · Real tool execution</p>
+ 619 |                 </div>
+ 620 |                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
+ 621 |                   <div className="flex items-center gap-3">
+ 622 |                     <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
+ 623 |                     <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder="Ask anything. Be specific. (Enter to send, Shift+Enter for newline)" className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
+ 624 |                     <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim()} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
+ 625 |                   </div>
+ 626 |                 </div>
+ 627 |                 <div className="flex items-center gap-3 mt-5 select-none">
+ 628 |                   <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">Mode:</span>
+ 629 |                   <button onClick={() => setExecutionMode("auto")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "auto" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sparkles className="w-3 h-3 stroke-[2]" /><span>Smart Auto</span></button>
+ 630 |                   <button onClick={() => setExecutionMode("custom")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "custom" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sliders className="w-3 h-3" /><span>Custom Agent</span></button>
+ 631 |                 </div>
+ 632 | 
+ 633 |                 {/* EchoHouse Feature Card */}
+ 634 |                 <div className="w-full mt-4">
+ 635 |                   <button
+ 636 |                     onClick={(e) => {
+ 637 |                       createSession("EchoHouse Simulation", "echohouse");
+ 638 |                       setWorkspaceState("active");
+ 639 |                       setCurrentTab("chat");
+ 640 |                     }}
+ 641 |                     className="w-full p-4 bg-gradient-to-r from-neutral-950 to-neutral-900 border border-neutral-800 hover:border-neutral-600 rounded-2xl text-left transition-all cursor-pointer group"
+ 642 |                   >
+ 643 |                     <div className="flex items-center gap-3">
+ 644 |                       <div className="w-8 h-8 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center justify-center text-base">🌀</div>
+ 645 |                       <div className="flex-1 min-w-0">
+ 646 |                         <p className="text-xs font-bold text-white">EchoHouse — Social Dynamics Simulator</p>
+ 647 |                         <p className="text-[10px] text-neutral-500 mt-0.5">Simulate conversations with people in your life. Get therapeutic insights.</p>
+ 648 |                       </div>
+ 649 |                       <ArrowRight className="w-4 h-4 text-neutral-600 group-hover:text-white transition-colors shrink-0" />
+ 650 |                     </div>
+ 651 |                   </button>
+ 652 |                 </div>
+ 653 | 
+ 654 |               </div>
+ 655 |               <div />
+ 656 |             </div>
+ 657 |           )}
+ 658 | 
+ 659 |           {workspaceState === "home" && isEchoHouseMode && (
+ 660 |             <div className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto custom-scrollbar px-6 py-12">
+ 661 |               <div className="w-full max-w-xl space-y-8">
+ 662 |                 {/* Step indicator */}
+ 663 |                 <div className="flex items-center gap-2 select-none">
+ 664 |                   {[1, 2, 3].map((s) => (
+ 665 |                     <div key={s} className="flex items-center gap-2">
+ 666 |                       <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-mono font-bold transition-all ${echoStep >= s ? 'bg-white text-black' : 'bg-neutral-800 text-neutral-500'}`}>{s}</div>
+ 667 |                       {s < 3 && <div className={`w-8 h-px transition-all ${echoStep > s ? 'bg-white' : 'bg-neutral-800'}`} />}
+ 668 |                     </div>
+ 669 |                   ))}
+ 670 |                   <span className="text-[10px] font-mono text-neutral-500 ml-2 uppercase tracking-wider">
+ 671 |                     {echoStep === 1 ? 'Situation' : echoStep === 2 ? 'Focus' : 'Cast Review'}
+ 672 |                   </span>
+ 673 |                 </div>
+ 674 | 
+ 675 |                 {/* Step 1 — Situation */}
+ 676 |                 {echoStep === 1 && (
+ 677 |                   <div className="space-y-4">
+ 678 |                     <div className="space-y-1">
+ 679 |                       <h1 className="text-2xl font-bold text-white tracking-tight">Describe the situation you are navigating.</h1>
+ 680 |                       <p className="text-xs text-neutral-500 font-sans">Write freely. This is private. The more specific, the more useful the simulation.</p>
+ 681 |                     </div>
+ 682 |                     <textarea
+ 683 |                       rows={6}
+ 684 |                       value={echoSituation}
+ 685 |                       onChange={(e) => setEchoSituation(e.target.value)}
+ 686 |                       placeholder="My manager keeps dismissing my ideas in meetings. Last week they took credit for a suggestion I made and..."
+ 687 |                       className="w-full bg-neutral-950 border border-[#1f1f1f] rounded-2xl p-4 text-sm text-neutral-200 outline-none placeholder:text-neutral-700 focus:border-neutral-600 resize-none leading-relaxed transition-colors custom-scrollbar"
+ 688 |                     />
+ 689 |                     <button
+ 690 |                       onClick={() => { if (echoSituation.trim()) setEchoStep(2); }}
+ 691 |                       disabled={!echoSituation.trim()}
+ 692 |                       className="w-full py-3 bg-white text-black font-semibold text-sm rounded-2xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
+ 693 |                     >
+ 694 |                       Continue
+ 695 |                     </button>
+ 696 |                   </div>
+ 697 |                 )}
+ 698 | 
+ 699 |                 {/* Step 2 — Focus */}
+ 700 |                 {echoStep === 2 && (
+ 701 |                   <div className="space-y-4">
+ 702 |                     <div className="space-y-1">
+ 703 |                       <h1 className="text-2xl font-bold text-white tracking-tight">What do you want from this simulation?</h1>
+ 704 |                       <p className="text-xs text-neutral-500 font-sans">Select the focus that best fits your goal.</p>
+ 705 |                     </div>
+ 706 |                     <div className="space-y-2">
+ 707 |                       {[
+ 708 |                         "Understand why this keeps happening",
+ 709 |                         "Prepare for a difficult conversation",
+ 710 |                         "Process feelings about a past event"
+ 711 |                       ].map((option) => (
+ 712 |                         <button
+ 713 |                           key={option}
+ 714 |                           onClick={() => setEchoFocus(option)}
+ 715 |                           className={`w-full text-left px-4 py-3 rounded-xl border text-sm transition-all cursor-pointer ${echoFocus === option ? 'border-white bg-white/[0.06] text-white font-semibold' : 'border-[#1f1f1f] text-neutral-400 hover:border-neutral-600 hover:text-white'}`}
+ 716 |                         >
+ 717 |                           {option}
+ 718 |                         </button>
+ 719 |                       ))}
+ 720 |                     </div>
+ 721 |                     <div className="flex gap-2">
+ 722 |                       <button onClick={() => setEchoStep(1)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
+ 723 |                       <button
+ 724 |                         onClick={async () => {
+ 725 |                           if (echoFocus.trim()) {
+ 726 |                             setEchoStep(3);
+ 727 |                             if (executionMode === "auto") {
+ 728 |                               await fetchEchoCast(echoSituation, echoFocus);
+ 729 |                             } else {
+ 730 |                               setEchoCast([]);
+ 731 |                             }
+ 732 |                           }
+ 733 |                         }}
+ 734 |                         disabled={!echoFocus.trim()}
+ 735 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
+ 736 |                       >
+ 737 |                         {isLoadingCast ? "Inferring cast..." : "Next"}
+ 738 |                       </button>
+ 739 |                     </div>
+ 740 |                   </div>
+ 741 |                 )}
+ 742 | 
+ 743 |                 {/* Step 3 — Cast Review */}
+ 744 |                 {echoStep === 3 && (
+ 745 |                   <div className="space-y-4">
+ 746 |                     <div className="space-y-1">
+ 747 |                       <h1 className="text-2xl font-bold text-white tracking-tight">Review the cast.</h1>
+ 748 |                       <p className="text-xs text-neutral-500 font-sans">These are the people who will participate in the simulation. Edit, remove, or add as needed.</p>
+ 749 |                     </div>
+ 750 |                     {isLoadingCast ? (
+ 751 |                       <div className="flex items-center justify-center py-12">
+ 752 |                         <div className="w-5 h-5 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
+ 753 |                         <span className="text-xs text-neutral-500 ml-3 font-mono">Inferring cast...</span>
+ 754 |                       </div>
+ 755 |                     ) : (executionMode === "custom" && echoCast.length === 0) ? (
+ 756 |                       <p>You are in Custom mode. Add people directly on the canvas after starting the simulation.</p>
+ 757 |                     ) : (
+ 758 |                       <div className="space-y-2">
+ 759 |                         {echoCast.map((member, idx) => (
+ 760 |                           <div key={idx} className="bg-neutral-950 border border-[#1f1f1f] rounded-xl p-3 space-y-2">
+ 761 |                             {editingCastIdx === idx ? (
+ 762 |                               <div className="space-y-2">
+ 763 |                                 <input
+ 764 |                                   type="text"
+ 765 |                                   value={member.inferred_name}
+ 766 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_name: e.target.value } : m))}
+ 767 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
+ 768 |                                   placeholder="Name"
+ 769 |                                 />
+ 770 |                                 <input
+ 771 |                                   type="text"
+ 772 |                                   value={member.role}
+ 773 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, role: e.target.value } : m))}
+ 774 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
+ 775 |                                   placeholder="Role"
+ 776 |                                 />
+ 777 |                                 <textarea
+ 778 |                                   value={member.inferred_problem}
+ 779 |                                   rows={2}
+ 780 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_problem: e.target.value } : m))}
+ 781 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2.5 text-xs text-white outline-none focus:border-neutral-500 resize-none"
+ 782 |                                   placeholder="Their perspective..."
+ 783 |                                 />
+ 784 |                                 <button onClick={() => setEditingCastIdx(null)} className="text-[10px] font-mono text-neutral-400 hover:text-white cursor-pointer">Done</button>
+ 785 |                               </div>
+ 786 |                             ) : (
+ 787 |                               <div className="flex items-start justify-between gap-2">
+ 788 |                                 <div className="min-w-0 flex-1">
+ 789 |                                   <div className="flex items-center gap-2">
+ 790 |                                     <span className="text-xs font-semibold text-white">{member.inferred_name}</span>
+ 791 |                                     <span className="text-[9px] font-mono text-neutral-500 uppercase tracking-wider">{member.role}</span>
+ 792 |                                   </div>
+ 793 |                                   <p className="text-[11px] text-neutral-500 leading-relaxed mt-0.5 line-clamp-2">{member.inferred_problem}</p>
+ 794 |                                 </div>
+ 795 |                                 {!member.is_self && (
+ 796 |                                   <div className="flex gap-1 shrink-0">
+ 797 |                                     <button onClick={() => setEditingCastIdx(idx)} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><Pencil className="w-3 h-3" /></button>
+ 798 |                                     <button onClick={() => setEchoCast(prev => prev.filter((_, i) => i !== idx))} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><X className="w-3 h-3" /></button>
+ 799 |                                   </div>
+ 800 |                                 )}
+ 801 |                               </div>
+ 802 |                             )}
+ 803 |                           </div>
+ 804 |                         ))}
+ 805 |                         <button
+ 806 |                           onClick={() => setEchoCast(prev => [...prev, { inferred_name: "New Person", role: "acquaintance", inferred_problem: "Enter their perspective...", emotional_core: "", is_self: false }])}
+ 807 |                           className="w-full py-2.5 border border-dashed border-[#1f1f1f] rounded-xl text-xs text-neutral-500 hover:text-white hover:border-neutral-600 transition-all cursor-pointer"
+ 808 |                         >
+ 809 |                           Add Person
+ 810 |                         </button>
+ 811 |                       </div>
+ 812 |                     )}
+ 813 |                     <div className="flex gap-2">
+ 814 |                       <button onClick={() => setEchoStep(2)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
+ 815 |                       <button
+ 816 |                         onClick={beginEchoHouseSimulation}
+ 817 |                         disabled={isLoadingCast || (executionMode !== "custom" && echoCast.filter(m => !m.is_self).length === 0)}
+ 818 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
+ 819 |                       >
+ 820 |                         Begin Simulation
+ 821 |                       </button>
+ 822 |                     </div>
+ 823 |                   </div>
+ 824 |                 )}
+ 825 |               </div>
+ 826 |             </div>
+ 827 |           )}
+ 828 | 
+ 829 |           {workspaceState === "active" && (
+ 830 |             <div className="absolute inset-0 flex">
+ 831 |               {currentTab === "chat" && (
+ 832 |                 <div className="flex-1 flex flex-col justify-between overflow-hidden bg-black">
+ 833 |                   <div ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
+ 834 |                     {isLoadingSession ? (
+ 835 |                       <div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" /></div>
+ 836 |                     ) : (
+ 837 |                       <div className="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto space-y-4 select-text">
+ 838 |                         {chatMessages.length === 0 ? (
+ 839 |                           <div className="flex flex-col items-center justify-center py-20 text-center space-y-2 select-none">
+ 840 |                             <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">
+ 841 |                               {isEchoHouseMode ? "What is your problem in life?" : "What's on your mind?"}
+ 842 |                             </h1>
+ 843 |                             <p className="text-sm text-neutral-400 font-sans">
+ 844 |                               {isEchoHouseMode ? "Type your struggle below to initialize the simulation." : "Start a conversation to see AI response."}
+ 845 |                             </p>
+ 846 |                           </div>
+ 847 |                         ) : (
+ 848 |                           chatMessages.map((msg, msgIdx) => (
+ 849 |                             <motion.div key={msg.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={`flex w-full ${msg.sender === "divider" ? "justify-center" : msg.sender === "user" ? "justify-end" : "justify-start"}`}>
+ 850 |                               {msg.sender === "divider" ? (
+ 851 |                                 <div className="w-full flex items-center gap-4 my-4 select-none">
+ 852 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
+ 853 |                                   <span className="text-[10px] font-mono text-neutral-500 tracking-wider uppercase">{msg.text}</span>
+ 854 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
+ 855 |                                 </div>
+ 856 |                               ) : msg.sender === "user" ? (
+ 857 |                                 <div className="flex flex-col items-end space-y-1 max-w-[72%] group">
+ 858 |                                   {msg.speakerName && (
+ 859 |                                     <span className="text-[10px] font-mono text-neutral-500 mr-2">{msg.speakerName}</span>
+ 860 |                                   )}
+ 861 |                                   <div className={`rounded-3xl px-5 py-3 text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'bg-neutral-800' : 'bg-[#2f2f2f]'}`}><p className="whitespace-pre-wrap">{msg.text}</p></div>
+ 862 |                                   <div className="flex items-center gap-3 mt-1.5 text-neutral-500 select-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 mr-2">
+ 863 |                                     <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
+ 864 |                                       {copiedMsgId === msg.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+ 865 |                                       <span>{copiedMsgId === msg.id ? "Copied" : "Copy"}</span>
  866 |                                     </button>
- 867 |                                   </div>
- 868 |                                 </div>
- 869 |                               ) : (
- 870 |                                 <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
- 871 |                                   {msg.speakerName && msg.speakerName !== "insight" && msg.speakerName !== "takeaways" && (
- 872 |                                     <span className="text-[10px] font-mono text-neutral-500 ml-1">{msg.speakerName}</span>
- 873 |                                   )}
- 874 |                                   {msg.speakerName === "takeaways" && msg.takeaways ? (
- 875 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 space-y-3 mt-2">
- 876 |                                       <span className="text-[10px] font-mono text-neutral-400 uppercase tracking-wider font-bold block">What you can try</span>
- 877 |                                       <ol className="space-y-2">
- 878 |                                         {msg.takeaways.map((item, ti) => (
- 879 |                                           <li key={ti} className="flex gap-2.5 text-xs text-neutral-300 leading-relaxed">
- 880 |                                             <span className="font-mono text-neutral-600 shrink-0">{ti + 1}.</span>
- 881 |                                             <span>{item}</span>
- 882 |                                           </li>
- 883 |                                         ))}
- 884 |                                       </ol>
- 885 |                                     </div>
- 886 |                                   ) : msg.speakerName === "insight" ? (
- 887 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4">
- 888 |                                       {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
+ 867 |                                     <button onClick={() => { setUserQuery(msg.text); textareaRef.current?.focus(); textareaRef.current?.scrollIntoView({ behavior: "smooth" }); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
+ 868 |                                       <Pencil className="w-3 h-3" />
+ 869 |                                       <span>Edit</span>
+ 870 |                                     </button>
+ 871 |                                   </div>
+ 872 |                                 </div>
+ 873 |                               ) : (
+ 874 |                                 <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
+ 875 |                                   {msg.speakerName && msg.speakerName !== "insight" && msg.speakerName !== "takeaways" && (
+ 876 |                                     <span className="text-[10px] font-mono text-neutral-500 ml-1">{msg.speakerName}</span>
+ 877 |                                   )}
+ 878 |                                   {msg.speakerName === "takeaways" && msg.takeaways ? (
+ 879 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 space-y-3 mt-2">
+ 880 |                                       <span className="text-[10px] font-mono text-neutral-400 uppercase tracking-wider font-bold block">What you can try</span>
+ 881 |                                       <ol className="space-y-2">
+ 882 |                                         {msg.takeaways.map((item, ti) => (
+ 883 |                                           <li key={ti} className="flex gap-2.5 text-xs text-neutral-300 leading-relaxed">
+ 884 |                                             <span className="font-mono text-neutral-600 shrink-0">{ti + 1}.</span>
+ 885 |                                             <span>{item}</span>
+ 886 |                                           </li>
+ 887 |                                         ))}
+ 888 |                                       </ol>
  889 |                                     </div>
- 890 |                                   ) : (
- 891 |                                     <div className={`w-full text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'rounded-2xl px-4 py-3 bg-neutral-900' : 'px-1 py-2'}`}>
+ 890 |                                   ) : msg.speakerName === "insight" ? (
+ 891 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4">
  892 |                                       {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
- 893 |                                       {msg.text && (!isOrchestrating || msgIdx !== chatMessages.length - 1) && (
- 894 |                                         <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
- 895 |                                           <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
- 896 |                                             {copiedMsgId === msg.id ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400 font-medium">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
- 897 |                                           </button>
- 898 |                                           {!isEchoHouseMode && msgIdx === chatMessages.length - 1 && !isOrchestrating && (
- 899 |                                             <button onClick={handleRegenerate} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
- 900 |                                               <RefreshCw className="w-3.5 h-3.5" />
- 901 |                                               <span>Regenerate</span>
- 902 |                                             </button>
- 903 |                                           )}
- 904 |                                         </div>
- 905 |                                       )}
- 906 |                                     </div>
- 907 |                                   )}
- 908 |                                   {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && nodes.length > 0 && (
- 909 |                                     <div className="flex gap-3 mt-4 select-none">
- 910 |                                       <button onClick={() => setCurrentTab("arena")} className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max">
- 911 |                                         <GitFork className="w-3.5 h-3.5 text-cyan-400" /><span>See Agent Flow</span>
- 912 |                                       </button>
- 913 |                                       {!isEchoHouseMode && useWorkflowStore.getState().executionState === "paused" && (
- 914 |                                         <button
- 915 |                                           onClick={async () => {
- 916 |                                             setExecutionState("running");
- 917 |                                             await useWorkflowStore.getState().triggerCustomExecution();
- 918 |                                           }}
- 919 |                                           className="px-4 py-2 bg-white hover:bg-neutral-200 rounded-xl text-xs font-bold text-black transition-all flex items-center gap-1.5 cursor-pointer max-w-max"
- 920 |                                         >
- 921 |                                           Proceed
- 922 |                                         </button>
- 923 |                                       )}
- 924 |                                     </div>
- 925 |                                   )}
- 926 |                                 </div>
- 927 |                               )}
- 928 |                             </motion.div>
- 929 |                           ))
- 930 |                         )}
- 931 |                         {/* Live agent thinking indicator */}
- 932 |                         {isThinking && chatMessages[chatMessages.length - 1]?.sender !== 'ai' && (
- 933 |                           <motion.div 
- 934 |                             initial={{ opacity: 0, y: 8 }} 
- 935 |                             animate={{ opacity: 1, y: 0 }} 
- 936 |                             className="flex justify-start"
- 937 |                           >
- 938 |                             <div className="flex items-center gap-2 px-4 py-3 bg-neutral-950 border border-[#1f1f1f] rounded-2xl max-w-[200px]">
- 939 |                               <div className="flex gap-1">
- 940 |                                 {[0, 1, 2].map(i => (
- 941 |                                   <div key={i} className="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
- 942 |                                 ))}
- 943 |                               </div>
- 944 |                               <ThinkingText prefix="thinking" className="text-[10px] text-neutral-500 font-mono" />
- 945 |                             </div>
- 946 |                           </motion.div>
- 947 |                         )}
- 948 |                         <div ref={chatEndRef} />
- 949 |                       </div>
- 950 |                     )}
- 951 |                   </div>
- 952 |                   <div className="px-4 sm:px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
- 953 |                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
- 954 |                       <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
- 955 |                       <textarea ref={textareaRef} rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery); } }} placeholder={isOrchestrating ? "Streaming..." : isEchoHouseMode ? "What is your problem in life?" : "Ask a follow-up..."} disabled={isOrchestrating} className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar" />
- 956 |                       <div className="flex items-center gap-2 shrink-0">
- 957 |                         <ModeSelector />
- 958 |                         {isOrchestrating ? (
- 959 |                           <button onClick={cancelOrchestration} className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all cursor-pointer"><Square className="w-3.5 h-3.5 text-white fill-white" /></button>
- 960 |                         ) : (
- 961 |                           <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim() || isThinking} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
- 962 |                         )}
- 963 |                       </div>
- 964 |                     </div>
- 965 |                   </div>
- 966 |                 </div>
- 967 |               )}
- 968 |               {currentTab === "arena" && (
- 969 |                 <div className="flex-1 relative overflow-hidden bg-[#000000] flex">
- 970 |                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#0d0d0d]/90 border border-[#1f1f1f] rounded-full px-4 py-2 backdrop-blur-md shadow-xl pointer-events-auto">
- 971 |                     <button onClick={() => setCurrentTab("chat")} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-mono"><ChevronLeft className="w-3.5 h-3.5" /> Back to Chat</button>
- 972 |                   </div>
- 973 |                   <FlowArena onProceed={() => setCurrentTab("chat")} />
- 974 |                 </div>
- 975 |               )}
- 976 |             </div>
- 977 |           )}
- 978 |         </div>
- 979 |       </main>
- 980 | 
- 981 |       {currentTab === "arena" && isConfigPanelOpen && activeNodeDetail && (
- 982 |         <div className="fixed top-0 right-0 h-full w-80 bg-[#0c0c0c]/95 border-l border-[#1f1f1f] z-40 flex flex-col justify-between shadow-2xl transition-transform duration-300 right-panel select-none">
- 983 |           <div className="p-5 border-b border-[#1f1f1f] flex justify-between items-center bg-[#0d0d0d]">
- 984 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider">{activeNodeDetail.data.name}</h3>
- 985 |             <button onClick={() => { setIsConfigPanelOpen(false); setSelectedNodeId(null); }} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
- 986 |           </div>
- 987 |           <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
- 988 |             {activeNodeDetail.data.isEchoHouseAgent ? (
- 989 |               <>
- 990 |                 <div className="space-y-1.5">
- 991 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label>
- 992 |                   <input
- 993 |                     type="text"
- 994 |                     value={activeNodeDetail.data.name}
- 995 |                     onChange={(e) => {
- 996 |                       const nameVal = e.target.value;
- 997 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
- 998 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
- 999 |                       updateNodeField(activeNodeDetail.id, {
-1000 |                         name: nameVal,
-1001 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
-1002 |                         objective: nameVal === "You (Self)" || roleVal === "self"
-1003 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
-1004 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
-1005 |                       });
-1006 |                     }}
-1007 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
-1008 |                   />
-1009 |                 </div>
-1010 |                 <div className="space-y-1.5">
-1011 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Role</label>
-1012 |                   <input
-1013 |                     type="text"
-1014 |                     value={activeNodeDetail.data.echohouseRole}
-1015 |                     disabled={activeNodeDetail.data.echohouseRole === "self"}
-1016 |                     onChange={(e) => {
-1017 |                       const nameVal = activeNodeDetail.data.name || "";
-1018 |                       const roleVal = e.target.value;
-1019 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
-1020 |                       updateNodeField(activeNodeDetail.id, {
-1021 |                         echohouseRole: roleVal,
-1022 |                         tag: roleVal.toUpperCase().replace(/\s+/g, '_'),
-1023 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
-1024 |                         objective: `Provide perspective as ${nameVal} (${roleVal}).`
-1025 |                       });
-1026 |                     }}
-1027 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none disabled:opacity-40"
-1028 |                   />
-1029 |                 </div>
-1030 |                 <div className="space-y-1.5">
-1031 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">
-1032 |                     {activeNodeDetail.data.echohouseRole === "self" ? "Your problem in life" : "What do they think about your situation?"}
-1033 |                   </label>
-1034 |                   <textarea
-1035 |                     value={activeNodeDetail.data.echohouseProblem}
-1036 |                     onChange={(e) => {
-1037 |                       const nameVal = activeNodeDetail.data.name || "";
-1038 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
-1039 |                       const probVal = e.target.value;
-1040 |                       updateNodeField(activeNodeDetail.id, {
-1041 |                         echohouseProblem: probVal,
-1042 |                         systemPrompt: roleVal === "self"
-1043 |                           ? "You are the user themselves, experiencing this problem from the inside."
-1044 |                           : `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
-1045 |                         objective: roleVal === "self"
-1046 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
-1047 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
-1048 |                       });
-1049 |                     }}
-1050 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[100px] resize-none leading-relaxed"
-1051 |                   />
-1052 |                 </div>
-1053 |               </>
-1054 |             ) : (
-1055 |               <>
-1056 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label><input type="text" value={activeNodeDetail.data.name} onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none" /></div>
-1057 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label><textarea value={activeNodeDetail.data.systemPrompt} onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed" /></div>
-1058 |               </>
-1059 |             )}
-1060 |           </div>
-1061 |         </div>
-1062 |       )}
-1063 | 
-1064 |       <AnimatePresence>
-1065 |         {isSecretOpen && <APIKeysModal isOpen={isSecretOpen} onClose={() => setIsSecretOpen(false)} />}
-1066 |         
-1067 |         {pendingApproval && (
-1068 |           <div className="fixed bottom-6 right-6 w-96 bg-[#0d0d0d] border border-amber-500/50 shadow-[0_0_50px_rgba(245,158,11,0.15)] rounded-2xl p-5 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300 select-none">
-1069 |             <div className="flex gap-4 items-start">
-1070 |               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 shrink-0"><Sliders className="w-5 h-5 animate-pulse" /></div>
-1071 |               <div className="flex-1 space-y-2">
-1072 |                 <h4 className="text-xs font-bold text-white">&apos;{(nodes.find(n => n.id === pendingApproval.nodeId)?.data as any)?.name}&apos; wants to use <span className="text-amber-400 font-mono">[{pendingApproval.toolName}]</span></h4>
-1073 |                 <p className="text-[10px] text-neutral-400 leading-normal">Action: <span className="text-white font-semibold">{pendingApproval.action}</span> — {pendingApproval.detail}</p>
-1074 |                 <div className="pt-3 flex gap-2">
-1075 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "approve", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Approve</button>
-1076 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "deny", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="px-4 py-2 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Deny</button>
-1077 |                 </div>
-1078 |               </div>
-1079 |             </div>
-1080 |           </div>
-1081 |         )}
-1082 |       </AnimatePresence>
-1083 |     </div>
-1084 |   );
-1085 | }
-1086 |
+ 893 |                                     </div>
+ 894 |                                   ) : (
+ 895 |                                     <div className={`w-full text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'rounded-2xl px-4 py-3 bg-neutral-900' : 'px-1 py-2'}`}>
+ 896 |                                       {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
+ 897 |                                       {msg.text && (!isOrchestrating || msgIdx !== chatMessages.length - 1) && (
+ 898 |                                         <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
+ 899 |                                           <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
+ 900 |                                             {copiedMsgId === msg.id ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400 font-medium">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
+ 901 |                                           </button>
+ 902 |                                           {!isEchoHouseMode && msgIdx === chatMessages.length - 1 && !isOrchestrating && (
+ 903 |                                             <button onClick={handleRegenerate} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
+ 904 |                                               <RefreshCw className="w-3.5 h-3.5" />
+ 905 |                                               <span>Regenerate</span>
+ 906 |                                             </button>
+ 907 |                                           )}
+ 908 |                                         </div>
+ 909 |                                       )}
+ 910 |                                     </div>
+ 911 |                                   )}
+ 912 |                                   {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && nodes.length > 0 && (
+ 913 |                                     <div className="flex gap-3 mt-4 select-none">
+ 914 |                                       <button onClick={() => setCurrentTab("arena")} className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max">
+ 915 |                                         <GitFork className="w-3.5 h-3.5 text-cyan-400" /><span>See Agent Flow</span>
+ 916 |                                       </button>
+ 917 |                                       {!isEchoHouseMode && useWorkflowStore.getState().executionState === "paused" && (
+ 918 |                                         <button
+ 919 |                                           onClick={async () => {
+ 920 |                                             setExecutionState("running");
+ 921 |                                             await useWorkflowStore.getState().triggerCustomExecution();
+ 922 |                                           }}
+ 923 |                                           className="px-4 py-2 bg-white hover:bg-neutral-200 rounded-xl text-xs font-bold text-black transition-all flex items-center gap-1.5 cursor-pointer max-w-max"
+ 924 |                                         >
+ 925 |                                           Proceed
+ 926 |                                         </button>
+ 927 |                                       )}
+ 928 |                                     </div>
+ 929 |                                   )}
+ 930 |                                 </div>
+ 931 |                               )}
+ 932 |                             </motion.div>
+ 933 |                           ))
+ 934 |                         )}
+ 935 |                         {/* Live agent thinking indicator */}
+ 936 |                         {isThinking && chatMessages[chatMessages.length - 1]?.sender !== 'ai' && (
+ 937 |                           <motion.div 
+ 938 |                             initial={{ opacity: 0, y: 8 }} 
+ 939 |                             animate={{ opacity: 1, y: 0 }} 
+ 940 |                             className="flex justify-start"
+ 941 |                           >
+ 942 |                             <div className="flex items-center gap-2 px-4 py-3 bg-neutral-950 border border-[#1f1f1f] rounded-2xl max-w-[200px]">
+ 943 |                               <div className="flex gap-1">
+ 944 |                                 {[0, 1, 2].map(i => (
+ 945 |                                   <div key={i} className="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+ 946 |                                 ))}
+ 947 |                               </div>
+ 948 |                               <ThinkingText prefix="thinking" className="text-[10px] text-neutral-500 font-mono" />
+ 949 |                             </div>
+ 950 |                           </motion.div>
+ 951 |                         )}
+ 952 |                         <div ref={chatEndRef} />
+ 953 |                       </div>
+ 954 |                     )}
+ 955 |                   </div>
+ 956 |                   <div className="px-4 sm:px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
+ 957 |                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
+ 958 |                       <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
+ 959 |                       <textarea ref={textareaRef} rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery); } }} placeholder={isOrchestrating ? "Streaming..." : isEchoHouseMode ? "What is your problem in life?" : "Ask a follow-up..."} disabled={isOrchestrating} className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar" />
+ 960 |                       <div className="flex items-center gap-2 shrink-0">
+ 961 |                         <ModeSelector />
+ 962 |                         {isOrchestrating ? (
+ 963 |                           <button onClick={cancelOrchestration} className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all cursor-pointer"><Square className="w-3.5 h-3.5 text-white fill-white" /></button>
+ 964 |                         ) : (
+ 965 |                           <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim() || isThinking} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
+ 966 |                         )}
+ 967 |                       </div>
+ 968 |                     </div>
+ 969 |                   </div>
+ 970 |                 </div>
+ 971 |               )}
+ 972 |               {currentTab === "arena" && (
+ 973 |                 <div className="flex-1 relative overflow-hidden bg-[#000000] flex">
+ 974 |                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#0d0d0d]/90 border border-[#1f1f1f] rounded-full px-4 py-2 backdrop-blur-md shadow-xl pointer-events-auto">
+ 975 |                     <button onClick={() => setCurrentTab("chat")} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-mono"><ChevronLeft className="w-3.5 h-3.5" /> Back to Chat</button>
+ 976 |                   </div>
+ 977 |                   <FlowArena onProceed={() => setCurrentTab("chat")} />
+ 978 |                 </div>
+ 979 |               )}
+ 980 |             </div>
+ 981 |           )}
+ 982 |         </div>
+ 983 |       </main>
+ 984 | 
+ 985 |       {currentTab === "arena" && isConfigPanelOpen && activeNodeDetail && (
+ 986 |         <div className="fixed top-0 right-0 h-full w-80 bg-[#0c0c0c]/95 border-l border-[#1f1f1f] z-40 flex flex-col justify-between shadow-2xl transition-transform duration-300 right-panel select-none">
+ 987 |           <div className="p-5 border-b border-[#1f1f1f] flex justify-between items-center bg-[#0d0d0d]">
+ 988 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider">{activeNodeDetail.data.name}</h3>
+ 989 |             <button onClick={() => { setIsConfigPanelOpen(false); setSelectedNodeId(null); }} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
+ 990 |           </div>
+ 991 |           <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
+ 992 |             {activeNodeDetail.data.isEchoHouseAgent ? (
+ 993 |               <>
+ 994 |                 <div className="space-y-1.5">
+ 995 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label>
+ 996 |                   <input
+ 997 |                     type="text"
+ 998 |                     value={activeNodeDetail.data.name}
+ 999 |                     onChange={(e) => {
+1000 |                       const nameVal = e.target.value;
+1001 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
+1002 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
+1003 |                       updateNodeField(activeNodeDetail.id, {
+1004 |                         name: nameVal,
+1005 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+1006 |                         objective: nameVal === "You (Self)" || roleVal === "self"
+1007 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
+1008 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
+1009 |                       });
+1010 |                     }}
+1011 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
+1012 |                   />
+1013 |                 </div>
+1014 |                 <div className="space-y-1.5">
+1015 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Role</label>
+1016 |                   <input
+1017 |                     type="text"
+1018 |                     value={activeNodeDetail.data.echohouseRole}
+1019 |                     disabled={activeNodeDetail.data.echohouseRole === "self"}
+1020 |                     onChange={(e) => {
+1021 |                       const nameVal = activeNodeDetail.data.name || "";
+1022 |                       const roleVal = e.target.value;
+1023 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
+1024 |                       updateNodeField(activeNodeDetail.id, {
+1025 |                         echohouseRole: roleVal,
+1026 |                         tag: roleVal.toUpperCase().replace(/\s+/g, '_'),
+1027 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+1028 |                         objective: `Provide perspective as ${nameVal} (${roleVal}).`
+1029 |                       });
+1030 |                     }}
+1031 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none disabled:opacity-40"
+1032 |                   />
+1033 |                 </div>
+1034 |                 <div className="space-y-1.5">
+1035 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">
+1036 |                     {activeNodeDetail.data.echohouseRole === "self" ? "Your problem in life" : "What do they think about your situation?"}
+1037 |                   </label>
+1038 |                   <textarea
+1039 |                     value={activeNodeDetail.data.echohouseProblem}
+1040 |                     onChange={(e) => {
+1041 |                       const nameVal = activeNodeDetail.data.name || "";
+1042 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
+1043 |                       const probVal = e.target.value;
+1044 |                       updateNodeField(activeNodeDetail.id, {
+1045 |                         echohouseProblem: probVal,
+1046 |                         systemPrompt: roleVal === "self"
+1047 |                           ? "You are the user themselves, experiencing this problem from the inside."
+1048 |                           : `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+1049 |                         objective: roleVal === "self"
+1050 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
+1051 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
+1052 |                       });
+1053 |                     }}
+1054 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[100px] resize-none leading-relaxed"
+1055 |                   />
+1056 |                 </div>
+1057 |               </>
+1058 |             ) : (
+1059 |               <>
+1060 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label><input type="text" value={activeNodeDetail.data.name} onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none" /></div>
+1061 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label><textarea value={activeNodeDetail.data.systemPrompt} onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed" /></div>
+1062 |               </>
+1063 |             )}
+1064 |           </div>
+1065 |         </div>
+1066 |       )}
+1067 | 
+1068 |       <AnimatePresence>
+1069 |         {isSecretOpen && <APIKeysModal isOpen={isSecretOpen} onClose={() => setIsSecretOpen(false)} />}
+1070 |         
+1071 |         {pendingApproval && (
+1072 |           <div className="fixed bottom-6 right-6 w-96 bg-[#0d0d0d] border border-amber-500/50 shadow-[0_0_50px_rgba(245,158,11,0.15)] rounded-2xl p-5 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300 select-none">
+1073 |             <div className="flex gap-4 items-start">
+1074 |               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 shrink-0"><Sliders className="w-5 h-5 animate-pulse" /></div>
+1075 |               <div className="flex-1 space-y-2">
+1076 |                 <h4 className="text-xs font-bold text-white">&apos;{(nodes.find(n => n.id === pendingApproval.nodeId)?.data as any)?.name}&apos; wants to use <span className="text-amber-400 font-mono">[{pendingApproval.toolName}]</span></h4>
+1077 |                 <p className="text-[10px] text-neutral-400 leading-normal">Action: <span className="text-white font-semibold">{pendingApproval.action}</span> — {pendingApproval.detail}</p>
+1078 |                 <div className="pt-3 flex gap-2">
+1079 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "approve", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Approve</button>
+1080 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "deny", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="px-4 py-2 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Deny</button>
+1081 |                 </div>
+1082 |               </div>
+1083 |             </div>
+1084 |           </div>
+1085 |         )}
+1086 |       </AnimatePresence>
+1087 |     </div>
+1088 |   );
+1089 | }
+1090 |
 ```
 
 ### File: `Frontend/components/edges/CustomEdge.tsx`
@@ -8596,7 +8606,7 @@ SoloSpace/
 
 ### File: `Frontend/components/FlowArena.tsx`
 
-> 627 lines | 24.9 KB
+> 655 lines | 26.3 KB
 
 ```tsx
   1 | import React, { useState, useCallback, useEffect, useRef } from 'react';
@@ -8633,7 +8643,7 @@ SoloSpace/
  32 | const getLayoutedElements = (nodes: Node[], edges: Edge[]) => {
  33 |   const dagreGraph = new dagre.graphlib.Graph();
  34 |   dagreGraph.setDefaultEdgeLabel(() => ({}));
- 35 |   dagreGraph.setGraph({ rankdir: 'LR', nodesep: 200, ranksep: 250 });
+ 35 |   dagreGraph.setGraph({ rankdir: 'LR', nodesep: 150, ranksep: 180 });
  36 | 
  37 |   nodes.forEach((node) => {
  38 |     dagreGraph.setNode(node.id, { width: 256, height: 220 });
@@ -8645,8 +8655,8 @@ SoloSpace/
  44 | 
  45 |   dagre.layout(dagreGraph);
  46 | 
- 47 |   const scaleX = 1.5;
- 48 |   const scaleY = 1.5;
+ 47 |   const scaleX = 1.2;
+ 48 |   const scaleY = 1.2;
  49 | 
  50 |   const layoutedNodes = nodes.map((node) => {
  51 |     const nodeWithPosition = dagreGraph.node(node.id);
@@ -8677,555 +8687,583 @@ SoloSpace/
  76 |   const setSelectedNodeId = useWorkflowStore((s) => s.setSelectedNodeId);
  77 |   const isOrchestrating = useWorkflowStore((s) => s.isOrchestrating);
  78 |   const executionState = useWorkflowStore((s) => s.executionState);
- 79 |   
- 80 |   const isEchoHouseMode = useWorkflowStore((s) => s.activeSessionId ? s.sessions[s.activeSessionId]?.mode === 'echohouse' : false);
- 81 | 
- 82 |   // EchoHouse creation form state
- 83 |   const [isEchoHouseCreateFormOpen, setIsEchoHouseCreateFormOpen] = useState(false);
- 84 |   const [formName, setFormName] = useState("");
- 85 |   const [formRole, setFormRole] = useState("");
- 86 |   const [formProblem, setFormProblem] = useState("");
+ 79 |   const chatMessages = useWorkflowStore((s) => s.chatMessages);
+ 80 |   
+ 81 |   const isEchoHouseMode = useWorkflowStore((s) => s.activeSessionId ? s.sessions[s.activeSessionId]?.mode === 'echohouse' : false);
+ 82 | 
+ 83 |   const lastMsg = chatMessages[chatMessages.length - 1];
+ 84 |   const hasCircularDependencyError = lastMsg && lastMsg.sender === "ai" && lastMsg.text.includes("Circular dependency");
+ 85 | 
+ 86 |   const [showBanner, setShowBanner] = useState(false);
  87 | 
- 88 |   // EchoHouse simulation controls
- 89 |   const [echoRounds, setEchoRounds] = useState(3);
- 90 |   const [echoTone, setEchoTone] = useState<"Realistic" | "Compassionate" | "Confrontational">("Realistic");
- 91 |   const [isControlsOpen, setIsControlsOpen] = useState(false);
- 92 | 
- 93 |   const handleEchoHouseProceed = async () => {
- 94 |     if (onProceed) onProceed();
- 95 |     await useWorkflowStore.getState().triggerEchoHouseSimulation(echoRounds, echoTone.toLowerCase());
- 96 |   };
- 97 | 
- 98 |   const handleNormalProceed = async () => {
- 99 |     if (onProceed) onProceed();
-100 |     
-101 |     const activeSession = useWorkflowStore.getState().sessions[useWorkflowStore.getState().activeSessionId || ""];
-102 |     const mode = activeSession?.mode || "auto";
-103 |     
-104 |     if (mode === "auto") {
-105 |       const chatMessages = useWorkflowStore.getState().chatMessages;
-106 |       const lastUserMsg = chatMessages.findLast(m => m.sender === "user")?.text || "";
-107 |       useWorkflowStore.getState().triggerSteerOrchestration(lastUserMsg, true, "auto");
-108 |     } else if (mode === "custom") {
-109 |       await useWorkflowStore.getState().triggerCustomExecution();
-110 |     }
-111 |   };
-112 | 
-113 |   const handleCreateEchoHousePerson = () => {
-114 |     if (!formName.trim() || !formRole.trim() || !formProblem.trim()) return;
-115 | 
-116 |     const randomId = `echo_agent_${Date.now()}`;
-117 |     const view = getViewport();
-118 |     // Center new node inside view coordinates
-119 |     let x = (-view.x + window.innerWidth / 2 - 120) / view.zoom;
-120 |     let y = (-view.y + window.innerHeight / 2 - 100) / view.zoom;
-121 | 
-122 |     // Avoid collision
-123 |     const NODE_W = 240;
-124 |     const NODE_H = 220;
-125 |     const existingPositions = nodes.map(n => n.position);
-126 |     for (const pos of existingPositions) {
-127 |       if (Math.abs(x - pos.x) < NODE_W && Math.abs(y - pos.y) < NODE_H) {
-128 |         y = pos.y + NODE_H + 40;
-129 |       }
-130 |     }
-131 | 
-132 |     const newNode = {
-133 |       id: randomId,
-134 |       type: 'custom',
-135 |       position: { x: Math.max(50, x), y: Math.max(50, y) },
-136 |       data: {
-137 |         name: formName.trim(),
-138 |         tag: formRole.trim().toUpperCase().replace(/\s+/g, '_'),
-139 |         icon: "science",
-140 |         objective: `Provide perspective as ${formName.trim()} (${formRole.trim()}).`,
-141 |         systemPrompt: `You are ${formName.trim()}, whose role in the user's life is ${formRole.trim()}. From your perspective about their situation: ${formProblem.trim()}`,
-142 |         isEchoHouseAgent: true,
-143 |         echohouseRole: formRole.trim(),
-144 |         echohouseProblem: formProblem.trim(),
-145 |         status: "IDLE" as const,
-146 |         enabled: true,
-147 |         rules: [],
-148 |         dependencies: [],
-149 |         tools: [],
-150 |         toolPermissions: {},
-151 |         temp: 0.8,
-152 |         logic: 70,
-153 |         empathy: 50,
-154 |         priority: 5,
-155 |         toolLogs: [],
-156 |         personality: ""
-157 |       }
-158 |     };
-159 | 
-160 |     addNode(newNode);
-161 |     setFormName("");
-162 |     setFormRole("");
-163 |     setFormProblem("");
-164 |     setIsEchoHouseCreateFormOpen(false);
-165 |     setSelectedNodeId(newNode.id);
-166 |   };
-167 | 
-168 |   const [initialLayoutDone, setInitialLayoutDone] = useState(false);
-169 |   const prevNodeCount = useRef(0);
-170 | 
-171 |   // Context Menu State
-172 |   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: Node | null } | null>(null);
+ 88 |   useEffect(() => {
+ 89 |     if (hasCircularDependencyError && !isOrchestrating) {
+ 90 |       setShowBanner(true);
+ 91 |     } else {
+ 92 |       setShowBanner(false);
+ 93 |     }
+ 94 |   }, [hasCircularDependencyError, isOrchestrating]);
+ 95 | 
+ 96 |   // EchoHouse creation form state
+ 97 |   const [isEchoHouseCreateFormOpen, setIsEchoHouseCreateFormOpen] = useState(false);
+ 98 |   const [formName, setFormName] = useState("");
+ 99 |   const [formRole, setFormRole] = useState("");
+100 |   const [formProblem, setFormProblem] = useState("");
+101 | 
+102 |   // EchoHouse simulation controls
+103 |   const [echoRounds, setEchoRounds] = useState(3);
+104 |   const [echoTone, setEchoTone] = useState<"Realistic" | "Compassionate" | "Confrontational">("Realistic");
+105 |   const [isControlsOpen, setIsControlsOpen] = useState(false);
+106 | 
+107 |   const handleEchoHouseProceed = async () => {
+108 |     if (onProceed) onProceed();
+109 |     await useWorkflowStore.getState().triggerEchoHouseSimulation(echoRounds, echoTone.toLowerCase());
+110 |   };
+111 | 
+112 |   const handleNormalProceed = async () => {
+113 |     if (onProceed) onProceed();
+114 |     
+115 |     const activeSession = useWorkflowStore.getState().sessions[useWorkflowStore.getState().activeSessionId || ""];
+116 |     const mode = activeSession?.mode || "auto";
+117 |     
+118 |     if (mode === "auto") {
+119 |       const chatMessages = useWorkflowStore.getState().chatMessages;
+120 |       const lastUserMsg = chatMessages.findLast(m => m.sender === "user")?.text || "";
+121 |       useWorkflowStore.getState().triggerSteerOrchestration(lastUserMsg, true, "auto");
+122 |     } else if (mode === "custom") {
+123 |       await useWorkflowStore.getState().triggerCustomExecution();
+124 |     }
+125 |   };
+126 | 
+127 |   const handleCreateEchoHousePerson = () => {
+128 |     if (!formName.trim() || !formRole.trim() || !formProblem.trim()) return;
+129 | 
+130 |     const randomId = `echo_agent_${Date.now()}`;
+131 |     const view = getViewport();
+132 |     // Center new node inside view coordinates
+133 |     let x = (-view.x + window.innerWidth / 2 - 120) / view.zoom;
+134 |     let y = (-view.y + window.innerHeight / 2 - 100) / view.zoom;
+135 | 
+136 |     // Avoid collision
+137 |     const NODE_W = 240;
+138 |     const NODE_H = 220;
+139 |     const existingPositions = nodes.map(n => n.position);
+140 |     for (const pos of existingPositions) {
+141 |       if (Math.abs(x - pos.x) < NODE_W && Math.abs(y - pos.y) < NODE_H) {
+142 |         y = pos.y + NODE_H + 40;
+143 |       }
+144 |     }
+145 | 
+146 |     const newNode = {
+147 |       id: randomId,
+148 |       type: 'custom',
+149 |       position: { x: Math.max(50, x), y: Math.max(50, y) },
+150 |       data: {
+151 |         name: formName.trim(),
+152 |         tag: formRole.trim().toUpperCase().replace(/\s+/g, '_'),
+153 |         icon: "science",
+154 |         objective: `Provide perspective as ${formName.trim()} (${formRole.trim()}).`,
+155 |         systemPrompt: `You are ${formName.trim()}, whose role in the user's life is ${formRole.trim()}. From your perspective about their situation: ${formProblem.trim()}`,
+156 |         isEchoHouseAgent: true,
+157 |         echohouseRole: formRole.trim(),
+158 |         echohouseProblem: formProblem.trim(),
+159 |         status: "IDLE" as const,
+160 |         enabled: true,
+161 |         rules: [],
+162 |         dependencies: [],
+163 |         tools: [],
+164 |         toolPermissions: {},
+165 |         temp: 0.8,
+166 |         logic: 70,
+167 |         empathy: 50,
+168 |         priority: 5,
+169 |         toolLogs: [],
+170 |         personality: ""
+171 |       }
+172 |     };
 173 | 
-174 |   // Reconnection state
-175 |   const onReconnect = useCallback((oldEdge: Edge, newConnection: Connection) => {
-176 |     setEdges((eds) => reconnectEdge(oldEdge, newConnection, eds));
-177 |   }, [setEdges]);
-178 | 
-179 |   // Context Menu triggers
-180 |   const onNodeContextMenu = useCallback((event: any, node: Node) => {
-181 |     event.preventDefault();
-182 |     setContextMenu({
-183 |       x: event.clientX,
-184 |       y: event.clientY,
-185 |       node,
-186 |     });
-187 |   }, []);
-188 | 
-189 |   const onPaneContextMenu = useCallback((event: any) => {
-190 |     event.preventDefault();
-191 |     setContextMenu({
-192 |       x: event.clientX,
-193 |       y: event.clientY,
-194 |       node: null,
-195 |     });
-196 |   }, []);
-197 | 
-198 |   const onPaneClick = useCallback(() => {
-199 |     setContextMenu(null);
-200 |   }, []);
-201 | 
-202 |   // Zoom/Viewport Controls
-203 |   const handleZoomIn = () => {
-204 |     zoomIn({ duration: 300 });
-205 |   };
-206 | 
-207 |   const handleZoomOut = () => {
-208 |     zoomOut({ duration: 300 });
-209 |   };
-210 | 
-211 |   const handleResetView = () => {
-212 |     setViewport({ x: 100, y: 50, zoom: 0.9 }, { duration: 400 });
-213 |   };
-214 | 
-215 |   const applyLayout = useCallback(() => {
-216 |     if (nodes.length === 0) return;
-217 |     const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
-218 |     setNodes(layoutedNodes);
-219 |   }, [nodes, edges, setNodes]);
+174 |     addNode(newNode);
+175 |     setFormName("");
+176 |     setFormRole("");
+177 |     setFormProblem("");
+178 |     setIsEchoHouseCreateFormOpen(false);
+179 |     setSelectedNodeId(newNode.id);
+180 |   };
+181 | 
+182 |   const [initialLayoutDone, setInitialLayoutDone] = useState(false);
+183 |   const prevNodeCount = useRef(0);
+184 | 
+185 |   // Context Menu State
+186 |   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: Node | null } | null>(null);
+187 | 
+188 |   // Reconnection state
+189 |   const onReconnect = useCallback((oldEdge: Edge, newConnection: Connection) => {
+190 |     setEdges((eds) => reconnectEdge(oldEdge, newConnection, eds));
+191 |   }, [setEdges]);
+192 | 
+193 |   // Context Menu triggers
+194 |   const onNodeContextMenu = useCallback((event: any, node: Node) => {
+195 |     event.preventDefault();
+196 |     setContextMenu({
+197 |       x: event.clientX,
+198 |       y: event.clientY,
+199 |       node,
+200 |     });
+201 |   }, []);
+202 | 
+203 |   const onPaneContextMenu = useCallback((event: any) => {
+204 |     event.preventDefault();
+205 |     setContextMenu({
+206 |       x: event.clientX,
+207 |       y: event.clientY,
+208 |       node: null,
+209 |     });
+210 |   }, []);
+211 | 
+212 |   const onPaneClick = useCallback(() => {
+213 |     setContextMenu(null);
+214 |   }, []);
+215 | 
+216 |   // Zoom/Viewport Controls
+217 |   const handleZoomIn = () => {
+218 |     zoomIn({ duration: 300 });
+219 |   };
 220 | 
-221 |   // Layout nodes once initially when loaded and whenever node count increases
-222 |   useEffect(() => {
-223 |     if (nodes.length > prevNodeCount.current && nodes.length > 0) {
-224 |       const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
-225 |       setNodes(layoutedNodes);
-226 |       setInitialLayoutDone(true);
-227 |     }
-228 |     prevNodeCount.current = nodes.length;
-229 |   }, [nodes, edges, setNodes]);
-230 | 
-231 |   // Reset layout state if node length changes back to 0 (new chat)
-232 |   useEffect(() => {
-233 |     if (nodes.length === 0) {
-234 |       setInitialLayoutDone(false);
-235 |       prevNodeCount.current = 0;
-236 |     }
-237 |   }, [nodes.length]);
-238 | 
-239 |   // Auto-fit viewport on node count changes
-240 |   useEffect(() => {
-241 |     if (nodes.length > 0) {
-242 |       const timer = setTimeout(() => {
-243 |         fitView({ padding: 0.3, duration: 400 });
-244 |       }, 300);
-245 |       return () => clearTimeout(timer);
-246 |     }
-247 |   }, [nodes.length, fitView]);
-248 | 
-249 |   const handleAddAgentNode = () => {
-250 |     const randomId = `custom_agent_${Date.now().toString().slice(-4)}`;
-251 |     const view = getViewport();
-252 |     // Center new node inside view coordinates
-253 |     let x = (-view.x + window.innerWidth / 2 - 120) / view.zoom;
-254 |     let y = (-view.y + window.innerHeight / 2 - 100) / view.zoom;
-255 | 
-256 |     // Avoid collision
-257 |     const NODE_W = 240;
-258 |     const NODE_H = 220;
-259 |     const existingPositions = nodes.map(n => n.position);
-260 |     for (const pos of existingPositions) {
-261 |       if (Math.abs(x - pos.x) < NODE_W && Math.abs(y - pos.y) < NODE_H) {
-262 |         y = pos.y + NODE_H + 40;
-263 |       }
-264 |     }
-265 | 
-266 |     const newNode = {
-267 |       id: randomId,
-268 |       type: 'custom',
-269 |       position: { x: Math.max(50, x), y: Math.max(50, y) },
-270 |       data: {
-271 |         name: "Custom Agent Node",
-272 |         tag: "USER_CUSTOM_NODE",
-273 |         status: "IDLE" as const,
-274 |         metricLabel: "Tasks Completed",
-275 |         metricVal: "0",
-276 |         icon: "science",
-277 |         objective: "Enter agent goals...",
-278 |         personality: "Pragmatic, logical, responsive",
-279 |         systemPrompt: "You are a custom assistant. Fulfill user demands precisely.",
-280 |         rules: ["Verify actions before launching"],
-281 |         tools: ["Web Search"],
-282 |         temp: 0.5,
-283 |         logic: 80,
-284 |         empathy: 50,
-285 |         context: "128k",
-286 |         enabled: true,
-287 |         priority: 5,
-288 |         toolPermissions: {
-289 |           "Web Search": "ALLOWED" as const
-290 |         },
-291 |         toolLogs: []
-292 |       }
-293 |     };
-294 |     addNode(newNode);
-295 |     setSelectedNodeId(newNode.id);
-296 |   };
-297 | 
-298 |   // Node styles for MiniMap representation
-299 |   const getMiniMapNodeColor = (node: Node) => {
-300 |     if (node.type === 'groupNode') return 'rgba(255, 255, 255, 0.03)';
-301 |     const data = node.data as CanvasNodeData;
-302 |     if (data && data.enabled === false) return '#262626';
-303 |     if (data && (data.status === 'ACTIVE' || data.status === 'PROCESSING')) return '#06b6d4';
-304 |     return '#404040';
-305 |   };
-306 | 
-307 |   return (
-308 |     <div className="w-full h-full flex-1 relative bg-black">
-309 |       <ReactFlow
-310 |         nodes={nodes}
-311 |         edges={edges}
-312 |         onNodesChange={onNodesChange}
-313 |         onEdgesChange={onEdgesChange}
-314 |         onConnect={onConnect}
-315 |         onReconnect={onReconnect}
-316 |         nodeTypes={nodeTypes}
-317 |         edgeTypes={edgeTypes}
-318 |         onNodeContextMenu={onNodeContextMenu}
-319 |         onPaneContextMenu={onPaneContextMenu}
-320 |         onPaneClick={onPaneClick}
-321 |         snapToGrid={true}
-322 |         snapGrid={[15, 15]}
-323 |         fitViewOptions={{ padding: 0.3 }}
-324 |         className="flow-arena-editor"
-325 |         minZoom={0.2}
-326 |         maxZoom={2.5}
-327 |         defaultViewport={{ x: 100, y: 50, zoom: 0.9 }}
-328 |       >
-329 |         {/* Subtle grid background dots */}
-330 |         <Background 
-331 |           variant={BackgroundVariant.Dots} 
-332 |           color="rgba(255, 255, 255, 0.06)" 
-333 |           gap={24} 
-334 |           size={1}
-335 |         />
-336 | 
-337 |         {/* Custom Minimap Overlay */}
-338 |         <MiniMap 
-339 |           zoomable 
-340 |           pannable 
-341 |           nodeColor={getMiniMapNodeColor}
-342 |           nodeStrokeWidth={3}
-343 |           nodeBorderRadius={8}
-344 |           maskColor="rgba(0, 0, 0, 0.65)"
-345 |           className="!right-4 !top-4"
-346 |         />
-347 | 
-348 |         {/* Custom Floating Zoom & Node controls */}
-349 |         <Panel position="bottom-left" className="!left-4 !bottom-14 flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-1 rounded-xl z-20 shadow-2xl">
-350 |           <button 
-351 |             onClick={handleZoomIn}
-352 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors cursor-pointer"
-353 |             title="Zoom In"
-354 |           >
-355 |             <Plus className="w-3.5 h-3.5" />
-356 |           </button>
-357 | 
-358 |           <button 
-359 |             onClick={handleZoomOut}
-360 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors cursor-pointer"
-361 |             title="Zoom Out"
-362 |           >
-363 |             <Minus className="w-3.5 h-3.5" />
-364 |           </button>
-365 | 
-366 |           <button 
-367 |             onClick={handleResetView}
-368 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 cursor-pointer"
-369 |             title="Reset Viewport"
-370 |           >
-371 |             <Maximize className="w-3.5 h-3.5" />
-372 |           </button>
+221 |   const handleZoomOut = () => {
+222 |     zoomOut({ duration: 300 });
+223 |   };
+224 | 
+225 |   const handleResetView = () => {
+226 |     setViewport({ x: 100, y: 50, zoom: 0.9 }, { duration: 400 });
+227 |   };
+228 | 
+229 |   const applyLayout = useCallback(() => {
+230 |     if (nodes.length === 0 || isEchoHouseMode) return;
+231 |     const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
+232 |     setNodes(layoutedNodes);
+233 |   }, [nodes, edges, setNodes, isEchoHouseMode]);
+234 | 
+235 |   // Layout nodes once initially when loaded and whenever node count increases
+236 |   useEffect(() => {
+237 |     if (isEchoHouseMode) return; // Skip auto-layout for EchoHouse mode
+238 |     if (nodes.length > prevNodeCount.current && nodes.length > 0) {
+239 |       const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
+240 |       setNodes(layoutedNodes);
+241 |       setInitialLayoutDone(true);
+242 |     }
+243 |     prevNodeCount.current = nodes.length;
+244 |   }, [nodes, edges, setNodes, isEchoHouseMode]);
+245 | 
+246 |   // Reset layout state if node length changes back to 0 (new chat)
+247 |   useEffect(() => {
+248 |     if (nodes.length === 0) {
+249 |       setInitialLayoutDone(false);
+250 |       prevNodeCount.current = 0;
+251 |     }
+252 |   }, [nodes.length]);
+253 | 
+254 |   // Auto-fit viewport on node count changes
+255 |   useEffect(() => {
+256 |     if (nodes.length > 0) {
+257 |       const timer = setTimeout(() => {
+258 |         fitView({ padding: 0.3, duration: 400 });
+259 |       }, 300);
+260 |       return () => clearTimeout(timer);
+261 |     }
+262 |   }, [nodes.length, fitView]);
+263 | 
+264 |   const handleAddAgentNode = () => {
+265 |     const randomId = `custom_agent_${Date.now().toString().slice(-4)}`;
+266 |     const view = getViewport();
+267 |     // Center new node inside view coordinates
+268 |     let x = (-view.x + window.innerWidth / 2 - 120) / view.zoom;
+269 |     let y = (-view.y + window.innerHeight / 2 - 100) / view.zoom;
+270 | 
+271 |     // Avoid collision
+272 |     const NODE_W = 240;
+273 |     const NODE_H = 220;
+274 |     const existingPositions = nodes.map(n => n.position);
+275 |     for (const pos of existingPositions) {
+276 |       if (Math.abs(x - pos.x) < NODE_W && Math.abs(y - pos.y) < NODE_H) {
+277 |         y = pos.y + NODE_H + 40;
+278 |       }
+279 |     }
+280 | 
+281 |     const newNode = {
+282 |       id: randomId,
+283 |       type: 'custom',
+284 |       position: { x: Math.max(50, x), y: Math.max(50, y) },
+285 |       data: {
+286 |         name: "Custom Agent Node",
+287 |         tag: "USER_CUSTOM_NODE",
+288 |         status: "IDLE" as const,
+289 |         metricLabel: "Tasks Completed",
+290 |         metricVal: "0",
+291 |         icon: "science",
+292 |         objective: "Enter agent goals...",
+293 |         personality: "Pragmatic, logical, responsive",
+294 |         systemPrompt: "You are a custom assistant. Fulfill user demands precisely.",
+295 |         rules: ["Verify actions before launching"],
+296 |         tools: ["Web Search"],
+297 |         temp: 0.5,
+298 |         logic: 80,
+299 |         empathy: 50,
+300 |         context: "128k",
+301 |         enabled: true,
+302 |         priority: 5,
+303 |         toolPermissions: {
+304 |           "Web Search": "ALLOWED" as const
+305 |         },
+306 |         toolLogs: []
+307 |       }
+308 |     };
+309 |     addNode(newNode);
+310 |     setSelectedNodeId(newNode.id);
+311 |   };
+312 | 
+313 |   // Node styles for MiniMap representation
+314 |   const getMiniMapNodeColor = (node: Node) => {
+315 |     if (node.type === 'groupNode') return 'rgba(255, 255, 255, 0.03)';
+316 |     const data = node.data as CanvasNodeData;
+317 |     if (data && data.enabled === false) return '#262626';
+318 |     if (data && (data.status === 'ACTIVE' || data.status === 'PROCESSING')) return '#06b6d4';
+319 |     return '#404040';
+320 |   };
+321 | 
+322 |   return (
+323 |     <div className="w-full h-full flex-1 relative bg-black">
+324 |       {showBanner && (
+325 |         <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-red-950/95 border border-red-800 text-red-200 rounded-full px-4 py-2 text-xs backdrop-blur-md shadow-xl max-w-lg text-center select-none font-sans">
+326 |           <span>⚠️ Your agent graph has a loop — check the Flow tab and remove any arrows that point backwards.</span>
+327 |           <button
+328 |             onClick={() => setShowBanner(false)}
+329 |             className="ml-2 hover:text-white transition-colors cursor-pointer text-red-400 font-bold font-mono text-[11px]"
+330 |           >
+331 |             ✕
+332 |           </button>
+333 |         </div>
+334 |       )}
+335 |       <ReactFlow
+336 |         nodes={nodes}
+337 |         edges={edges}
+338 |         onNodesChange={onNodesChange}
+339 |         onEdgesChange={onEdgesChange}
+340 |         onConnect={onConnect}
+341 |         onReconnect={onReconnect}
+342 |         nodeTypes={nodeTypes}
+343 |         edgeTypes={edgeTypes}
+344 |         onNodeContextMenu={onNodeContextMenu}
+345 |         onPaneContextMenu={onPaneContextMenu}
+346 |         onPaneClick={onPaneClick}
+347 |         snapToGrid={true}
+348 |         snapGrid={[15, 15]}
+349 |         fitViewOptions={{ padding: 0.3 }}
+350 |         className="flow-arena-editor"
+351 |         minZoom={0.2}
+352 |         maxZoom={2.5}
+353 |         defaultViewport={{ x: 100, y: 50, zoom: 0.9 }}
+354 |       >
+355 |         {/* Subtle grid background dots */}
+356 |         <Background 
+357 |           variant={BackgroundVariant.Dots} 
+358 |           color="rgba(255, 255, 255, 0.06)" 
+359 |           gap={24} 
+360 |           size={1}
+361 |         />
+362 | 
+363 |         {/* Custom Minimap Overlay */}
+364 |         <MiniMap 
+365 |           zoomable 
+366 |           pannable 
+367 |           nodeColor={getMiniMapNodeColor}
+368 |           nodeStrokeWidth={3}
+369 |           nodeBorderRadius={8}
+370 |           maskColor="rgba(0, 0, 0, 0.65)"
+371 |           className="!right-4 !top-4"
+372 |         />
 373 | 
-374 |           <button 
-375 |             onClick={applyLayout}
-376 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 cursor-pointer"
-377 |             title="Auto Layout Graph"
-378 |           >
-379 |             <LayoutGrid className="w-3.5 h-3.5" />
-380 |           </button>
-381 | 
-382 |           <button 
-383 |             onClick={isEchoHouseMode ? () => setIsEchoHouseCreateFormOpen(true) : handleAddAgentNode}
-384 |             className="p-2 text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 flex items-center gap-1 text-[10px] cursor-pointer"
-385 |             title={isEchoHouseMode ? "Add Person" : "Add Custom Agent Node"}
-386 |           >
-387 |             <PlusCircle className="w-3.5 h-3.5 text-white" />
-388 |             <span className="font-semibold pr-1">Node</span>
-389 |           </button>
-390 | 
-391 |           <button
-392 |             onClick={() => {
-393 |               const state = useWorkflowStore.getState();
-394 |               const exportData = {
-395 |                 nodes: state.nodes,
-396 |                 edges: state.edges,
-397 |                 version: "1.0",
-398 |                 exported_at: new Date().toISOString(),
-399 |                 session_title: state.activeSessionId ? state.sessions[state.activeSessionId]?.title : "Solospace Workflow"
-400 |               };
-401 |               const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-402 |               const url = URL.createObjectURL(blob);
-403 |               const a = document.createElement('a');
-404 |               a.href = url;
-405 |               a.download = `solospace-workflow-${Date.now()}.json`;
-406 |               a.click();
-407 |               URL.revokeObjectURL(url);
-408 |             }}
-409 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 flex items-center gap-1 text-[10px] cursor-pointer"
-410 |             title="Export Workflow as JSON"
-411 |           >
-412 |             <span className="text-[10px] font-mono pr-1">↓JSON</span>
-413 |           </button>
-414 | 
-415 |           <button
-416 |             onClick={() => {
-417 |               const input = document.createElement('input');
-418 |               input.type = 'file';
-419 |               input.accept = '.json';
-420 |               input.onchange = (e: any) => {
-421 |                 const file = e.target.files?.[0];
-422 |                 if (!file) return;
-423 |                 const reader = new FileReader();
-424 |                 reader.onload = (ev) => {
-425 |                   try {
-426 |                     const data = JSON.parse(ev.target?.result as string);
-427 |                     if (data.nodes && data.edges) {
-428 |                       useWorkflowStore.getState().setNodes(data.nodes);
-429 |                       useWorkflowStore.getState().setEdges(data.edges);
-430 |                     }
-431 |                   } catch {
-432 |                     alert('Invalid workflow file.');
-433 |                   }
-434 |                 };
-435 |                 reader.readAsText(file);
-436 |               };
-437 |               input.click();
-438 |             }}
-439 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 flex items-center gap-1 text-[10px] cursor-pointer"
-440 |             title="Import Workflow from JSON"
-441 |           >
-442 |             <span className="text-[10px] font-mono pr-1">↑JSON</span>
-443 |           </button>
-444 |         </Panel>
-445 | 
-446 |         {/* Right-click Context Menu */}
-447 |         {contextMenu && (
-448 |           <ContextMenu
-449 |             x={contextMenu.x}
-450 |             y={contextMenu.y}
-451 |             node={contextMenu.node}
-452 |             onClose={() => setContextMenu(null)}
-453 |           />
-454 |         )}
-455 | 
-456 | 
-457 |         {/* EchoHouse instructional panel moved to the top-left panel */}
-458 | 
-459 |         {/* Bottom-center Proceed Buttons */}
-460 |         {isEchoHouseMode ? (
-461 |           nodes.filter(n => (n.data as any).isEchoHouseAgent && (n.data as any).echohouseRole !== "self").length > 0 && (
-462 |             <Panel position="bottom-center" className="!bottom-14 z-20">
-463 |               <button
-464 |                 onClick={handleEchoHouseProceed}
-465 |                 disabled={isOrchestrating}
-466 |                 className="px-6 py-2.5 bg-white text-black font-bold text-xs rounded-full shadow-2xl hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2 select-none"
-467 |               >
-468 |                 {isOrchestrating ? (
-469 |                   <>
-470 |                     <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
-471 |                     <span>Running...</span>
-472 |                   </>
-473 |                 ) : (
-474 |                   <span>Proceed</span>
-475 |                 )}
-476 |               </button>
-477 |             </Panel>
-478 |           )
-479 |         ) : (
-480 |           nodes.length > 0 && executionState !== "running" && !isOrchestrating && (
-481 |             <Panel position="bottom-center" className="!bottom-14 z-20">
-482 |               <button
-483 |                 onClick={handleNormalProceed}
-484 |                 disabled={isOrchestrating}
-485 |                 className="px-6 py-2.5 bg-white text-black font-bold text-xs rounded-full shadow-2xl hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2 select-none"
-486 |               >
-487 |                 {isOrchestrating ? (
-488 |                   <>
-489 |                     <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
-490 |                     <span>Running...</span>
-491 |                   </>
-492 |                 ) : (
-493 |                   <span>Proceed</span>
-494 |                 )}
-495 |               </button>
-496 |             </Panel>
-497 |           )
-498 |         )}
-499 | 
-500 |         {/* Persistent legend and EchoHouse instructions — top left */}
-501 |         <Panel position="top-left" className="!left-4 !top-16 select-none z-20 flex flex-col gap-2.5">
-502 |           <div className="bg-[#0d0d0d]/80 border border-[#1f1f1f] rounded-lg p-2.5 backdrop-blur-md shadow-xl text-[9px] font-mono text-neutral-600 space-y-1.5 w-64">
-503 |             <div className="flex items-center gap-2">
-504 |               <span className="w-2.5 h-2.5 rounded-full bg-black border-2 border-rose-500 shrink-0" />
-505 |               <span>Input (data in)</span>
-506 |             </div>
-507 |             <div className="flex items-center gap-2">
-508 |               <span className="w-2.5 h-2.5 rounded-full bg-black border-2 border-emerald-500 shrink-0" />
-509 |               <span>Output (data out)</span>
-510 |             </div>
-511 |             <div className="flex items-center gap-2">
-512 |               <span className="w-3.5 h-0.5 bg-cyan-500 rounded shrink-0" />
-513 |               <span>Dependency wire</span>
-514 |             </div>
-515 |             <div className="flex items-center gap-2">
-516 |               <span className="text-[8px] leading-none">✥</span>
-517 |               <span>Drag card to reposition</span>
-518 |             </div>
-519 |           </div>
-520 | 
-521 |           {isEchoHouseMode && (
-522 |             <div className="bg-[#0d0d0d]/80 border border-[#1f1f1f] rounded-lg p-2.5 backdrop-blur-md shadow-xl space-y-3 w-64">
-523 |               <p className="text-xs text-neutral-300 leading-relaxed font-sans">
-524 |                 Add the people in your life — give each one a name, their role, and what they think about your situation. Then click Proceed to begin the simulation.
-525 |               </p>
-526 |               <div className="border-t border-[#1f1f1f] pt-3">
-527 |                 <button
-528 |                   onClick={() => setIsControlsOpen(!isControlsOpen)}
-529 |                   className="w-full flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-neutral-500 hover:text-neutral-300 transition-colors cursor-pointer"
-530 |                 >
-531 |                   <span>Simulation Settings</span>
-532 |                   <span className={`transition-transform duration-200 ${isControlsOpen ? 'rotate-180' : ''}`}>&#8964;</span>
-533 |                 </button>
-534 |                 {isControlsOpen && (
-535 |                   <div className="mt-3 space-y-3">
-536 |                     <div className="space-y-1.5">
-537 |                       <span className="text-[9px] font-mono uppercase tracking-wider text-neutral-600 font-bold block">Rounds</span>
-538 |                       <div className="flex gap-1">
-539 |                         {[1, 2, 3, 4, 5].map((n) => (
-540 |                           <button
-541 |                             key={n}
-542 |                             onClick={() => setEchoRounds(n)}
-543 |                             className={`w-8 h-8 rounded-lg text-xs font-semibold font-mono transition-all cursor-pointer ${
-544 |                               echoRounds === n ? 'bg-white text-black' : 'bg-neutral-900 text-neutral-400 hover:text-white border border-[#1f1f1f]'
-545 |                             }`}
-546 |                           >
-547 |                             {n}
-548 |                           </button>
-549 |                         ))}
-550 |                       </div>
-551 |                     </div>
-552 |                     <div className="space-y-1.5">
-553 |                       <span className="text-[9px] font-mono uppercase tracking-wider text-neutral-600 font-bold block">Tone</span>
-554 |                       <div className="flex gap-1 flex-wrap">
-555 |                         {(['Realistic', 'Compassionate', 'Confrontational'] as const).map((t) => (
-556 |                           <button
-557 |                             key={t}
-558 |                             onClick={() => setEchoTone(t)}
-559 |                             className={`px-2.5 py-1 rounded-lg text-[10px] font-mono transition-all cursor-pointer ${
-560 |                               echoTone === t ? 'bg-white text-black font-semibold' : 'bg-neutral-900 text-neutral-400 hover:text-white border border-[#1f1f1f]'
-561 |                             }`}
-562 |                           >
-563 |                             {t}
-564 |                           </button>
-565 |                         ))}
-566 |                       </div>
-567 |                     </div>
-568 |                   </div>
-569 |                 )}
-570 |               </div>
-571 |             </div>
-572 |           )}
-573 |         </Panel>
-574 |       </ReactFlow>
-575 | 
-576 |       {/* EchoHouse Inline Creation Form */}
-577 |       {isEchoHouseCreateFormOpen && isEchoHouseMode && (
-578 |         <div className="absolute bottom-28 left-4 w-72 bg-[#0c0c0c]/95 border border-[#1f1f1f] rounded-xl p-4 shadow-2xl z-30 space-y-3 select-none">
-579 |           <div className="flex justify-between items-center pb-2 border-b border-[#1f1f1f]">
-580 |             <span className="text-xs font-bold text-white uppercase tracking-wider">Add Person</span>
-581 |             <button onClick={() => setIsEchoHouseCreateFormOpen(false)} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-3.5 h-3.5" /></button>
-582 |           </div>
-583 |           <div className="space-y-2 text-xs">
-584 |             <div className="space-y-1">
-585 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">Name</label>
-586 |               <input
-587 |                 type="text"
-588 |                 value={formName}
-589 |                 onChange={(e) => setFormName(e.target.value)}
-590 |                 placeholder="Sarah, Dad, Crush..."
-591 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-white outline-none focus:border-neutral-500"
-592 |               />
-593 |             </div>
-594 |             <div className="space-y-1">
-595 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">Role in your life</label>
-596 |               <input
-597 |                 type="text"
-598 |                 value={formRole}
-599 |                 onChange={(e) => setFormRole(e.target.value)}
-600 |                 placeholder="Girlfriend, Father, Best Friend..."
-601 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-white outline-none focus:border-neutral-500"
-602 |               />
-603 |             </div>
-604 |             <div className="space-y-1">
-605 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">What do they think about your situation?</label>
-606 |               <textarea
-607 |                 value={formProblem}
-608 |                 onChange={(e) => setFormProblem(e.target.value)}
-609 |                 placeholder="Their perspective/context..."
-610 |                 rows={3}
-611 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2 text-white outline-none focus:border-neutral-500 resize-none"
-612 |               />
-613 |             </div>
-614 |             <button
-615 |               onClick={handleCreateEchoHousePerson}
-616 |               disabled={!formName.trim() || !formRole.trim() || !formProblem.trim()}
-617 |               className="w-full py-2 bg-white text-black font-bold rounded-lg text-xs hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-30 disabled:scale-100 cursor-pointer text-center"
-618 |             >
-619 |               Add Person
-620 |             </button>
-621 |           </div>
-622 |         </div>
-623 |       )}
-624 |     </div>
-625 |   );
-626 | }
-627 |
+374 |         {/* Custom Floating Zoom & Node controls */}
+375 |         <Panel position="bottom-left" className="!left-4 !bottom-14 flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-1 rounded-xl z-20 shadow-2xl">
+376 |           <button 
+377 |             onClick={handleZoomIn}
+378 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors cursor-pointer"
+379 |             title="Zoom In"
+380 |           >
+381 |             <Plus className="w-3.5 h-3.5" />
+382 |           </button>
+383 | 
+384 |           <button 
+385 |             onClick={handleZoomOut}
+386 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors cursor-pointer"
+387 |             title="Zoom Out"
+388 |           >
+389 |             <Minus className="w-3.5 h-3.5" />
+390 |           </button>
+391 | 
+392 |           <button 
+393 |             onClick={handleResetView}
+394 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 cursor-pointer"
+395 |             title="Reset Viewport"
+396 |           >
+397 |             <Maximize className="w-3.5 h-3.5" />
+398 |           </button>
+399 | 
+400 |           {!isEchoHouseMode && (
+401 |             <button 
+402 |               onClick={applyLayout}
+403 |               className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 cursor-pointer"
+404 |               title="Auto Layout Graph"
+405 |             >
+406 |               <LayoutGrid className="w-3.5 h-3.5" />
+407 |             </button>
+408 |           )}
+409 | 
+410 |           <button 
+411 |             onClick={isEchoHouseMode ? () => setIsEchoHouseCreateFormOpen(true) : handleAddAgentNode}
+412 |             className="p-2 text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 flex items-center gap-1 text-[10px] cursor-pointer"
+413 |             title={isEchoHouseMode ? "Add Person" : "Add Custom Agent Node"}
+414 |           >
+415 |             <PlusCircle className="w-3.5 h-3.5 text-white" />
+416 |             <span className="font-semibold pr-1">{isEchoHouseMode ? "Add Person" : "Add Agent"}</span>
+417 |           </button>
+418 | 
+419 |           <button
+420 |             onClick={() => {
+421 |               const state = useWorkflowStore.getState();
+422 |               const exportData = {
+423 |                 nodes: state.nodes,
+424 |                 edges: state.edges,
+425 |                 version: "1.0",
+426 |                 exported_at: new Date().toISOString(),
+427 |                 session_title: state.activeSessionId ? state.sessions[state.activeSessionId]?.title : "Solospace Workflow"
+428 |               };
+429 |               const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+430 |               const url = URL.createObjectURL(blob);
+431 |               const a = document.createElement('a');
+432 |               a.href = url;
+433 |               a.download = `solospace-workflow-${Date.now()}.json`;
+434 |               a.click();
+435 |               URL.revokeObjectURL(url);
+436 |             }}
+437 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 flex items-center gap-1 text-[10px] cursor-pointer"
+438 |             title="Export Workflow as JSON"
+439 |           >
+440 |             <span className="text-[10px] font-mono pr-1">↓JSON</span>
+441 |           </button>
+442 | 
+443 |           <button
+444 |             onClick={() => {
+445 |               const input = document.createElement('input');
+446 |               input.type = 'file';
+447 |               input.accept = '.json';
+448 |               input.onchange = (e: any) => {
+449 |                 const file = e.target.files?.[0];
+450 |                 if (!file) return;
+451 |                 const reader = new FileReader();
+452 |                 reader.onload = (ev) => {
+453 |                   try {
+454 |                     const data = JSON.parse(ev.target?.result as string);
+455 |                     if (data.nodes && data.edges) {
+456 |                       useWorkflowStore.getState().setNodes(data.nodes);
+457 |                       useWorkflowStore.getState().setEdges(data.edges);
+458 |                     }
+459 |                   } catch {
+460 |                     alert('Invalid workflow file.');
+461 |                   }
+462 |                 };
+463 |                 reader.readAsText(file);
+464 |               };
+465 |               input.click();
+466 |             }}
+467 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 flex items-center gap-1 text-[10px] cursor-pointer"
+468 |             title="Import Workflow from JSON"
+469 |           >
+470 |             <span className="text-[10px] font-mono pr-1">↑JSON</span>
+471 |           </button>
+472 |         </Panel>
+473 | 
+474 |         {/* Right-click Context Menu */}
+475 |         {contextMenu && (
+476 |           <ContextMenu
+477 |             x={contextMenu.x}
+478 |             y={contextMenu.y}
+479 |             node={contextMenu.node}
+480 |             onClose={() => setContextMenu(null)}
+481 |           />
+482 |         )}
+483 | 
+484 | 
+485 |         {/* EchoHouse instructional panel moved to the top-left panel */}
+486 | 
+487 |         {/* Bottom-center Proceed Buttons */}
+488 |         {isEchoHouseMode ? (
+489 |           nodes.filter(n => (n.data as any).isEchoHouseAgent && (n.data as any).echohouseRole !== "self").length > 0 && (
+490 |             <Panel position="bottom-center" className="!bottom-14 z-20">
+491 |               <button
+492 |                 onClick={handleEchoHouseProceed}
+493 |                 disabled={isOrchestrating}
+494 |                 className="px-6 py-2.5 bg-white text-black font-bold text-xs rounded-full shadow-2xl hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2 select-none"
+495 |               >
+496 |                 {isOrchestrating ? (
+497 |                   <>
+498 |                     <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+499 |                     <span>Running...</span>
+500 |                   </>
+501 |                 ) : (
+502 |                   <span>Proceed</span>
+503 |                 )}
+504 |               </button>
+505 |             </Panel>
+506 |           )
+507 |         ) : (
+508 |           nodes.length > 0 && executionState !== "running" && !isOrchestrating && (
+509 |             <Panel position="bottom-center" className="!bottom-14 z-20">
+510 |               <button
+511 |                 onClick={handleNormalProceed}
+512 |                 disabled={isOrchestrating}
+513 |                 className="px-6 py-2.5 bg-white text-black font-bold text-xs rounded-full shadow-2xl hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2 select-none"
+514 |               >
+515 |                 {isOrchestrating ? (
+516 |                   <>
+517 |                     <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+518 |                     <span>Running...</span>
+519 |                   </>
+520 |                 ) : (
+521 |                   <span>Proceed</span>
+522 |                 )}
+523 |               </button>
+524 |             </Panel>
+525 |           )
+526 |         )}
+527 | 
+528 |         {/* Persistent legend and EchoHouse instructions — top left */}
+529 |         <Panel position="top-left" className="!left-4 !top-16 select-none z-20 flex flex-col gap-2.5">
+530 |           <div className="bg-[#0d0d0d]/80 border border-[#1f1f1f] rounded-lg p-2.5 backdrop-blur-md shadow-xl text-[9px] font-mono text-neutral-600 space-y-1.5 w-64">
+531 |             <div className="flex items-center gap-2">
+532 |               <span className="w-2.5 h-2.5 rounded-full bg-black border-2 border-rose-500 shrink-0" />
+533 |               <span>Input (data in)</span>
+534 |             </div>
+535 |             <div className="flex items-center gap-2">
+536 |               <span className="w-2.5 h-2.5 rounded-full bg-black border-2 border-emerald-500 shrink-0" />
+537 |               <span>Output (data out)</span>
+538 |             </div>
+539 |             <div className="flex items-center gap-2">
+540 |               <span className="w-3.5 h-0.5 bg-cyan-500 rounded shrink-0" />
+541 |               <span>Dependency wire</span>
+542 |             </div>
+543 |             <div className="flex items-center gap-2">
+544 |               <span className="text-[8px] leading-none">✥</span>
+545 |               <span>Drag card to reposition</span>
+546 |             </div>
+547 |           </div>
+548 | 
+549 |           {isEchoHouseMode && (
+550 |             <div className="bg-[#0d0d0d]/80 border border-[#1f1f1f] rounded-lg p-2.5 backdrop-blur-md shadow-xl space-y-3 w-64">
+551 |               <p className="text-xs text-neutral-300 leading-relaxed font-sans">
+552 |                 Add the people in your life — give each one a name, their role, and what they think about your situation. Then click Proceed to begin the simulation.
+553 |               </p>
+554 |               <div className="border-t border-[#1f1f1f] pt-3">
+555 |                 <button
+556 |                   onClick={() => setIsControlsOpen(!isControlsOpen)}
+557 |                   className="w-full flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-neutral-500 hover:text-neutral-300 transition-colors cursor-pointer"
+558 |                 >
+559 |                   <span>Simulation Settings</span>
+560 |                   <span className={`transition-transform duration-200 ${isControlsOpen ? 'rotate-180' : ''}`}>&#8964;</span>
+561 |                 </button>
+562 |                 {isControlsOpen && (
+563 |                   <div className="mt-3 space-y-3">
+564 |                     <div className="space-y-1.5">
+565 |                       <span className="text-[9px] font-mono uppercase tracking-wider text-neutral-600 font-bold block">Rounds</span>
+566 |                       <div className="flex gap-1">
+567 |                         {[1, 2, 3, 4, 5].map((n) => (
+568 |                           <button
+569 |                             key={n}
+570 |                             onClick={() => setEchoRounds(n)}
+571 |                             className={`w-8 h-8 rounded-lg text-xs font-semibold font-mono transition-all cursor-pointer ${
+572 |                               echoRounds === n ? 'bg-white text-black' : 'bg-neutral-900 text-neutral-400 hover:text-white border border-[#1f1f1f]'
+573 |                             }`}
+574 |                           >
+575 |                             {n}
+576 |                           </button>
+577 |                         ))}
+578 |                       </div>
+579 |                     </div>
+580 |                     <div className="space-y-1.5">
+581 |                       <span className="text-[9px] font-mono uppercase tracking-wider text-neutral-600 font-bold block">Tone</span>
+582 |                       <div className="flex gap-1 flex-wrap">
+583 |                         {(['Realistic', 'Compassionate', 'Confrontational'] as const).map((t) => (
+584 |                           <button
+585 |                             key={t}
+586 |                             onClick={() => setEchoTone(t)}
+587 |                             className={`px-2.5 py-1 rounded-lg text-[10px] font-mono transition-all cursor-pointer ${
+588 |                               echoTone === t ? 'bg-white text-black font-semibold' : 'bg-neutral-900 text-neutral-400 hover:text-white border border-[#1f1f1f]'
+589 |                             }`}
+590 |                           >
+591 |                             {t}
+592 |                           </button>
+593 |                         ))}
+594 |                       </div>
+595 |                     </div>
+596 |                   </div>
+597 |                 )}
+598 |               </div>
+599 |             </div>
+600 |           )}
+601 |         </Panel>
+602 |       </ReactFlow>
+603 | 
+604 |       {/* EchoHouse Inline Creation Form */}
+605 |       {isEchoHouseCreateFormOpen && isEchoHouseMode && (
+606 |         <div className="absolute bottom-28 left-4 w-72 bg-[#0c0c0c]/95 border border-[#1f1f1f] rounded-xl p-4 shadow-2xl z-30 space-y-3 select-none">
+607 |           <div className="flex justify-between items-center pb-2 border-b border-[#1f1f1f]">
+608 |             <span className="text-xs font-bold text-white uppercase tracking-wider">Add Person</span>
+609 |             <button onClick={() => setIsEchoHouseCreateFormOpen(false)} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+610 |           </div>
+611 |           <div className="space-y-2 text-xs">
+612 |             <div className="space-y-1">
+613 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">Name</label>
+614 |               <input
+615 |                 type="text"
+616 |                 value={formName}
+617 |                 onChange={(e) => setFormName(e.target.value)}
+618 |                 placeholder="Sarah, Dad, Crush..."
+619 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-white outline-none focus:border-neutral-500"
+620 |               />
+621 |             </div>
+622 |             <div className="space-y-1">
+623 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">Role in your life</label>
+624 |               <input
+625 |                 type="text"
+626 |                 value={formRole}
+627 |                 onChange={(e) => setFormRole(e.target.value)}
+628 |                 placeholder="Girlfriend, Father, Best Friend..."
+629 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-white outline-none focus:border-neutral-500"
+630 |               />
+631 |             </div>
+632 |             <div className="space-y-1">
+633 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">What do they think about your situation?</label>
+634 |               <textarea
+635 |                 value={formProblem}
+636 |                 onChange={(e) => setFormProblem(e.target.value)}
+637 |                 placeholder="Their perspective/context..."
+638 |                 rows={3}
+639 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2 text-white outline-none focus:border-neutral-500 resize-none"
+640 |               />
+641 |             </div>
+642 |             <button
+643 |               onClick={handleCreateEchoHousePerson}
+644 |               disabled={!formName.trim() || !formRole.trim() || !formProblem.trim()}
+645 |               className="w-full py-2 bg-white text-black font-bold rounded-lg text-xs hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-30 disabled:scale-100 cursor-pointer text-center"
+646 |             >
+647 |               Add Person
+648 |             </button>
+649 |           </div>
+650 |         </div>
+651 |       )}
+652 |     </div>
+653 |   );
+654 | }
+655 |
 ```
 
 ### File: `Frontend/components/MarkdownRenderer.tsx`
@@ -9880,7 +9918,7 @@ SoloSpace/
 
 ### File: `Frontend/store/workflowStore.ts`
 
-> 1423 lines | 49.0 KB
+> 1433 lines | 49.9 KB
 
 ```typescript
    1 | import { create } from 'zustand';
@@ -10853,459 +10891,469 @@ SoloSpace/
  968 |       const handlers = {
  969 |         onText: (token: string) => {
  970 |           assistantResponse += token;
- 971 |           set((state) => ({
- 972 |             isThinking: false,
- 973 |             chatMessages: state.chatMessages.map(m =>
- 974 |               m.id === aiMsgId ? { ...m, text: assistantResponse } : m
- 975 |             )
- 976 |           }));
- 977 |         },
- 978 |         onThinking: (thought: string) => {
- 979 |           thinkingSummary += thought;
- 980 |           set((state) => ({
- 981 |             liveThoughts: thinkingSummary,
- 982 |             chatMessages: state.chatMessages.map(m =>
- 983 |               m.id === aiMsgId ? { ...m, thinkingSummary } : m
- 984 |             )
- 985 |           }));
- 986 |         },
- 987 |         onStatus: (msg: string) => set({ statusMessage: msg }),
- 988 |         onMetadata: (meta: Record<string, any>) => {
- 989 |           const activeSession = get().sessions[get().activeSessionId || ''];
- 990 |           const currentMode = activeSession?.mode || 'auto';
- 991 | 
- 992 |           if (currentMode === 'auto' || (currentMode === 'custom' && !execute)) {
- 993 |             const { nodes: mergedNodes, edges: mergedEdges } = mergeCanvasState(
- 994 |               preExistingNodes, preExistingEdges,
- 995 |               meta.nodes || [], meta.edges || []
- 996 |             );
- 997 |             set({ nodes: mergedNodes, edges: mergedEdges });
- 998 |           }
- 999 | 
-1000 |           set({ agentTalkLogs: meta.agent_talk || [], followUpSuggestions: meta.follow_up_suggestions || [] });
-1001 |           // If plan-only mode (execute=false), mark as paused so Proceed button appears
-1002 |           if (!execute && (meta.nodes || []).length > 0) {
-1003 |             set({ executionState: 'paused' });
-1004 |           }
-1005 |           const talk = meta.agent_talk || [];
-1006 |           if (talk.length > 0) {
-1007 |             const latest = talk[talk.length - 1];
-1008 |             set({ statusMessage: `⚙️ **${latest.senderName}** completed — ${latest.text?.substring(0, 80) ?? ''}${(latest.text?.length ?? 0) > 80 ? '...' : ''}` });
+ 971 |           let displayText = assistantResponse;
+ 972 |           if (assistantResponse.includes("Circular dependency")) {
+ 973 |             displayText = "⚠️ Circular Dependency Detected — One or more agents are connected in a loop (e.g., Agent A → Agent B → Agent A). Please open the Flow tab and remove the arrow(s) that create a loop. Each agent must have a clear start with no backwards connections.";
+ 974 |             assistantResponse = displayText;
+ 975 |           }
+ 976 |           set((state) => ({
+ 977 |             isThinking: false,
+ 978 |             chatMessages: state.chatMessages.map(m =>
+ 979 |               m.id === aiMsgId ? { ...m, text: displayText } : m
+ 980 |             )
+ 981 |           }));
+ 982 |         },
+ 983 |         onThinking: (thought: string) => {
+ 984 |           thinkingSummary += thought;
+ 985 |           set((state) => ({
+ 986 |             liveThoughts: thinkingSummary,
+ 987 |             chatMessages: state.chatMessages.map(m =>
+ 988 |               m.id === aiMsgId ? { ...m, thinkingSummary } : m
+ 989 |             )
+ 990 |           }));
+ 991 |         },
+ 992 |         onStatus: (msg: string) => set({ statusMessage: msg }),
+ 993 |         onMetadata: (meta: Record<string, any>) => {
+ 994 |           const activeSession = get().sessions[get().activeSessionId || ''];
+ 995 |           const currentMode = activeSession?.mode || 'auto';
+ 996 | 
+ 997 |           if (currentMode === 'auto' || (currentMode === 'custom' && !execute)) {
+ 998 |             const { nodes: mergedNodes, edges: mergedEdges } = mergeCanvasState(
+ 999 |               preExistingNodes, preExistingEdges,
+1000 |               meta.nodes || [], meta.edges || []
+1001 |             );
+1002 |             set({ nodes: mergedNodes, edges: mergedEdges });
+1003 |           }
+1004 | 
+1005 |           set({ agentTalkLogs: meta.agent_talk || [], followUpSuggestions: meta.follow_up_suggestions || [] });
+1006 |           // If plan-only mode (execute=false), mark as paused so Proceed button appears
+1007 |           if (!execute && (meta.nodes || []).length > 0) {
+1008 |             set({ executionState: 'paused' });
 1009 |           }
-1010 |         },
-1011 |         onToolApproval: (approval: Record<string, any>) => set({ pendingApproval: approval as any }),
-1012 |         onDone: () => {},
-1013 |         onError: (err: Error) => { throw err; },
-1014 |       };
-1015 | 
-1016 |       await parseSSEStream(response, handlers, controller.signal);
-1017 | 
-1018 |       if (!assistantResponse) {
-1019 |         const fallbackMsg = execute
-1020 |           ? "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again."
-1021 |           : "I have generated a custom agent plan for your request. You can inspect/modify the agents in the **Flow** tab and click **Proceed** when you are ready to execute.";
-1022 |         set((state) => ({
-1023 |           chatMessages: state.chatMessages.map(m =>
-1024 |             m.id === aiMsgId ? { ...m, text: fallbackMsg } : m
-1025 |           )
-1026 |         }));
-1027 |       }
-1028 | 
-1029 |       set({ abortController: null });
-1030 |       get().saveCurrentSession();
-1031 |     } catch (err: any) {
-1032 |       if (err.name === 'AbortError') {
-1033 |         console.log("Steer Orchestration manually aborted.");
-1034 |         set((state) => ({
-1035 |           chatMessages: state.chatMessages.map(m =>
-1036 |             m.id === aiMsgId && !m.text ? { ...m, text: "*Generation stopped by user.*" } : m
-1037 |           )
-1038 |         }));
-1039 |       } else {
-1040 |         console.error("Steer Orchestration stream error:", err);
-1041 |         const errorMsg = `**Connection Error.**\n\n${err.message || "Failed to parse stream event source. Check backend logs."}`;
-1042 |         set((state) => ({
-1043 |           chatMessages: state.chatMessages.map(m =>
-1044 |             m.id === aiMsgId ? { ...m, text: errorMsg } : m
-1045 |           ),
-1046 |           nodes: [],
-1047 |           edges: [],
-1048 |           followUpSuggestions: []
-1049 |         }));
-1050 |       }
-1051 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
-1052 |       get().saveCurrentSession();
-1053 |     } finally {
-1054 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
-1055 |       get().saveCurrentSession();
-1056 |     }
-1057 |   },
-1058 | 
-1059 |   triggerCustomExecution: async () => {
-1060 |     const currentController = get().abortController;
-1061 |     if (currentController) {
-1062 |       currentController.abort();
-1063 |     }
-1064 | 
-1065 |     const controller = new AbortController();
-1066 | 
-1067 |     const preExistingNodes = [...get().nodes];
-1068 |     const preExistingEdges = [...get().edges];
+1010 |           const talk = meta.agent_talk || [];
+1011 |           if (talk.length > 0) {
+1012 |             const latest = talk[talk.length - 1];
+1013 |             set({ statusMessage: `⚙️ **${latest.senderName}** completed — ${latest.text?.substring(0, 80) ?? ''}${(latest.text?.length ?? 0) > 80 ? '...' : ''}` });
+1014 |           }
+1015 |         },
+1016 |         onToolApproval: (approval: Record<string, any>) => set({ pendingApproval: approval as any }),
+1017 |         onDone: () => {},
+1018 |         onError: (err: Error) => { throw err; },
+1019 |       };
+1020 | 
+1021 |       await parseSSEStream(response, handlers, controller.signal);
+1022 | 
+1023 |       if (!assistantResponse) {
+1024 |         const fallbackMsg = execute
+1025 |           ? "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again."
+1026 |           : "I have generated a custom agent plan for your request. You can inspect/modify the agents in the **Flow** tab and click **Proceed** when you are ready to execute.";
+1027 |         set((state) => ({
+1028 |           chatMessages: state.chatMessages.map(m =>
+1029 |             m.id === aiMsgId ? { ...m, text: fallbackMsg } : m
+1030 |           )
+1031 |         }));
+1032 |       }
+1033 | 
+1034 |       set({ abortController: null });
+1035 |       get().saveCurrentSession();
+1036 |     } catch (err: any) {
+1037 |       if (err.name === 'AbortError') {
+1038 |         console.log("Steer Orchestration manually aborted.");
+1039 |         set((state) => ({
+1040 |           chatMessages: state.chatMessages.map(m =>
+1041 |             m.id === aiMsgId && !m.text ? { ...m, text: "*Generation stopped by user.*" } : m
+1042 |           )
+1043 |         }));
+1044 |       } else {
+1045 |         console.error("Steer Orchestration stream error:", err);
+1046 |         const errorMsg = `**Connection Error.**\n\n${err.message || "Failed to parse stream event source. Check backend logs."}`;
+1047 |         set((state) => ({
+1048 |           chatMessages: state.chatMessages.map(m =>
+1049 |             m.id === aiMsgId ? { ...m, text: errorMsg } : m
+1050 |           ),
+1051 |           nodes: [],
+1052 |           edges: [],
+1053 |           followUpSuggestions: []
+1054 |         }));
+1055 |       }
+1056 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
+1057 |       get().saveCurrentSession();
+1058 |     } finally {
+1059 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
+1060 |       get().saveCurrentSession();
+1061 |     }
+1062 |   },
+1063 | 
+1064 |   triggerCustomExecution: async () => {
+1065 |     const currentController = get().abortController;
+1066 |     if (currentController) {
+1067 |       currentController.abort();
+1068 |     }
 1069 | 
-1070 |     const sessionId = get().activeSessionId;
-1071 |     if (!sessionId) return;
-1072 | 
-1073 |     const prompt = get().chatMessages.findLast(m => m.sender === 'user')?.text || "";
+1070 |     const controller = new AbortController();
+1071 | 
+1072 |     const preExistingNodes = [...get().nodes];
+1073 |     const preExistingEdges = [...get().edges];
 1074 | 
-1075 |     set((state) => ({
-1076 |       isOrchestrating: true,
-1077 |       isThinking: true,
-1078 |       statusMessage: "Running custom orchestration loop...",
-1079 |       liveThoughts: "",
-1080 |       agentTalkLogs: [],
-1081 |       followUpSuggestions: [],
-1082 |       abortController: controller,
-1083 |       executionState: "running"
-1084 |     }));
-1085 |     get().saveCurrentSession();
-1086 | 
-1087 |     const aiMsgId = Date.now().toString();
-1088 |     set((state) => ({
-1089 |       chatMessages: [
-1090 |         ...state.chatMessages,
-1091 |         {
-1092 |           id: aiMsgId,
-1093 |           sender: "ai",
-1094 |           text: "",
-1095 |           thinkingSummary: "",
-1096 |           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-1097 |         }
-1098 |       ]
-1099 |     }));
-1100 |     get().saveCurrentSession();
-1101 | 
-1102 |     try {
-1103 |       const response = await fetch("/api/gemini/execute_custom", {
-1104 |         method: "POST",
-1105 |         headers: { "Content-Type": "application/json" },
-1106 |         body: JSON.stringify({
-1107 |           session_id: sessionId,
-1108 |           prompt: prompt,
-1109 |           history: get().chatMessages
-1110 |             .filter(m => m.id !== aiMsgId)
-1111 |             .map(m => ({ sender: m.sender, text: m.text })),
-1112 |           api_key: get().apiKeys[get().provider] || get().apiKey || "",
-1113 |           api_keys: get().apiKeys,
-1114 |           nodes: get().nodes,
-1115 |           edges: get().edges,
-1116 |           provider: get().provider,
-1117 |           model: get().model,
-1118 |           fallback_provider: get().fallbackProvider || null,
-1119 |           base_url: get().providerBaseUrls[get().provider] || null,
-1120 |           backup_api_keys: get().backupApiKeys[get().provider] || []
-1121 |         }),
-1122 |         signal: controller.signal
-1123 |       });
-1124 | 
-1125 |       if (!response.ok) {
-1126 |         const errData = await response.json().catch(() => ({ detail: "Execution failed." }));
-1127 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
-1128 |       }
+1075 |     const sessionId = get().activeSessionId;
+1076 |     if (!sessionId) return;
+1077 | 
+1078 |     const prompt = get().chatMessages.findLast(m => m.sender === 'user')?.text || "";
+1079 | 
+1080 |     set((state) => ({
+1081 |       isOrchestrating: true,
+1082 |       isThinking: true,
+1083 |       statusMessage: "Running custom orchestration loop...",
+1084 |       liveThoughts: "",
+1085 |       agentTalkLogs: [],
+1086 |       followUpSuggestions: [],
+1087 |       abortController: controller,
+1088 |       executionState: "running"
+1089 |     }));
+1090 |     get().saveCurrentSession();
+1091 | 
+1092 |     const aiMsgId = Date.now().toString();
+1093 |     set((state) => ({
+1094 |       chatMessages: [
+1095 |         ...state.chatMessages,
+1096 |         {
+1097 |           id: aiMsgId,
+1098 |           sender: "ai",
+1099 |           text: "",
+1100 |           thinkingSummary: "",
+1101 |           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+1102 |         }
+1103 |       ]
+1104 |     }));
+1105 |     get().saveCurrentSession();
+1106 | 
+1107 |     try {
+1108 |       const response = await fetch("/api/gemini/execute_custom", {
+1109 |         method: "POST",
+1110 |         headers: { "Content-Type": "application/json" },
+1111 |         body: JSON.stringify({
+1112 |           session_id: sessionId,
+1113 |           prompt: prompt,
+1114 |           history: get().chatMessages
+1115 |             .filter(m => m.id !== aiMsgId)
+1116 |             .map(m => ({ sender: m.sender, text: m.text })),
+1117 |           api_key: get().apiKeys[get().provider] || get().apiKey || "",
+1118 |           api_keys: get().apiKeys,
+1119 |           nodes: get().nodes,
+1120 |           edges: get().edges,
+1121 |           provider: get().provider,
+1122 |           model: get().model,
+1123 |           fallback_provider: get().fallbackProvider || null,
+1124 |           base_url: get().providerBaseUrls[get().provider] || null,
+1125 |           backup_api_keys: get().backupApiKeys[get().provider] || []
+1126 |         }),
+1127 |         signal: controller.signal
+1128 |       });
 1129 | 
-1130 |       let assistantResponse = "";
-1131 |       let thinkingSummary = "";
-1132 | 
-1133 |       const customHandlers = {
-1134 |         onText: (token: string) => {
-1135 |           assistantResponse += token;
-1136 |           set((state) => ({
-1137 |             isThinking: false,
-1138 |             chatMessages: state.chatMessages.map(m =>
-1139 |               m.id === aiMsgId ? { ...m, text: assistantResponse } : m
-1140 |             )
-1141 |           }));
-1142 |         },
-1143 |         onThinking: (thought: string) => {
-1144 |           thinkingSummary += thought;
-1145 |           set((state) => ({
-1146 |             liveThoughts: thinkingSummary,
-1147 |             chatMessages: state.chatMessages.map(m =>
-1148 |               m.id === aiMsgId ? { ...m, thinkingSummary } : m
-1149 |             )
-1150 |           }));
-1151 |         },
-1152 |         onStatus: (msg: string) => set({ statusMessage: msg }),
-1153 |         onMetadata: (meta: Record<string, any>) => {
-1154 |           const { nodes: mergedNodes, edges: mergedEdges } = mergeCanvasState(
-1155 |             preExistingNodes, preExistingEdges,
-1156 |             meta.nodes || [], meta.edges || []
-1157 |           );
-1158 |           set({ nodes: mergedNodes, edges: mergedEdges, agentTalkLogs: meta.agent_talk || [], followUpSuggestions: meta.follow_up_suggestions || [] });
-1159 |           const talk = meta.agent_talk || [];
-1160 |           if (talk.length > 0) {
-1161 |             const latest = talk[talk.length - 1];
-1162 |             set({ statusMessage: `⚙️ **${latest.senderName}** completed — ${latest.text?.substring(0, 80) ?? ''}${(latest.text?.length ?? 0) > 80 ? '...' : ''}` });
-1163 |           }
-1164 |         },
-1165 |         onToolApproval: (approval: Record<string, any>) => set({ pendingApproval: approval as any }),
-1166 |         onDone: () => {},
-1167 |         onError: (err: Error) => { throw err; },
-1168 |       };
-1169 | 
-1170 |       await parseSSEStream(response, customHandlers, controller.signal);
-1171 | 
-1172 |       if (!assistantResponse) {
-1173 |         const fallbackMsg = "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again.";
-1174 |         set((state) => ({
-1175 |           chatMessages: state.chatMessages.map(m =>
-1176 |             m.id === aiMsgId ? { ...m, text: fallbackMsg } : m
-1177 |           )
-1178 |         }));
-1179 |       }
-1180 | 
-1181 |       set({ abortController: null });
-1182 |       get().saveCurrentSession();
-1183 |     } catch (err: any) {
-1184 |       if (err.name === 'AbortError') {
-1185 |         console.log("Steer Orchestration manually aborted.");
-1186 |         set((state) => ({
-1187 |           chatMessages: state.chatMessages.map(m =>
-1188 |             m.id === aiMsgId && !m.text ? { ...m, text: "*Generation stopped by user.*" } : m
-1189 |           )
-1190 |         }));
-1191 |       } else {
-1192 |         console.error("Steer Orchestration stream error:", err);
-1193 |         const errorMsg = `**Connection Error.**\n\n${err.message || "Failed to parse stream event source. Check backend logs."}`;
-1194 |         set((state) => ({
-1195 |           chatMessages: state.chatMessages.map(m =>
-1196 |             m.id === aiMsgId ? { ...m, text: errorMsg } : m
-1197 |           ),
-1198 |           nodes: [],
-1199 |           edges: [],
-1200 |           followUpSuggestions: []
-1201 |         }));
-1202 |       }
-1203 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
-1204 |       get().saveCurrentSession();
-1205 |     } finally {
-1206 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '', executionState: 'setup' });
-1207 |       get().saveCurrentSession();
-1208 |     }
-1209 |   },
-1210 | 
-1211 |   triggerEchoHouseSimulation: async (rounds = 3, tone = "realistic") => {
-1212 |     const activeSessionId = get().activeSessionId;
-1213 |     if (!activeSessionId) return;
-1214 | 
-1215 |     const selfNode = get().nodes.find(n => (n.data as any).echohouseRole === "self");
-1216 |     if (!selfNode) return;
-1217 |     const problemText = (selfNode.data as any).echohouseProblem || "";
-1218 | 
-1219 |     const cast = get().nodes
-1220 |       .filter(n => (n.data as any).isEchoHouseAgent === true)
-1221 |       .map(n => ({
-1222 |         inferred_name: n.data.name,
-1223 |         role: (n.data as any).echohouseRole || "",
-1224 |         inferred_problem: (n.data as any).echohouseProblem || "",
-1225 |         is_self: (n.data as any).echohouseRole === "self"
-1226 |       }));
-1227 | 
-1228 |     // Abort any active orchestration
-1229 |     const currentController = get().abortController;
-1230 |     if (currentController) {
-1231 |       currentController.abort();
-1232 |     }
-1233 | 
-1234 |     const controller = new AbortController();
-1235 | 
-1236 |     set({
-1237 |       isOrchestrating: true,
-1238 |       isThinking: true,
-1239 |       statusMessage: "Initializing social simulation...",
-1240 |       liveThoughts: "",
-1241 |       agentTalkLogs: [],
-1242 |       followUpSuggestions: [],
-1243 |       abortController: controller
-1244 |     });
-1245 |     get().saveCurrentSession();
-1246 | 
-1247 |     try {
-1248 |       const activeProv = get().provider;
-1249 |       const apiKey = get().apiKeys[activeProv] || get().apiKey || "";
-1250 |       const response = await fetch("/api/gemini/echohouse/simulate", {
-1251 |         method: "POST",
-1252 |         headers: { "Content-Type": "application/json" },
-1253 |         body: JSON.stringify({
-1254 |           session_id: activeSessionId,
-1255 |           problem_text: problemText,
-1256 |           cast: cast,
-1257 |           provider: activeProv,
-1258 |           model: get().model,
-1259 |           api_key: apiKey,
-1260 |           api_keys: get().apiKeys,
-1261 |           base_url: get().providerBaseUrls[activeProv] || null,
-1262 |           rounds: rounds,
-1263 |           tone: tone,
-1264 |           backup_api_keys: get().backupApiKeys[activeProv] || [],
-1265 |         }),
-1266 |         signal: controller.signal
-1267 |       });
-1268 | 
-1269 |       if (!response.ok) {
-1270 |         const errData = await response.json().catch(() => ({ detail: "Simulation failed." }));
-1271 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
-1272 |       }
-1273 | 
-1274 |       let currentStreamingMsgId = "";
-1275 |       let currentText = "";
-1276 |       let simulationTextAccum = "";
-1277 | 
-1278 |       const handlers = {
-1279 |         onText: (token: string) => {
-1280 |           if (!currentStreamingMsgId) return;
-1281 |           currentText += token;
-1282 |           simulationTextAccum += token;
-1283 |           set((state) => ({
-1284 |             isThinking: false,
-1285 |             chatMessages: state.chatMessages.map(m =>
-1286 |               m.id === currentStreamingMsgId ? { ...m, text: currentText } : m
-1287 |             )
-1288 |           }));
-1289 |         },
-1290 |         onThinking: () => {},
-1291 |         onStatus: (msg: string) => {
-1292 |           set({ statusMessage: msg });
-1293 |           // Detect round start and inject a divider message
-1294 |           const roundMatch = msg.match(/Orchestrating Round (\d+) of social simulation/);
-1295 |           if (roundMatch) {
-1296 |             const roundNum = roundMatch[1];
-1297 |             const dividerId = `divider-round-${roundNum}-${Date.now()}`;
-1298 |             const dividerMsg: ChatMessage = {
-1299 |               id: dividerId,
-1300 |               sender: 'divider',
-1301 |               text: `Round ${roundNum}`,
-1302 |               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-1303 |             };
-1304 |             set((state) => ({ chatMessages: [...state.chatMessages, dividerMsg] }));
-1305 |             currentStreamingMsgId = "";
-1306 |             currentText = "";
-1307 |           }
-1308 |         },
-1309 |         onMetadata: (meta: Record<string, any>) => {
-1310 |           if (meta.active_speaker) {
-1311 |             // Inject insight divider before the insight speaker
-1312 |             if (meta.active_speaker === "insight") {
-1313 |               const insightDividerId = `divider-insight-${Date.now()}`;
-1314 |               const insightDivider: ChatMessage = {
-1315 |                 id: insightDividerId,
-1316 |                 sender: 'divider',
-1317 |                 text: 'Therapeutic Insight',
-1318 |                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-1319 |               };
-1320 |               set((state) => ({ chatMessages: [...state.chatMessages, insightDivider] }));
-1321 |             }
-1322 | 
-1323 |             const isSelf = meta.active_speaker === "You (Self)" || (meta.active_speaker || "").toLowerCase() === "self";
-1324 |             const newMsgId = `echo-msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-1325 | 
-1326 |             const newMsg: ChatMessage = {
-1327 |               id: newMsgId,
-1328 |               sender: meta.active_speaker === "insight" ? 'ai' : (isSelf ? 'user' : 'ai'),
-1329 |               text: "",
-1330 |               speakerName: meta.active_speaker,
-1331 |               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-1332 |             };
-1333 | 
-1334 |             set((state) => ({
-1335 |               chatMessages: [...state.chatMessages, newMsg]
-1336 |             }));
-1337 | 
-1338 |             currentStreamingMsgId = newMsgId;
-1339 |             currentText = "";
-1340 |           }
-1341 |         },
-1342 |         onToolApproval: () => {},
-1343 |         onDone: () => {},
-1344 |         onError: (err: Error) => { throw err; },
-1345 |       };
-1346 | 
-1347 |       await parseSSEStream(response, handlers, controller.signal);
-1348 |       set({ abortController: null });
-1349 |       get().saveCurrentSession();
-1350 | 
-1351 |       // Fetch actionable takeaways after simulation completes
-1352 |       try {
-1353 |         const takeawaysResp = await fetch("/api/gemini/echohouse/takeaways", {
-1354 |           method: "POST",
-1355 |           headers: { "Content-Type": "application/json" },
-1356 |           body: JSON.stringify({
-1357 |             simulation_text: simulationTextAccum,
-1358 |             problem_text: problemText,
-1359 |             provider: activeProv,
-1360 |             model: get().model,
-1361 |             api_key: apiKey,
-1362 |             api_keys: get().apiKeys,
-1363 |             base_url: get().providerBaseUrls[activeProv] || null,
-1364 |             backup_api_keys: get().backupApiKeys[activeProv] || [],
-1365 |           })
-1366 |         });
-1367 |         if (takeawaysResp.ok) {
-1368 |           const { takeaways } = await takeawaysResp.json();
-1369 |           if (Array.isArray(takeaways) && takeaways.length > 0) {
-1370 |             const takeawaysMsgId = `echo-takeaways-${Date.now()}`;
-1371 |             const takeawaysMsg: ChatMessage = {
-1372 |               id: takeawaysMsgId,
-1373 |               sender: 'ai',
-1374 |               text: '',
-1375 |               speakerName: 'takeaways',
-1376 |               takeaways: takeaways,
-1377 |               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-1378 |             };
-1379 |             set((state) => ({ chatMessages: [...state.chatMessages, takeawaysMsg] }));
-1380 |             get().saveCurrentSession();
-1381 |           }
-1382 |         }
-1383 |       } catch (e) {
-1384 |         console.error("Failed to fetch EchoHouse takeaways:", e);
-1385 |       }
-1386 |     } catch (err: any) {
-1387 |       if (err.name === 'AbortError') {
-1388 |         console.log("EchoHouse simulation manually aborted.");
-1389 |       } else {
-1390 |         console.error("EchoHouse simulation stream error:", err);
-1391 |       }
-1392 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
-1393 |       get().saveCurrentSession();
-1394 |     } finally {
-1395 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
-1396 |       get().saveCurrentSession();
-1397 |     }
-1398 |   }
-1399 | }));
-1400 | 
-1401 | let persistTimeout: any = null;
-1402 | useWorkflowStore.subscribe((state) => {
-1403 |   if (typeof window === 'undefined') return;
-1404 |   if (persistTimeout) clearTimeout(persistTimeout);
-1405 |   persistTimeout = setTimeout(async () => {
-1406 |     try {
-1407 |       const stateToPersist = {
-1408 |         activeSessionId: state.activeSessionId,
-1409 |         sessions: state.sessions,
-1410 |         nodes: state.nodes,
-1411 |         edges: state.edges,
-1412 |         provider: state.provider,
-1413 |         model: state.model,
-1414 |         fallbackProvider: state.fallbackProvider,
-1415 |         providerBaseUrls: state.providerBaseUrls,
-1416 |       };
-1417 |       await idbSet('solospace_workflow_state', JSON.stringify(stateToPersist));
-1418 |     } catch (e) {
-1419 |       console.error("Failed to persist state to IndexedDB:", e);
-1420 |     }
-1421 |   }, 500);
-1422 | });
-1423 |
+1130 |       if (!response.ok) {
+1131 |         const errData = await response.json().catch(() => ({ detail: "Execution failed." }));
+1132 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
+1133 |       }
+1134 | 
+1135 |       let assistantResponse = "";
+1136 |       let thinkingSummary = "";
+1137 | 
+1138 |       const customHandlers = {
+1139 |         onText: (token: string) => {
+1140 |           assistantResponse += token;
+1141 |           let displayText = assistantResponse;
+1142 |           if (assistantResponse.includes("Circular dependency")) {
+1143 |             displayText = "⚠️ Circular Dependency Detected — One or more agents are connected in a loop (e.g., Agent A → Agent B → Agent A). Please open the Flow tab and remove the arrow(s) that create a loop. Each agent must have a clear start with no backwards connections.";
+1144 |             assistantResponse = displayText;
+1145 |           }
+1146 |           set((state) => ({
+1147 |             isThinking: false,
+1148 |             chatMessages: state.chatMessages.map(m =>
+1149 |               m.id === aiMsgId ? { ...m, text: displayText } : m
+1150 |             )
+1151 |           }));
+1152 |         },
+1153 |         onThinking: (thought: string) => {
+1154 |           thinkingSummary += thought;
+1155 |           set((state) => ({
+1156 |             liveThoughts: thinkingSummary,
+1157 |             chatMessages: state.chatMessages.map(m =>
+1158 |               m.id === aiMsgId ? { ...m, thinkingSummary } : m
+1159 |             )
+1160 |           }));
+1161 |         },
+1162 |         onStatus: (msg: string) => set({ statusMessage: msg }),
+1163 |         onMetadata: (meta: Record<string, any>) => {
+1164 |           const { nodes: mergedNodes, edges: mergedEdges } = mergeCanvasState(
+1165 |             preExistingNodes, preExistingEdges,
+1166 |             meta.nodes || [], meta.edges || []
+1167 |           );
+1168 |           set({ nodes: mergedNodes, edges: mergedEdges, agentTalkLogs: meta.agent_talk || [], followUpSuggestions: meta.follow_up_suggestions || [] });
+1169 |           const talk = meta.agent_talk || [];
+1170 |           if (talk.length > 0) {
+1171 |             const latest = talk[talk.length - 1];
+1172 |             set({ statusMessage: `⚙️ **${latest.senderName}** completed — ${latest.text?.substring(0, 80) ?? ''}${(latest.text?.length ?? 0) > 80 ? '...' : ''}` });
+1173 |           }
+1174 |         },
+1175 |         onToolApproval: (approval: Record<string, any>) => set({ pendingApproval: approval as any }),
+1176 |         onDone: () => {},
+1177 |         onError: (err: Error) => { throw err; },
+1178 |       };
+1179 | 
+1180 |       await parseSSEStream(response, customHandlers, controller.signal);
+1181 | 
+1182 |       if (!assistantResponse) {
+1183 |         const fallbackMsg = "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again.";
+1184 |         set((state) => ({
+1185 |           chatMessages: state.chatMessages.map(m =>
+1186 |             m.id === aiMsgId ? { ...m, text: fallbackMsg } : m
+1187 |           )
+1188 |         }));
+1189 |       }
+1190 | 
+1191 |       set({ abortController: null });
+1192 |       get().saveCurrentSession();
+1193 |     } catch (err: any) {
+1194 |       if (err.name === 'AbortError') {
+1195 |         console.log("Steer Orchestration manually aborted.");
+1196 |         set((state) => ({
+1197 |           chatMessages: state.chatMessages.map(m =>
+1198 |             m.id === aiMsgId && !m.text ? { ...m, text: "*Generation stopped by user.*" } : m
+1199 |           )
+1200 |         }));
+1201 |       } else {
+1202 |         console.error("Steer Orchestration stream error:", err);
+1203 |         const errorMsg = `**Connection Error.**\n\n${err.message || "Failed to parse stream event source. Check backend logs."}`;
+1204 |         set((state) => ({
+1205 |           chatMessages: state.chatMessages.map(m =>
+1206 |             m.id === aiMsgId ? { ...m, text: errorMsg } : m
+1207 |           ),
+1208 |           nodes: [],
+1209 |           edges: [],
+1210 |           followUpSuggestions: []
+1211 |         }));
+1212 |       }
+1213 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
+1214 |       get().saveCurrentSession();
+1215 |     } finally {
+1216 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '', executionState: 'setup' });
+1217 |       get().saveCurrentSession();
+1218 |     }
+1219 |   },
+1220 | 
+1221 |   triggerEchoHouseSimulation: async (rounds = 3, tone = "realistic") => {
+1222 |     const activeSessionId = get().activeSessionId;
+1223 |     if (!activeSessionId) return;
+1224 | 
+1225 |     const selfNode = get().nodes.find(n => (n.data as any).echohouseRole === "self");
+1226 |     if (!selfNode) return;
+1227 |     const problemText = (selfNode.data as any).echohouseProblem || "";
+1228 | 
+1229 |     const cast = get().nodes
+1230 |       .filter(n => (n.data as any).isEchoHouseAgent === true)
+1231 |       .map(n => ({
+1232 |         inferred_name: n.data.name,
+1233 |         role: (n.data as any).echohouseRole || "",
+1234 |         inferred_problem: (n.data as any).echohouseProblem || "",
+1235 |         is_self: (n.data as any).echohouseRole === "self"
+1236 |       }));
+1237 | 
+1238 |     // Abort any active orchestration
+1239 |     const currentController = get().abortController;
+1240 |     if (currentController) {
+1241 |       currentController.abort();
+1242 |     }
+1243 | 
+1244 |     const controller = new AbortController();
+1245 | 
+1246 |     set({
+1247 |       isOrchestrating: true,
+1248 |       isThinking: true,
+1249 |       statusMessage: "Initializing social simulation...",
+1250 |       liveThoughts: "",
+1251 |       agentTalkLogs: [],
+1252 |       followUpSuggestions: [],
+1253 |       abortController: controller
+1254 |     });
+1255 |     get().saveCurrentSession();
+1256 | 
+1257 |     try {
+1258 |       const activeProv = get().provider;
+1259 |       const apiKey = get().apiKeys[activeProv] || get().apiKey || "";
+1260 |       const response = await fetch("/api/gemini/echohouse/simulate", {
+1261 |         method: "POST",
+1262 |         headers: { "Content-Type": "application/json" },
+1263 |         body: JSON.stringify({
+1264 |           session_id: activeSessionId,
+1265 |           problem_text: problemText,
+1266 |           cast: cast,
+1267 |           provider: activeProv,
+1268 |           model: get().model,
+1269 |           api_key: apiKey,
+1270 |           api_keys: get().apiKeys,
+1271 |           base_url: get().providerBaseUrls[activeProv] || null,
+1272 |           rounds: rounds,
+1273 |           tone: tone,
+1274 |           backup_api_keys: get().backupApiKeys[activeProv] || [],
+1275 |         }),
+1276 |         signal: controller.signal
+1277 |       });
+1278 | 
+1279 |       if (!response.ok) {
+1280 |         const errData = await response.json().catch(() => ({ detail: "Simulation failed." }));
+1281 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
+1282 |       }
+1283 | 
+1284 |       let currentStreamingMsgId = "";
+1285 |       let currentText = "";
+1286 |       let simulationTextAccum = "";
+1287 | 
+1288 |       const handlers = {
+1289 |         onText: (token: string) => {
+1290 |           if (!currentStreamingMsgId) return;
+1291 |           currentText += token;
+1292 |           simulationTextAccum += token;
+1293 |           set((state) => ({
+1294 |             isThinking: false,
+1295 |             chatMessages: state.chatMessages.map(m =>
+1296 |               m.id === currentStreamingMsgId ? { ...m, text: currentText } : m
+1297 |             )
+1298 |           }));
+1299 |         },
+1300 |         onThinking: () => {},
+1301 |         onStatus: (msg: string) => {
+1302 |           set({ statusMessage: msg });
+1303 |           // Detect round start and inject a divider message
+1304 |           const roundMatch = msg.match(/Orchestrating Round (\d+) of social simulation/);
+1305 |           if (roundMatch) {
+1306 |             const roundNum = roundMatch[1];
+1307 |             const dividerId = `divider-round-${roundNum}-${Date.now()}`;
+1308 |             const dividerMsg: ChatMessage = {
+1309 |               id: dividerId,
+1310 |               sender: 'divider',
+1311 |               text: `Round ${roundNum}`,
+1312 |               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+1313 |             };
+1314 |             set((state) => ({ chatMessages: [...state.chatMessages, dividerMsg] }));
+1315 |             currentStreamingMsgId = "";
+1316 |             currentText = "";
+1317 |           }
+1318 |         },
+1319 |         onMetadata: (meta: Record<string, any>) => {
+1320 |           if (meta.active_speaker) {
+1321 |             // Inject insight divider before the insight speaker
+1322 |             if (meta.active_speaker === "insight") {
+1323 |               const insightDividerId = `divider-insight-${Date.now()}`;
+1324 |               const insightDivider: ChatMessage = {
+1325 |                 id: insightDividerId,
+1326 |                 sender: 'divider',
+1327 |                 text: 'Therapeutic Insight',
+1328 |                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+1329 |               };
+1330 |               set((state) => ({ chatMessages: [...state.chatMessages, insightDivider] }));
+1331 |             }
+1332 | 
+1333 |             const isSelf = meta.active_speaker === "You (Self)" || (meta.active_speaker || "").toLowerCase() === "self";
+1334 |             const newMsgId = `echo-msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+1335 | 
+1336 |             const newMsg: ChatMessage = {
+1337 |               id: newMsgId,
+1338 |               sender: meta.active_speaker === "insight" ? 'ai' : (isSelf ? 'user' : 'ai'),
+1339 |               text: "",
+1340 |               speakerName: meta.active_speaker,
+1341 |               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+1342 |             };
+1343 | 
+1344 |             set((state) => ({
+1345 |               chatMessages: [...state.chatMessages, newMsg]
+1346 |             }));
+1347 | 
+1348 |             currentStreamingMsgId = newMsgId;
+1349 |             currentText = "";
+1350 |           }
+1351 |         },
+1352 |         onToolApproval: () => {},
+1353 |         onDone: () => {},
+1354 |         onError: (err: Error) => { throw err; },
+1355 |       };
+1356 | 
+1357 |       await parseSSEStream(response, handlers, controller.signal);
+1358 |       set({ abortController: null });
+1359 |       get().saveCurrentSession();
+1360 | 
+1361 |       // Fetch actionable takeaways after simulation completes
+1362 |       try {
+1363 |         const takeawaysResp = await fetch("/api/gemini/echohouse/takeaways", {
+1364 |           method: "POST",
+1365 |           headers: { "Content-Type": "application/json" },
+1366 |           body: JSON.stringify({
+1367 |             simulation_text: simulationTextAccum,
+1368 |             problem_text: problemText,
+1369 |             provider: activeProv,
+1370 |             model: get().model,
+1371 |             api_key: apiKey,
+1372 |             api_keys: get().apiKeys,
+1373 |             base_url: get().providerBaseUrls[activeProv] || null,
+1374 |             backup_api_keys: get().backupApiKeys[activeProv] || [],
+1375 |           })
+1376 |         });
+1377 |         if (takeawaysResp.ok) {
+1378 |           const { takeaways } = await takeawaysResp.json();
+1379 |           if (Array.isArray(takeaways) && takeaways.length > 0) {
+1380 |             const takeawaysMsgId = `echo-takeaways-${Date.now()}`;
+1381 |             const takeawaysMsg: ChatMessage = {
+1382 |               id: takeawaysMsgId,
+1383 |               sender: 'ai',
+1384 |               text: '',
+1385 |               speakerName: 'takeaways',
+1386 |               takeaways: takeaways,
+1387 |               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+1388 |             };
+1389 |             set((state) => ({ chatMessages: [...state.chatMessages, takeawaysMsg] }));
+1390 |             get().saveCurrentSession();
+1391 |           }
+1392 |         }
+1393 |       } catch (e) {
+1394 |         console.error("Failed to fetch EchoHouse takeaways:", e);
+1395 |       }
+1396 |     } catch (err: any) {
+1397 |       if (err.name === 'AbortError') {
+1398 |         console.log("EchoHouse simulation manually aborted.");
+1399 |       } else {
+1400 |         console.error("EchoHouse simulation stream error:", err);
+1401 |       }
+1402 |       set({ abortController: null, isThinking: false, isOrchestrating: false });
+1403 |       get().saveCurrentSession();
+1404 |     } finally {
+1405 |       set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
+1406 |       get().saveCurrentSession();
+1407 |     }
+1408 |   }
+1409 | }));
+1410 | 
+1411 | let persistTimeout: any = null;
+1412 | useWorkflowStore.subscribe((state) => {
+1413 |   if (typeof window === 'undefined') return;
+1414 |   if (persistTimeout) clearTimeout(persistTimeout);
+1415 |   persistTimeout = setTimeout(async () => {
+1416 |     try {
+1417 |       const stateToPersist = {
+1418 |         activeSessionId: state.activeSessionId,
+1419 |         sessions: state.sessions,
+1420 |         nodes: state.nodes,
+1421 |         edges: state.edges,
+1422 |         provider: state.provider,
+1423 |         model: state.model,
+1424 |         fallbackProvider: state.fallbackProvider,
+1425 |         providerBaseUrls: state.providerBaseUrls,
+1426 |       };
+1427 |       await idbSet('solospace_workflow_state', JSON.stringify(stateToPersist));
+1428 |     } catch (e) {
+1429 |       console.error("Failed to persist state to IndexedDB:", e);
+1430 |     }
+1431 |   }, 500);
+1432 | });
+1433 |
 ```
 
 ### File: `Frontend/tests/crypto.test.ts`
