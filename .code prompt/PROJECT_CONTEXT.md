@@ -1,11 +1,11 @@
 # Full Project Context
 
-> Generated: 2026-05-30T09:33:55.898Z
+> Generated: 2026-05-30T16:57:40.858Z
 > Mode: Full Project
-> Files: 67
-> Total Lines: 10,910
-> Total Size: 427.1 KB
-> Directories: 33
+> Files: 68
+> Total Lines: 11,147
+> Total Size: 438.0 KB
+> Directories: 34
 
 ---
 
@@ -74,6 +74,8 @@ SoloSpace/
 │   │   │       │   └── route.ts
 │   │   │       ├── sessions/
 │   │   │       │   ├── [id]/
+│   │   │       │   │   └── route.ts
+│   │   │       │   ├── save/
 │   │   │       │   │   └── route.ts
 │   │   │       │   └── route.ts
 │   │   │       └── test_agent/
@@ -1474,48 +1476,48 @@ SoloSpace/
  39 | # ─── Provider Registry ───────────────────────────────────────────────
  40 | 
  41 | PROVIDERS: Dict[str, Dict[str, Any]] = {
- 42 |     "gemini": {
- 43 |         "name": "Google Gemini",
- 44 |         "description": "Multimodal AI with native JSON schema & embeddings",
- 45 |         "base_url": "https://generativelanguage.googleapis.com/v1beta",
- 46 |         "chat_path": None,
- 47 |         "default_model": "gemini-2.5-flash",
+ 42 |     "openai": {
+ 43 |         "name": "OpenAI",
+ 44 |         "description": "GPT-4o, o3-mini, o1 reasoning models",
+ 45 |         "base_url": "https://api.openai.com/v1",
+ 46 |         "chat_path": "/chat/completions",
+ 47 |         "default_model": "gpt-4.1",
  48 |         "models": [
- 49 |             {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "tier": "fast"},
- 50 |             {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "tier": "advanced"},
- 51 |             {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "tier": "fast"},
- 52 |             {"id": "gemini-2.5-flash-lite", "name": "Gemini 2.5 Flash Lite", "tier": "fast"},
- 53 |             {"id": "gemini-2.0-flash-lite", "name": "Gemini 2.0 Flash Lite", "tier": "fast"},
- 54 |             {"id": "gemma-3-27b-it", "name": "Gemma 3 27B IT", "tier": "open"},
- 55 |             {"id": "gemma-3-12b-it", "name": "Gemma 3 12B IT", "tier": "open"},
- 56 |             {"id": "gemma-3-4b-it", "name": "Gemma 3 4B IT", "tier": "open"},
- 57 |         ],
- 58 |         "capabilities": ["chat", "streaming", "json_schema", "embeddings"],
- 59 |         "key_url": "https://aistudio.google.com/apikey",
- 60 |         "key_hint": "AIzaSy...",
- 61 |         "adapter": "gemini",
- 62 |     },
- 63 |     "openai": {
- 64 |         "name": "OpenAI",
- 65 |         "description": "GPT-4o, o3-mini, o1 reasoning models",
- 66 |         "base_url": "https://api.openai.com/v1",
- 67 |         "chat_path": "/chat/completions",
- 68 |         "default_model": "gpt-4o",
- 69 |         "models": [
- 70 |             {"id": "gpt-4.1", "name": "GPT-4.1", "tier": "advanced"},
- 71 |             {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini", "tier": "fast"},
- 72 |             {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano", "tier": "fast"},
- 73 |             {"id": "gpt-4o", "name": "GPT-4o", "tier": "advanced"},
- 74 |             {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "tier": "fast"},
- 75 |             {"id": "o4-mini", "name": "o4-mini", "tier": "reasoning"},
- 76 |             {"id": "o3", "name": "o3", "tier": "reasoning"},
- 77 |             {"id": "o3-mini", "name": "o3-mini", "tier": "reasoning"},
- 78 |             {"id": "o1", "name": "o1", "tier": "reasoning"},
+ 49 |             {"id": "gpt-4.1", "name": "GPT-4.1", "tier": "advanced"},
+ 50 |             {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini", "tier": "fast"},
+ 51 |             {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano", "tier": "fast"},
+ 52 |             {"id": "gpt-4o", "name": "GPT-4o", "tier": "advanced"},
+ 53 |             {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "tier": "fast"},
+ 54 |             {"id": "o4-mini", "name": "o4-mini", "tier": "reasoning"},
+ 55 |             {"id": "o3", "name": "o3", "tier": "reasoning"},
+ 56 |             {"id": "o3-mini", "name": "o3-mini", "tier": "reasoning"},
+ 57 |             {"id": "o1", "name": "o1", "tier": "reasoning"},
+ 58 |         ],
+ 59 |         "capabilities": ["chat", "streaming", "json_mode", "embeddings"],
+ 60 |         "key_url": "https://platform.openai.com/api-keys",
+ 61 |         "key_hint": "sk-...",
+ 62 |         "adapter": "openai",
+ 63 |     },
+ 64 |     "gemini": {
+ 65 |         "name": "Google Gemini",
+ 66 |         "description": "Multimodal AI with native JSON schema & embeddings",
+ 67 |         "base_url": "https://generativelanguage.googleapis.com/v1beta",
+ 68 |         "chat_path": None,
+ 69 |         "default_model": "gemini-2.5-flash",
+ 70 |         "models": [
+ 71 |             {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "tier": "fast"},
+ 72 |             {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "tier": "advanced"},
+ 73 |             {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "tier": "fast"},
+ 74 |             {"id": "gemini-2.5-flash-lite", "name": "Gemini 2.5 Flash Lite", "tier": "fast"},
+ 75 |             {"id": "gemini-2.0-flash-lite", "name": "Gemini 2.0 Flash Lite", "tier": "fast"},
+ 76 |             {"id": "gemma-3-27b-it", "name": "Gemma 3 27B IT", "tier": "open"},
+ 77 |             {"id": "gemma-3-12b-it", "name": "Gemma 3 12B IT", "tier": "open"},
+ 78 |             {"id": "gemma-3-4b-it", "name": "Gemma 3 4B IT", "tier": "open"},
  79 |         ],
- 80 |         "capabilities": ["chat", "streaming", "json_mode", "embeddings"],
- 81 |         "key_url": "https://platform.openai.com/api-keys",
- 82 |         "key_hint": "sk-...",
- 83 |         "adapter": "openai",
+ 80 |         "capabilities": ["chat", "streaming", "json_schema", "embeddings"],
+ 81 |         "key_url": "https://aistudio.google.com/apikey",
+ 82 |         "key_hint": "AIzaSy...",
+ 83 |         "adapter": "gemini",
  84 |     },
  85 |     "claude": {
  86 |         "name": "Anthropic Claude",
@@ -2026,7 +2028,7 @@ SoloSpace/
  42 |     headers = {
  43 |         "Content-Type": "application/json",
  44 |         "x-api-key": api_key,
- 45 |         "anthropic-version": "2024-10-22",
+ 45 |         "anthropic-version": "2023-06-01",
  46 |     }
  47 | 
  48 |     payload: Dict[str, Any] = {
@@ -2072,7 +2074,7 @@ SoloSpace/
  88 |     headers = {
  89 |         "Content-Type": "application/json",
  90 |         "x-api-key": api_key,
- 91 |         "anthropic-version": "2024-10-22",
+ 91 |         "anthropic-version": "2023-06-01",
  92 |     }
  93 | 
  94 |     payload: Dict[str, Any] = {
@@ -4217,7 +4219,7 @@ SoloSpace/
  53 | 
  54 | app.add_middleware(
  55 |     CORSMiddleware,
- 56 |     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+ 56 |     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "https://*.vercel.app", "https://*.netlify.app"],
  57 |     allow_credentials=True,
  58 |     allow_methods=["*"],
  59 |     allow_headers=["*"],
@@ -4473,7 +4475,7 @@ SoloSpace/
 309 |         new_node = {
 310 |             "id": agent_id,
 311 |             "type": "custom",
-312 |             "position": {"x": 180 + col_idx * 260, "y": 100 + (len(nodes) // 3) * 200},
+312 |             "position": {"x": 100 + col_idx * 400, "y": 80 + (len(nodes) // 3) * 320},
 313 |             "data": {
 314 |                 "name": custom.get("name", agent.get("senderName", agent_id)),
 315 |                 "icon": custom.get("icon", "science"),
@@ -5464,6 +5466,38 @@ SoloSpace/
 46 |
 ```
 
+### File: `Frontend/app/api/gemini/sessions/save/route.ts`
+
+> 25 lines | 0.8 KB
+
+```typescript
+ 1 | import { NextRequest } from "next/server";
+ 2 | 
+ 3 | export async function POST(req: NextRequest) {
+ 4 |   try {
+ 5 |     const body = await req.json();
+ 6 | 
+ 7 |     const pyResponse = await fetch("http://127.0.0.1:8000/sessions/save", {
+ 8 |       method: "POST",
+ 9 |       headers: { "Content-Type": "application/json" },
+10 |       body: JSON.stringify(body),
+11 |     });
+12 | 
+13 |     if (!pyResponse.ok) {
+14 |       const errorData = await pyResponse.json().catch(() => ({ detail: `Backend error: ${pyResponse.status}` }));
+15 |       return Response.json(errorData, { status: pyResponse.status });
+16 |     }
+17 | 
+18 |     const data = await pyResponse.json();
+19 |     return Response.json(data);
+20 |   } catch (err: any) {
+21 |     console.error("Proxy error for /sessions/save — Python backend unreachable:", err.message);
+22 |     return Response.json({ detail: "Python backend is unavailable." }, { status: 503 });
+23 |   }
+24 | }
+25 |
+```
+
 ### File: `Frontend/app/api/gemini/sessions/route.ts`
 
 > 47 lines | 1.7 KB
@@ -5871,990 +5905,1095 @@ SoloSpace/
 
 ### File: `Frontend/app/page.tsx`
 
-> 981 lines | 61.5 KB
+> 1086 lines | 66.8 KB
 
 ```tsx
-  1 | 'use client';
-  2 | 
-  3 | import React, { useState, useEffect, useRef } from "react";
-  4 | import {
-  5 |   Bot, Zap, SquarePlus, Key, History, Settings, User, ChevronRight, ChevronLeft,
-  6 |   HelpCircle, UploadCloud, Eye, Mic, GitFork, ArrowRight, Database, Sliders,
-  7 |   X, Trash2, Globe, Terminal, Sparkles, Copy, Check, Square, Pencil, RefreshCw
-  8 | } from "lucide-react";
-  9 | import { motion, AnimatePresence } from "motion/react";
- 10 | import { ReactFlowProvider } from '@xyflow/react';
- 11 | import { useWorkflowStore, ChatMessage, AgentTalkLog } from "@/store/workflowStore";
- 12 | import FlowArena from "@/components/FlowArena";
- 13 | import MarkdownRenderer from "@/components/MarkdownRenderer";
- 14 | import APIKeysModal from "@/components/APIKeysModal";
- 15 | import { useWebSocket } from "@/store/hooks/useWebSocket";
- 16 | 
- 17 | const StreamingText = ({ text, isActive }: { text: string; isActive: boolean }) => (
- 18 |   <span className="whitespace-pre-wrap font-sans text-neutral-200">
- 19 |     {text}
- 20 |     {isActive && <span className="ml-1 inline-block w-1.5 h-4 bg-white align-middle animate-blink" />}
- 21 |   </span>
- 22 | );
- 23 | 
- 24 | export default function SolospaceApp() {
- 25 |   return (
- 26 |     <ReactFlowProvider>
- 27 |       <SolospaceContent />
- 28 |     </ReactFlowProvider>
- 29 |   );
- 30 | }
- 31 | 
- 32 | function SolospaceContent() {
- 33 |   const sessions = useWorkflowStore((s) => s.sessions);
- 34 |   const activeSessionId = useWorkflowStore((s) => s.activeSessionId);
- 35 |   const nodes = useWorkflowStore((s) => s.nodes);
- 36 |   const edges = useWorkflowStore((s) => s.edges);
- 37 |   const selectedNodeId = useWorkflowStore((s) => s.selectedNodeId);
- 38 |   const isOrchestrating = useWorkflowStore((s) => s.isOrchestrating);
- 39 |   const isThinking = useWorkflowStore((s) => s.isThinking);
- 40 |   const statusMessage = useWorkflowStore((s) => s.statusMessage);
- 41 |   const chatMessages = useWorkflowStore((s) => s.chatMessages);
- 42 |   const agentTalkLogs = useWorkflowStore((s) => s.agentTalkLogs);
- 43 |   const pendingApproval = useWorkflowStore((s) => s.pendingApproval);
- 44 |   const liveThoughts = useWorkflowStore((s) => s.liveThoughts);
- 45 |   const provider = useWorkflowStore((s) => s.provider);
- 46 |   const model = useWorkflowStore((s) => s.model);
- 47 |   const followUpSuggestions = useWorkflowStore((s) => s.followUpSuggestions);
- 48 | 
- 49 |   const setSelectedNodeId = useWorkflowStore((s) => s.setSelectedNodeId);
- 50 |   const setNodes = useWorkflowStore((s) => s.setNodes);
- 51 |   const setEdges = useWorkflowStore((s) => s.setEdges);
- 52 |   const setExecutionState = useWorkflowStore((s) => s.setExecutionState);
- 53 |   const updateNodeField = useWorkflowStore((s) => s.updateNodeField);
- 54 |   const addRule = useWorkflowStore((s) => s.addRule);
- 55 |   const deleteRule = useWorkflowStore((s) => s.deleteRule);
- 56 |   const deleteEdge = useWorkflowStore((s) => s.deleteEdge);
- 57 |   const setChatMessages = useWorkflowStore((s) => s.setChatMessages);
- 58 |   const createSession = useWorkflowStore((s) => s.createSession);
- 59 |   const cancelOrchestration = useWorkflowStore((s) => s.cancelOrchestration);
- 60 |   const fetchSessions = useWorkflowStore((s) => s.fetchSessions);
- 61 |   const loadSessionFromDb = useWorkflowStore((s) => s.loadSessionFromDb);
- 62 |   const deleteSessionFromDb = useWorkflowStore((s) => s.deleteSessionFromDb);
- 63 |   const fetchAvailableProviders = useWorkflowStore((s) => s.fetchAvailableProviders);
- 64 |   const triggerSteerOrchestration = useWorkflowStore((s) => s.triggerSteerOrchestration);
- 65 |   const loadPersistedKeys = useWorkflowStore((s) => s.loadPersistedKeys);
- 66 |   const loadPersistedState = useWorkflowStore((s) => s.loadPersistedState);
- 67 | 
- 68 |   const { isConnected, sendApprovalResponse } = useWebSocket(activeSessionId);
- 69 | 
- 70 |   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
- 71 |   const chatContainerRef = useRef<HTMLDivElement>(null);
- 72 |   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
- 73 |   const textareaRef = useRef<HTMLTextAreaElement>(null);
- 74 |   const chatEndRef = useRef<HTMLDivElement>(null);
- 75 | 
- 76 |   const [workspaceState, setWorkspaceState] = useState<"home" | "active">("home");
- 77 |   const [currentTab, setCurrentTab] = useState<"chat" | "arena">("chat");
- 78 |   const [executionMode, setExecutionMode] = useState<"auto" | "custom">("auto");
- 79 |   const [isSidebarExpanded, setIsSidebarExpanded] = useState<boolean>(true);
- 80 |   const [isLoadingSession, setIsLoadingSession] = useState<boolean>(false);
- 81 |   const [userQuery, setUserQuery] = useState<string>("");
- 82 |   const [isSecretOpen, setIsSecretOpen] = useState<boolean>(false);
- 83 |   const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
- 84 |   const [hoveredSidebarItem, setHoveredSidebarItem] = useState<string | null>(null);
- 85 |   const [isConfigPanelOpen, setIsConfigPanelOpen] = useState<boolean>(false);
- 86 |   const [newRuleText, setNewRuleText] = useState<string>("");
- 87 |   const [isTemplatesExpanded, setIsTemplatesExpanded] = useState<boolean>(true);
- 88 | 
- 89 |   const isEchoHouseMode = useWorkflowStore(s => s.activeSessionId ? s.sessions[s.activeSessionId]?.mode === 'echohouse' : false);
- 90 | 
- 91 |   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
- 92 | 
- 93 |   // EchoHouse guided intake state
- 94 |   const [echoStep, setEchoStep] = useState<1 | 2 | 3>(1);
- 95 |   const [echoSituation, setEchoSituation] = useState("");
- 96 |   const [echoFocus, setEchoFocus] = useState("");
- 97 |   const [echoCast, setEchoCast] = useState<any[]>([]);
- 98 |   const [isLoadingCast, setIsLoadingCast] = useState(false);
- 99 |   const [editingCastIdx, setEditingCastIdx] = useState<number | null>(null);
-100 | 
-101 |   useEffect(() => {
-102 |     if (textareaRef.current) {
-103 |       textareaRef.current.style.height = "auto";
-104 |       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
-105 |     }
-106 |   }, [userQuery]);
-107 | 
-108 |   useEffect(() => {
-109 |     if (selectedNodeId) setIsConfigPanelOpen(true);
-110 |     else setIsConfigPanelOpen(false);
-111 |   }, [selectedNodeId]);
-112 | 
-113 |   useEffect(() => {
-114 |     if (shouldAutoScroll) chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-115 |   }, [chatMessages, isThinking, shouldAutoScroll]);
-116 | 
-117 |   useEffect(() => {
-118 |     if (workspaceState === "active" && activeSessionId === null) {
-119 |       setWorkspaceState("home");
-120 |       setCurrentTab("chat");
-121 |       setUserQuery("");
-122 |     }
-123 |   }, [activeSessionId, workspaceState]);
-124 | 
-125 |   useEffect(() => {
-126 |     const init = async () => {
-127 |       await fetchSessions().catch(e => console.error("Failed to load sessions:", e));
-128 |       await fetchAvailableProviders().catch(e => console.error("Failed to load providers:", e));
-129 |       await loadPersistedKeys().catch(e => console.error("Failed to load API keys:", e));
-130 |       await loadPersistedState().catch(e => console.error("Failed to load state:", e));
-131 |       if (useWorkflowStore.getState().isOrchestrating) {
-132 |         useWorkflowStore.setState({
-133 |           isOrchestrating: false,
-134 |           isThinking: false,
-135 |           abortController: null
-136 |         });
-137 |       }
-138 |     };
-139 |     init();
-140 | 
-141 |     const handleUnload = () => {
-142 |       useWorkflowStore.getState().saveCurrentSession();
-143 |     };
-144 |     window.addEventListener("beforeunload", handleUnload);
-145 |     return () => {
-146 |       window.removeEventListener("beforeunload", handleUnload);
-147 |     };
-148 |   }, []);
-149 | 
-150 |   useEffect(() => {
-151 |     const handleResize = () => setIsSidebarExpanded(window.innerWidth >= 768);
-152 |     handleResize();
-153 |     window.addEventListener("resize", handleResize);
-154 |     return () => window.removeEventListener("resize", handleResize);
-155 |   }, []);
-156 | 
-157 |   // Reset EchoHouse intake when session changes
-158 |   useEffect(() => {
-159 |     if (isEchoHouseMode) {
-160 |       setEchoStep(1);
-161 |       setEchoSituation("");
-162 |       setEchoFocus("");
-163 |       setEchoCast([]);
-164 |       setEditingCastIdx(null);
-165 |     }
-166 |   }, [activeSessionId]);
-167 | 
-168 |   const fetchEchoCast = async (situationText: string, focusText: string) => {
-169 |     setIsLoadingCast(true);
-170 |     try {
-171 |       const activeProv = useWorkflowStore.getState().provider;
-172 |       const apiKey = useWorkflowStore.getState().apiKeys[activeProv] || useWorkflowStore.getState().apiKey || "";
-173 |       const resp = await fetch("/api/gemini/echohouse/init", {
-174 |         method: "POST",
-175 |         headers: { "Content-Type": "application/json" },
-176 |         body: JSON.stringify({
-177 |           problem_text: `${situationText}\n\nFocus: ${focusText}`,
-178 |           provider: activeProv,
-179 |           model: useWorkflowStore.getState().model,
-180 |           api_key: apiKey,
-181 |           api_keys: useWorkflowStore.getState().apiKeys,
-182 |           base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null,
-183 |           backup_api_keys: useWorkflowStore.getState().backupApiKeys[activeProv] || []
-184 |         })
-185 |       });
-186 |       if (resp.ok) {
-187 |         const castData = await resp.json();
-188 |         if (Array.isArray(castData)) {
-189 |           setEchoCast(castData);
-190 |         }
-191 |       }
-192 |     } catch (e) {
-193 |       console.error("Failed to fetch cast:", e);
-194 |     } finally {
-195 |       setIsLoadingCast(false);
-196 |     }
-197 |   };
-198 | 
-199 |   const beginEchoHouseSimulation = () => {
-200 |     const selfMember = echoCast.find(m => m.is_self || m.role === "self");
-201 |     const selfNode = {
-202 |       id: "self-node",
-203 |       type: "custom",
-204 |       position: { x: 300, y: 200 },
-205 |       data: {
-206 |         name: selfMember?.inferred_name || "You (Self)",
-207 |         tag: "SELF",
-208 |         icon: "bot",
-209 |         objective: echoSituation.length > 120 ? echoSituation.substring(0, 120) + "..." : echoSituation,
-210 |         systemPrompt: "You are the user themselves, experiencing this problem from the inside.",
-211 |         status: "IDLE" as const,
-212 |         enabled: true,
-213 |         isEchoHouseAgent: true,
-214 |         echohouseRole: "self",
-215 |         echohouseProblem: echoSituation,
-216 |         emotional_core: selfMember?.emotional_core || "",
-217 |         rules: [],
-218 |         dependencies: [],
-219 |         tools: [],
-220 |         toolPermissions: {},
-221 |         temp: 0.7,
-222 |         logic: 70,
-223 |         empathy: 50,
-224 |         priority: 5,
-225 |         toolLogs: [],
-226 |         personality: "",
-227 |         senderId: "self-node"
-228 |       }
-229 |     };
-230 |     const nodesList: any[] = [selfNode];
-231 |     echoCast.forEach((member: any, idx: number) => {
-232 |       if (member.is_self || member.role === "self") return;
-233 |       const angle = (idx * 2 * Math.PI) / Math.max(echoCast.length - 1, 1);
-234 |       const x = 300 + Math.cos(angle) * 250;
-235 |       const y = 200 + Math.sin(angle) * 200;
-236 |       nodesList.push({
-237 |         id: `echo-agent-${idx}-${Date.now()}`,
-238 |         type: "custom",
-239 |         position: { x: Math.max(50, x), y: Math.max(50, y) },
-240 |         data: {
-241 |           name: member.inferred_name,
-242 |           tag: member.role.toUpperCase().replace(/\s+/g, "_"),
-243 |           icon: "science",
-244 |           objective: `Provide perspective as ${member.inferred_name} (${member.role}).`,
-245 |           systemPrompt: `You are ${member.inferred_name}, whose role in the user's life is ${member.role}. From your perspective about their situation: ${member.inferred_problem}`,
-246 |           status: "IDLE" as const,
-247 |           enabled: true,
-248 |           isEchoHouseAgent: true,
-249 |           echohouseRole: member.role,
-250 |           echohouseProblem: member.inferred_problem,
-251 |           emotional_core: member.emotional_core || "",
-252 |           rules: [],
-253 |           dependencies: [],
-254 |           tools: [],
-255 |           toolPermissions: {},
-256 |           temp: 0.8,
-257 |           logic: 70,
-258 |           empathy: 50,
-259 |           priority: 5,
-260 |           toolLogs: [],
-261 |           personality: "",
-262 |           senderId: `echo-agent-${idx}-${Date.now()}`
-263 |         }
-264 |       });
-265 |     });
-266 |     setNodes(nodesList);
-267 |     setEdges([]);
-268 |     setWorkspaceState("active");
-269 |     setCurrentTab("arena");
-270 |   };
-271 | 
-272 |   const startOrchestration = async (promptText: string) => {
-273 |     if (!promptText.trim()) return;
-274 | 
-275 |     if (isEchoHouseMode) {
-276 |       const userMsgId = Date.now().toString();
-277 |       const userMsg: ChatMessage = {
-278 |         id: userMsgId,
-279 |         sender: "user",
-280 |         text: promptText,
-281 |         speakerName: "You (Self)",
-282 |         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-283 |       };
-284 |       setChatMessages((prev) => [...prev, userMsg]);
-285 |       setUserQuery("");
-286 |       setCurrentTab("arena");
-287 | 
-288 |       const selfNode = {
-289 |         id: "self-node",
-290 |         type: "custom",
-291 |         position: { x: 300, y: 200 },
-292 |         data: {
-293 |           name: "You (Self)",
-294 |           tag: "SELF",
-295 |           icon: "bot",
-296 |           objective: promptText.length > 120 ? promptText.substring(0, 120) + "..." : promptText,
-297 |           systemPrompt: "You are the user themselves, experiencing this problem from the inside.",
-298 |           status: "IDLE" as const,
-299 |           enabled: true,
-300 |           isEchoHouseAgent: true,
-301 |           echohouseRole: "self",
-302 |           echohouseProblem: promptText,
-303 |           rules: [],
-304 |           dependencies: [],
-305 |           tools: [],
-306 |           toolPermissions: {},
-307 |           temp: 0.7,
-308 |           logic: 70,
-309 |           empathy: 50,
-310 |           priority: 5,
-311 |           toolLogs: [],
-312 |           personality: "",
-313 |           senderId: "self-node"
-314 |         }
-315 |       };
-316 |       setNodes([selfNode]);
-317 |       setEdges([]);
-318 | 
-319 |       try {
-320 |         const activeProv = useWorkflowStore.getState().provider;
-321 |         const apiKey = useWorkflowStore.getState().apiKeys[activeProv] || useWorkflowStore.getState().apiKey || "";
-322 |         const resp = await fetch("/api/gemini/echohouse/init", {
-323 |           method: "POST",
-324 |           headers: { "Content-Type": "application/json" },
-325 |           body: JSON.stringify({
-326 |             problem_text: promptText,
-327 |             provider: activeProv,
-328 |             model: useWorkflowStore.getState().model,
-329 |             api_key: apiKey,
-330 |             api_keys: useWorkflowStore.getState().apiKeys,
-331 |             base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null,
-332 |             backup_api_keys: useWorkflowStore.getState().backupApiKeys[activeProv] || []
-333 |           })
-334 |         });
-335 |         if (resp.ok) {
-336 |           const suggestedCast = await resp.json();
-337 |           const nodesList = [selfNode];
-338 |           suggestedCast.forEach((member: any, idx: number) => {
-339 |             if (member.is_self || member.role === "self") return;
-340 |             
-341 |             const angle = (idx * 2 * Math.PI) / (suggestedCast.length - 1 || 1);
-342 |             const x = 300 + Math.cos(angle) * 250;
-343 |             const y = 200 + Math.sin(angle) * 200;
-344 |             
-345 |             nodesList.push({
-346 |               id: `echo-agent-${idx}-${Date.now()}`,
-347 |               type: "custom",
-348 |               position: { x: Math.max(50, x), y: Math.max(50, y) },
-349 |               data: {
-350 |                 name: member.inferred_name,
-351 |                 tag: member.role.toUpperCase().replace(/\s+/g, "_"),
-352 |                 icon: "science",
-353 |                 objective: `Provide perspective as ${member.inferred_name} (${member.role}).`,
-354 |                 systemPrompt: `You are ${member.inferred_name}, whose role in the user's life is ${member.role}. From your perspective about their situation: ${member.inferred_problem}`,
-355 |                 status: "IDLE" as const,
-356 |                 enabled: true,
-357 |                 isEchoHouseAgent: true,
-358 |                 echohouseRole: member.role,
-359 |                 echohouseProblem: member.inferred_problem,
-360 |                 rules: [],
-361 |                 dependencies: [],
-362 |                 tools: [],
-363 |                 toolPermissions: {},
-364 |                 temp: 0.8,
-365 |                 logic: 70,
-366 |                 empathy: 50,
-367 |                 priority: 5,
-368 |                 toolLogs: [],
-369 |                 personality: "",
-370 |                 senderId: `echo-agent-${idx}-${Date.now()}`
-371 |               }
-372 |             });
-373 |           });
-374 |           setNodes(nodesList);
-375 |         }
-376 |       } catch (e) {
-377 |         console.error("Failed to suggest cast:", e);
-378 |       }
-379 |       return;
-380 |     }
-381 | 
-382 |     setWorkspaceState("active");
-383 |     let sessionId = activeSessionId;
-384 |     if (!sessionId) sessionId = createSession(promptText, executionMode);
-385 |     setExecutionState("running");
-386 |     if (executionMode === "custom") {
-387 |       setCurrentTab("arena");
-388 |       triggerSteerOrchestration(promptText, false, "custom");
-389 |       // executionState will be set to "paused" by the store after the plan arrives
-390 |     } else {
-391 |       setCurrentTab("chat");
-392 |       triggerSteerOrchestration(promptText, true, "auto");
-393 |     }
-394 |     setUserQuery("");
-395 |   };
-396 | 
-397 |   const handleRegenerate = () => {
-398 |     const lastAIIdx = chatMessages.findLastIndex(m => m.sender === "ai");
-399 |     if (lastAIIdx === -1) return;
-400 |     
-401 |     const lastUserMsg = chatMessages.slice(0, lastAIIdx).findLast(m => m.sender === "user");
-402 |     if (!lastUserMsg) return;
-403 | 
-404 |     setChatMessages((prev) => prev.slice(0, lastAIIdx));
-405 |     startOrchestration(lastUserMsg.text);
-406 |   };
-407 | 
-408 |   const handleAddRule = () => {
-409 |     if (!newRuleText.trim() || !selectedNodeId) return;
-410 |     addRule(selectedNodeId, newRuleText.trim());
-411 |     setNewRuleText("");
-412 |   };
-413 | 
-414 |   const activeNodeDetail = nodes.find(n => n.id === selectedNodeId) as any;
-415 | 
-416 |   const ModeSelector = () => (
-417 |     <div className="flex items-center gap-1 bg-neutral-900/40 rounded-full p-0.5 border border-[#1f1f1f]">
-418 |       <button onClick={() => setExecutionMode("auto")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "auto" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Smart</button>
-419 |       <button onClick={() => setExecutionMode("custom")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "custom" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Custom</button>
-420 |     </div>
-421 |   );
-422 | 
-423 |   const handleFileAttach = () => {
-424 |     const input = document.createElement("input");
-425 |     input.type = "file";
-426 |     input.accept = ".txt,.md,.json,.csv,.py,.js,.ts,.tsx,.html,.css,.yaml,.yml,.xml,.ini,.cfg,.pdf,.jpg,.png";
-427 |     input.onchange = (e: any) => {
-428 |       const file = e.target.files?.[0];
-429 |       if (!file) return;
-430 |       const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-431 |       if (['.txt', '.md', '.json', '.csv', '.py', '.js', '.ts', '.tsx', '.html', '.css', '.yaml', '.yml', '.xml', '.ini', '.cfg'].includes(ext)) {
-432 |         const reader = new FileReader();
-433 |         reader.onload = (ev) => setUserQuery((prev) => prev + `\n[Attached: ${file.name}]\n${ev.target?.result as string}\n`);
-434 |         reader.readAsText(file);
-435 |       }
-436 |     };
-437 |     input.click();
-438 |   };
-439 | 
-440 |   return (
-441 |     <div className="flex h-screen w-full bg-black text-[#f5f5f5] overflow-hidden font-sans">
-442 |       <aside onClick={() => { if (!isSidebarExpanded) setIsSidebarExpanded(true); }} className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-30 select-none cursor-pointer ${isSidebarExpanded ? "w-64 cursor-default" : "w-[60px]"}`}>
-443 |         <div className="flex items-center gap-3 h-16 border-b border-[#1f1f1f] px-4 justify-between">
-444 |           {isSidebarExpanded ? (
-445 |             <div className="flex items-center gap-2.5">
-446 |               <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
-447 |               <h1 className="text-sm font-bold text-white tracking-tight leading-none">Solospace</h1>
-448 |             </div>
-449 |           ) : (
-450 |             <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center mx-auto"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
-451 |           )}
-452 |           {isSidebarExpanded && <button onClick={(e) => { e.stopPropagation(); setIsSidebarExpanded(false); }} className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>}
-453 |         </div>
-454 | 
-455 |         <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto custom-scrollbar">
-456 |           <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); useWorkflowStore.getState().abortController?.abort(); setWorkspaceState("home"); setUserQuery(""); useWorkflowStore.setState({ activeSessionId: null, nodes: [], edges: [], chatMessages: [], agentTalkLogs: [], executionState: "setup", statusMessage: "", isThinking: false, isOrchestrating: false, liveThoughts: "", pendingApproval: null, followUpSuggestions: [], abortController: null }); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
-457 |             <SquarePlus className="w-5 h-5 stroke-[1.8]" />
-458 |             {isSidebarExpanded && <span className="text-xs font-semibold">New Chat</span>}
-459 |           </button>
-460 | 
-461 |           <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsSecretOpen(true); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
-462 |             <Key className="w-5 h-5 stroke-[1.8]" />
-463 |             {isSidebarExpanded && <span className="text-xs font-semibold">API Keys</span>}
-464 |           </button>
-465 | 
-466 |           {/* Templates Section */}
-467 |           <div className="pt-2 select-none">
-468 |             {isSidebarExpanded ? (
-469 |               <>
-470 |                 <button
-471 |                   onClick={(e) => { e.stopPropagation(); setIsTemplatesExpanded(!isTemplatesExpanded); }}
-472 |                   className="w-full flex items-center justify-between px-3 py-1.5 text-neutral-600 hover:text-neutral-400 cursor-pointer"
-473 |                 >
-474 |                   <span className="text-[10px] font-bold uppercase tracking-widest font-mono">Templates</span>
-475 |                   <ChevronRight className={`w-3.5 h-3.5 transition-transform duration-200 ${isTemplatesExpanded ? "rotate-90" : ""}`} />
-476 |                 </button>
-477 |                 {isTemplatesExpanded && (
-478 |                   <button
-479 |                     onClick={(e) => {
-480 |                       e.stopPropagation();
-481 |                       createSession("EchoHouse Simulation", "echohouse");
-482 |                       setWorkspaceState("active");
-483 |                       setCurrentTab("chat");
-484 |                     }}
-485 |                     className="w-full flex items-center rounded-lg transition-all duration-150 py-2.5 px-3 gap-3 hover:bg-neutral-900 text-neutral-200 cursor-pointer"
-486 |                   >
-487 |                     <Globe className="w-5 h-5 stroke-[1.8]" />
-488 |                     <span className="text-xs font-semibold">EchoHouse</span>
-489 |                   </button>
-490 |                 )}
-491 |               </>
-492 |             ) : (
-493 |               <button
-494 |                 onClick={() => {
-495 |                   createSession("EchoHouse Simulation", "echohouse");
-496 |                   setWorkspaceState("active");
-497 |                   setCurrentTab("chat");
-498 |                 }}
-499 |                 className="w-full flex items-center justify-center rounded-lg transition-all duration-150 py-2.5 hover:bg-neutral-900 text-neutral-400 cursor-pointer"
-500 |                 title="EchoHouse Template"
-501 |               >
-502 |                 <Globe className="w-5 h-5 stroke-[1.8]" />
-503 |               </button>
-504 |             )}
-505 |           </div>
-506 | 
-507 |           {isSidebarExpanded && (
-508 |             <div className="pt-6 space-y-2 select-none">
-509 |               <div className="flex items-center gap-1.5 px-3"><History className="w-3.5 h-3.5 text-neutral-600" /><span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest font-mono">Recents</span></div>
-510 |               <div className="space-y-1 max-h-[220px] overflow-y-auto custom-scrollbar">
-511 |                 {Object.values(sessions).length === 0 ? <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span> : (
-512 |                   Object.values(sessions).reverse().map((s) => (
-513 |                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
-514 |                       <button disabled={isLoadingSession} onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsLoadingSession(true); try { await loadSessionFromDb(s.id); setWorkspaceState("active"); setCurrentTab("chat"); } catch (err) { console.error(err); } finally { setIsLoadingSession(false); } } }} className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${activeSessionId === s.id ? "text-white font-bold" : "text-neutral-500 hover:text-white"}`} title={s.prompt}>{s.mode === 'echohouse' ? `${s.title} [Echo]` : s.title}</button>
-515 |                       <button onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); if (confirm(`Delete "${s.title}"?`)) await deleteSessionFromDb(s.id); } }} className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
-516 |                     </div>
-517 |                   ))
-518 |                 )}
-519 |               </div>
-520 |             </div>
-521 |           )}
-522 |         </nav>
-523 |       </aside>
-524 | 
-525 |       <main onClick={() => { if (isSidebarExpanded && window.innerWidth < 768) setIsSidebarExpanded(false); }} className="flex-1 flex flex-col min-w-0 bg-[#000000] relative transition-all duration-300">
-526 |         <header className="flex justify-between items-center w-full px-6 h-16 border-b border-[#141414] shrink-0 z-10 bg-black/85 backdrop-blur-md">
-527 |           <div className="flex items-center gap-2" />
-528 |           <div className="flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-[2px] rounded-full select-none">
-529 |             <button onClick={() => { if (workspaceState !== "home") setCurrentTab("chat"); }} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${currentTab === "chat" || workspaceState === "home" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>Chat</button>
-530 |             {workspaceState === "active" && (
-531 |               <button onClick={() => setCurrentTab("arena")} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${currentTab === "arena" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>
-532 |                 <GitFork className="w-3 h-3" /> Flow {nodes.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse ml-0.5" />}
-533 |               </button>
-534 |             )}
-535 |           </div>
-536 |           <div className="flex items-center gap-2 select-none">
-537 |             <button onClick={() => alert("Solospace AI OS")} className="text-neutral-400 hover:text-white p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer"><HelpCircle className="w-4 h-4 stroke-[1.8]" /></button>
-538 |           </div>
-539 |         </header>
-540 | 
-541 |         <div className="flex-1 relative overflow-hidden">
-542 |           {workspaceState === "home" && !isEchoHouseMode && (
-543 |             <div className="absolute inset-0 flex flex-col justify-between overflow-y-auto custom-scrollbar">
-544 |               <div />
-545 |               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
-546 |                 <div className="text-center mb-10 space-y-2 select-none">
-547 |                   <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">What do you want to know?</h1>
-548 |                   <p className="text-sm text-neutral-400 font-sans">No filters. No hedging. Ask anything.</p>
-549 |                 </div>
-550 |                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
-551 |                   <div className="flex items-center gap-3">
-552 |                     <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
-553 |                     <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder="Ask anything. Be specific." className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
-554 |                     <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim()} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
-555 |                   </div>
-556 |                 </div>
-557 |                 <div className="flex items-center gap-3 mt-5 select-none">
-558 |                   <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">Mode:</span>
-559 |                   <button onClick={() => setExecutionMode("auto")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "auto" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sparkles className="w-3 h-3 stroke-[2]" /><span>Smart Auto</span></button>
-560 |                   <button onClick={() => setExecutionMode("custom")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "custom" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sliders className="w-3 h-3" /><span>Custom Agent</span></button>
-561 |                 </div>
-562 |               </div>
-563 |               <div />
-564 |             </div>
-565 |           )}
-566 | 
-567 |           {workspaceState === "home" && isEchoHouseMode && (
-568 |             <div className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto custom-scrollbar px-6 py-12">
-569 |               <div className="w-full max-w-xl space-y-8">
-570 |                 {/* Step indicator */}
-571 |                 <div className="flex items-center gap-2 select-none">
-572 |                   {[1, 2, 3].map((s) => (
-573 |                     <div key={s} className="flex items-center gap-2">
-574 |                       <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-mono font-bold transition-all ${echoStep >= s ? 'bg-white text-black' : 'bg-neutral-800 text-neutral-500'}`}>{s}</div>
-575 |                       {s < 3 && <div className={`w-8 h-px transition-all ${echoStep > s ? 'bg-white' : 'bg-neutral-800'}`} />}
-576 |                     </div>
-577 |                   ))}
-578 |                   <span className="text-[10px] font-mono text-neutral-500 ml-2 uppercase tracking-wider">
-579 |                     {echoStep === 1 ? 'Situation' : echoStep === 2 ? 'Focus' : 'Cast Review'}
-580 |                   </span>
-581 |                 </div>
-582 | 
-583 |                 {/* Step 1 — Situation */}
-584 |                 {echoStep === 1 && (
-585 |                   <div className="space-y-4">
-586 |                     <div className="space-y-1">
-587 |                       <h1 className="text-2xl font-bold text-white tracking-tight">Describe the situation you are navigating.</h1>
-588 |                       <p className="text-xs text-neutral-500 font-sans">Write freely. This is private. The more specific, the more useful the simulation.</p>
-589 |                     </div>
-590 |                     <textarea
-591 |                       rows={6}
-592 |                       value={echoSituation}
-593 |                       onChange={(e) => setEchoSituation(e.target.value)}
-594 |                       placeholder="My manager keeps dismissing my ideas in meetings. Last week they took credit for a suggestion I made and..."
-595 |                       className="w-full bg-neutral-950 border border-[#1f1f1f] rounded-2xl p-4 text-sm text-neutral-200 outline-none placeholder:text-neutral-700 focus:border-neutral-600 resize-none leading-relaxed transition-colors custom-scrollbar"
-596 |                     />
-597 |                     <button
-598 |                       onClick={() => { if (echoSituation.trim()) setEchoStep(2); }}
-599 |                       disabled={!echoSituation.trim()}
-600 |                       className="w-full py-3 bg-white text-black font-semibold text-sm rounded-2xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
-601 |                     >
-602 |                       Continue
-603 |                     </button>
-604 |                   </div>
-605 |                 )}
-606 | 
-607 |                 {/* Step 2 — Focus */}
-608 |                 {echoStep === 2 && (
-609 |                   <div className="space-y-4">
-610 |                     <div className="space-y-1">
-611 |                       <h1 className="text-2xl font-bold text-white tracking-tight">What do you want from this simulation?</h1>
-612 |                       <p className="text-xs text-neutral-500 font-sans">Select the focus that best fits your goal.</p>
-613 |                     </div>
-614 |                     <div className="space-y-2">
-615 |                       {[
-616 |                         "Understand why this keeps happening",
-617 |                         "Prepare for a difficult conversation",
-618 |                         "Process feelings about a past event"
-619 |                       ].map((option) => (
-620 |                         <button
-621 |                           key={option}
-622 |                           onClick={() => setEchoFocus(option)}
-623 |                           className={`w-full text-left px-4 py-3 rounded-xl border text-sm transition-all cursor-pointer ${echoFocus === option ? 'border-white bg-white/[0.06] text-white font-semibold' : 'border-[#1f1f1f] text-neutral-400 hover:border-neutral-600 hover:text-white'}`}
-624 |                         >
-625 |                           {option}
-626 |                         </button>
-627 |                       ))}
-628 |                     </div>
-629 |                     <div className="flex gap-2">
-630 |                       <button onClick={() => setEchoStep(1)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
-631 |                       <button
-632 |                         onClick={async () => {
-633 |                           if (echoFocus.trim()) {
-634 |                             setEchoStep(3);
-635 |                             if (executionMode === "auto") {
-636 |                               await fetchEchoCast(echoSituation, echoFocus);
-637 |                             } else {
-638 |                               setEchoCast([]);
-639 |                             }
-640 |                           }
-641 |                         }}
-642 |                         disabled={!echoFocus.trim()}
-643 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
-644 |                       >
-645 |                         {isLoadingCast ? "Inferring cast..." : "Next"}
-646 |                       </button>
-647 |                     </div>
-648 |                   </div>
-649 |                 )}
-650 | 
-651 |                 {/* Step 3 — Cast Review */}
-652 |                 {echoStep === 3 && (
-653 |                   <div className="space-y-4">
-654 |                     <div className="space-y-1">
-655 |                       <h1 className="text-2xl font-bold text-white tracking-tight">Review the cast.</h1>
-656 |                       <p className="text-xs text-neutral-500 font-sans">These are the people who will participate in the simulation. Edit, remove, or add as needed.</p>
-657 |                     </div>
-658 |                     {isLoadingCast ? (
-659 |                       <div className="flex items-center justify-center py-12">
-660 |                         <div className="w-5 h-5 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
-661 |                         <span className="text-xs text-neutral-500 ml-3 font-mono">Inferring cast...</span>
-662 |                       </div>
-663 |                     ) : (executionMode === "custom" && echoCast.length === 0) ? (
-664 |                       <p>You are in Custom mode. Add people directly on the canvas after starting the simulation.</p>
-665 |                     ) : (
-666 |                       <div className="space-y-2">
-667 |                         {echoCast.map((member, idx) => (
-668 |                           <div key={idx} className="bg-neutral-950 border border-[#1f1f1f] rounded-xl p-3 space-y-2">
-669 |                             {editingCastIdx === idx ? (
-670 |                               <div className="space-y-2">
-671 |                                 <input
-672 |                                   type="text"
-673 |                                   value={member.inferred_name}
-674 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_name: e.target.value } : m))}
-675 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
-676 |                                   placeholder="Name"
-677 |                                 />
-678 |                                 <input
-679 |                                   type="text"
-680 |                                   value={member.role}
-681 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, role: e.target.value } : m))}
-682 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
-683 |                                   placeholder="Role"
-684 |                                 />
-685 |                                 <textarea
-686 |                                   value={member.inferred_problem}
-687 |                                   rows={2}
-688 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_problem: e.target.value } : m))}
-689 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2.5 text-xs text-white outline-none focus:border-neutral-500 resize-none"
-690 |                                   placeholder="Their perspective..."
-691 |                                 />
-692 |                                 <button onClick={() => setEditingCastIdx(null)} className="text-[10px] font-mono text-neutral-400 hover:text-white cursor-pointer">Done</button>
-693 |                               </div>
-694 |                             ) : (
-695 |                               <div className="flex items-start justify-between gap-2">
-696 |                                 <div className="min-w-0 flex-1">
-697 |                                   <div className="flex items-center gap-2">
-698 |                                     <span className="text-xs font-semibold text-white">{member.inferred_name}</span>
-699 |                                     <span className="text-[9px] font-mono text-neutral-500 uppercase tracking-wider">{member.role}</span>
-700 |                                   </div>
-701 |                                   <p className="text-[11px] text-neutral-500 leading-relaxed mt-0.5 line-clamp-2">{member.inferred_problem}</p>
-702 |                                 </div>
-703 |                                 {!member.is_self && (
-704 |                                   <div className="flex gap-1 shrink-0">
-705 |                                     <button onClick={() => setEditingCastIdx(idx)} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><Pencil className="w-3 h-3" /></button>
-706 |                                     <button onClick={() => setEchoCast(prev => prev.filter((_, i) => i !== idx))} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><X className="w-3 h-3" /></button>
-707 |                                   </div>
-708 |                                 )}
-709 |                               </div>
-710 |                             )}
-711 |                           </div>
-712 |                         ))}
-713 |                         <button
-714 |                           onClick={() => setEchoCast(prev => [...prev, { inferred_name: "New Person", role: "acquaintance", inferred_problem: "Enter their perspective...", emotional_core: "", is_self: false }])}
-715 |                           className="w-full py-2.5 border border-dashed border-[#1f1f1f] rounded-xl text-xs text-neutral-500 hover:text-white hover:border-neutral-600 transition-all cursor-pointer"
-716 |                         >
-717 |                           Add Person
-718 |                         </button>
-719 |                       </div>
-720 |                     )}
-721 |                     <div className="flex gap-2">
-722 |                       <button onClick={() => setEchoStep(2)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
-723 |                       <button
-724 |                         onClick={beginEchoHouseSimulation}
-725 |                         disabled={isLoadingCast || (executionMode !== "custom" && echoCast.filter(m => !m.is_self).length === 0)}
-726 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
-727 |                       >
-728 |                         Begin Simulation
-729 |                       </button>
-730 |                     </div>
-731 |                   </div>
-732 |                 )}
-733 |               </div>
-734 |             </div>
-735 |           )}
-736 | 
-737 |           {workspaceState === "active" && (
-738 |             <div className="absolute inset-0 flex">
-739 |               {currentTab === "chat" && (
-740 |                 <div className="flex-1 flex flex-col justify-between overflow-hidden bg-black">
-741 |                   <div ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
-742 |                     {isLoadingSession ? (
-743 |                       <div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" /></div>
-744 |                     ) : (
-745 |                       <div className="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto space-y-4 select-text">
-746 |                         {chatMessages.length === 0 ? (
-747 |                           <div className="flex flex-col items-center justify-center py-20 text-center space-y-2 select-none">
-748 |                             <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">
-749 |                               {isEchoHouseMode ? "What is your problem in life?" : "What's on your mind?"}
-750 |                             </h1>
-751 |                             <p className="text-sm text-neutral-400 font-sans">
-752 |                               {isEchoHouseMode ? "Type your struggle below to initialize the simulation." : "Start a conversation to see AI response."}
-753 |                             </p>
-754 |                           </div>
-755 |                         ) : (
-756 |                           chatMessages.map((msg, msgIdx) => (
-757 |                             <motion.div key={msg.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={`flex w-full ${msg.sender === "divider" ? "justify-center" : msg.sender === "user" ? "justify-end" : "justify-start"}`}>
-758 |                               {msg.sender === "divider" ? (
-759 |                                 <div className="w-full flex items-center gap-4 my-4 select-none">
-760 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
-761 |                                   <span className="text-[10px] font-mono text-neutral-500 tracking-wider uppercase">{msg.text}</span>
-762 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
-763 |                                 </div>
-764 |                               ) : msg.sender === "user" ? (
-765 |                                 <div className="flex flex-col items-end space-y-1 max-w-[72%] group">
-766 |                                   {msg.speakerName && (
-767 |                                     <span className="text-[10px] font-mono text-neutral-500 mr-2">{msg.speakerName}</span>
-768 |                                   )}
-769 |                                   <div className={`rounded-3xl px-5 py-3 text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'bg-neutral-800' : 'bg-[#2f2f2f]'}`}><p className="whitespace-pre-wrap">{msg.text}</p></div>
-770 |                                   <div className="flex items-center gap-3 mt-1.5 text-neutral-500 select-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 mr-2">
-771 |                                     <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
-772 |                                       {copiedMsgId === msg.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-773 |                                       <span>{copiedMsgId === msg.id ? "Copied" : "Copy"}</span>
-774 |                                     </button>
-775 |                                     <button onClick={() => { setUserQuery(msg.text); textareaRef.current?.focus(); textareaRef.current?.scrollIntoView({ behavior: "smooth" }); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
-776 |                                       <Pencil className="w-3 h-3" />
-777 |                                       <span>Edit</span>
-778 |                                     </button>
-779 |                                   </div>
-780 |                                 </div>
-781 |                               ) : (
-782 |                                 <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
-783 |                                   {msg.speakerName && msg.speakerName !== "insight" && msg.speakerName !== "takeaways" && (
-784 |                                     <span className="text-[10px] font-mono text-neutral-500 ml-1">{msg.speakerName}</span>
-785 |                                   )}
-786 |                                   {msg.speakerName === "takeaways" && msg.takeaways ? (
-787 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 space-y-3 mt-2">
-788 |                                       <span className="text-[10px] font-mono text-neutral-400 uppercase tracking-wider font-bold block">What you can try</span>
-789 |                                       <ol className="space-y-2">
-790 |                                         {msg.takeaways.map((item, ti) => (
-791 |                                           <li key={ti} className="flex gap-2.5 text-xs text-neutral-300 leading-relaxed">
-792 |                                             <span className="font-mono text-neutral-600 shrink-0">{ti + 1}.</span>
-793 |                                             <span>{item}</span>
-794 |                                           </li>
-795 |                                         ))}
-796 |                                       </ol>
-797 |                                     </div>
-798 |                                   ) : msg.speakerName === "insight" ? (
-799 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4">
-800 |                                       {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
-801 |                                     </div>
-802 |                                   ) : (
-803 |                                     <div className={`w-full text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'rounded-2xl px-4 py-3 bg-neutral-900' : 'px-1 py-2'}`}>
-804 |                                       {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
-805 |                                       {msg.text && (!isOrchestrating || msgIdx !== chatMessages.length - 1) && (
-806 |                                         <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
-807 |                                           <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
-808 |                                             {copiedMsgId === msg.id ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400 font-medium">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
-809 |                                           </button>
-810 |                                           {!isEchoHouseMode && msgIdx === chatMessages.length - 1 && !isOrchestrating && (
-811 |                                             <button onClick={handleRegenerate} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
-812 |                                               <RefreshCw className="w-3.5 h-3.5" />
-813 |                                               <span>Regenerate</span>
-814 |                                             </button>
-815 |                                           )}
-816 |                                         </div>
-817 |                                       )}
-818 |                                     </div>
-819 |                                   )}
-820 |                                   {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && nodes.length > 0 && (
-821 |                                     <div className="flex gap-3 mt-4 select-none">
-822 |                                       <button onClick={() => setCurrentTab("arena")} className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max">
-823 |                                         <GitFork className="w-3.5 h-3.5 text-cyan-400" /><span>See Agent Flow</span>
-824 |                                       </button>
-825 |                                       {!isEchoHouseMode && useWorkflowStore.getState().executionState === "paused" && (
-826 |                                         <button
-827 |                                           onClick={async () => {
-828 |                                             setExecutionState("running");
-829 |                                             await useWorkflowStore.getState().triggerCustomExecution();
-830 |                                           }}
-831 |                                           className="px-4 py-2 bg-white hover:bg-neutral-200 rounded-xl text-xs font-bold text-black transition-all flex items-center gap-1.5 cursor-pointer max-w-max"
-832 |                                         >
-833 |                                           Proceed
-834 |                                         </button>
-835 |                                       )}
-836 |                                     </div>
-837 |                                   )}
-838 |                                 </div>
-839 |                               )}
-840 |                             </motion.div>
-841 |                           ))
-842 |                         )}
-843 |                         <div ref={chatEndRef} />
-844 |                       </div>
-845 |                     )}
-846 |                   </div>
-847 |                   <div className="px-4 sm:px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
-848 |                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
-849 |                       <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
-850 |                       <textarea ref={textareaRef} rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery); } }} placeholder={isOrchestrating ? "Streaming..." : isEchoHouseMode ? "What is your problem in life?" : "Ask a follow-up..."} disabled={isOrchestrating} className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar" />
-851 |                       <div className="flex items-center gap-2 shrink-0">
-852 |                         <ModeSelector />
-853 |                         {isOrchestrating ? (
-854 |                           <button onClick={cancelOrchestration} className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all cursor-pointer"><Square className="w-3.5 h-3.5 text-white fill-white" /></button>
-855 |                         ) : (
-856 |                           <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim() || isThinking} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
-857 |                         )}
-858 |                       </div>
-859 |                     </div>
-860 |                   </div>
-861 |                 </div>
-862 |               )}
-863 |               {currentTab === "arena" && (
-864 |                 <div className="flex-1 relative overflow-hidden bg-[#000000] flex">
-865 |                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#0d0d0d]/90 border border-[#1f1f1f] rounded-full px-4 py-2 backdrop-blur-md shadow-xl pointer-events-auto">
-866 |                     <button onClick={() => setCurrentTab("chat")} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-mono"><ChevronLeft className="w-3.5 h-3.5" /> Back to Chat</button>
-867 |                   </div>
-868 |                   <FlowArena onProceed={() => setCurrentTab("chat")} />
-869 |                 </div>
-870 |               )}
-871 |             </div>
-872 |           )}
-873 |         </div>
-874 |       </main>
-875 | 
-876 |       {currentTab === "arena" && isConfigPanelOpen && activeNodeDetail && (
-877 |         <div className="fixed top-0 right-0 h-full w-80 bg-[#0c0c0c]/95 border-l border-[#1f1f1f] z-40 flex flex-col justify-between shadow-2xl transition-transform duration-300 right-panel select-none">
-878 |           <div className="p-5 border-b border-[#1f1f1f] flex justify-between items-center bg-[#0d0d0d]">
-879 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider">{activeNodeDetail.data.name}</h3>
-880 |             <button onClick={() => { setIsConfigPanelOpen(false); setSelectedNodeId(null); }} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
-881 |           </div>
-882 |           <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
-883 |             {activeNodeDetail.data.isEchoHouseAgent ? (
-884 |               <>
-885 |                 <div className="space-y-1.5">
-886 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label>
-887 |                   <input
-888 |                     type="text"
-889 |                     value={activeNodeDetail.data.name}
-890 |                     onChange={(e) => {
-891 |                       const nameVal = e.target.value;
-892 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
-893 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
-894 |                       updateNodeField(activeNodeDetail.id, {
-895 |                         name: nameVal,
-896 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
-897 |                         objective: nameVal === "You (Self)" || roleVal === "self"
-898 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
-899 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
-900 |                       });
-901 |                     }}
-902 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
-903 |                   />
-904 |                 </div>
-905 |                 <div className="space-y-1.5">
-906 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Role</label>
-907 |                   <input
-908 |                     type="text"
-909 |                     value={activeNodeDetail.data.echohouseRole}
-910 |                     disabled={activeNodeDetail.data.echohouseRole === "self"}
-911 |                     onChange={(e) => {
-912 |                       const nameVal = activeNodeDetail.data.name || "";
-913 |                       const roleVal = e.target.value;
-914 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
-915 |                       updateNodeField(activeNodeDetail.id, {
-916 |                         echohouseRole: roleVal,
-917 |                         tag: roleVal.toUpperCase().replace(/\s+/g, '_'),
-918 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
-919 |                         objective: `Provide perspective as ${nameVal} (${roleVal}).`
-920 |                       });
-921 |                     }}
-922 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none disabled:opacity-40"
-923 |                   />
-924 |                 </div>
-925 |                 <div className="space-y-1.5">
-926 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">
-927 |                     {activeNodeDetail.data.echohouseRole === "self" ? "Your problem in life" : "What do they think about your situation?"}
-928 |                   </label>
-929 |                   <textarea
-930 |                     value={activeNodeDetail.data.echohouseProblem}
-931 |                     onChange={(e) => {
-932 |                       const nameVal = activeNodeDetail.data.name || "";
-933 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
-934 |                       const probVal = e.target.value;
-935 |                       updateNodeField(activeNodeDetail.id, {
-936 |                         echohouseProblem: probVal,
-937 |                         systemPrompt: roleVal === "self"
-938 |                           ? "You are the user themselves, experiencing this problem from the inside."
-939 |                           : `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
-940 |                         objective: roleVal === "self"
-941 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
-942 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
-943 |                       });
-944 |                     }}
-945 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[100px] resize-none leading-relaxed"
-946 |                   />
-947 |                 </div>
-948 |               </>
-949 |             ) : (
-950 |               <>
-951 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label><input type="text" value={activeNodeDetail.data.name} onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none" /></div>
-952 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label><textarea value={activeNodeDetail.data.systemPrompt} onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed" /></div>
-953 |               </>
-954 |             )}
-955 |           </div>
-956 |         </div>
-957 |       )}
-958 | 
-959 |       <AnimatePresence>
-960 |         {isSecretOpen && <APIKeysModal isOpen={isSecretOpen} onClose={() => setIsSecretOpen(false)} />}
-961 |         
-962 |         {pendingApproval && (
-963 |           <div className="fixed bottom-6 right-6 w-96 bg-[#0d0d0d] border border-amber-500/50 shadow-[0_0_50px_rgba(245,158,11,0.15)] rounded-2xl p-5 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300 select-none">
-964 |             <div className="flex gap-4 items-start">
-965 |               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 shrink-0"><Sliders className="w-5 h-5 animate-pulse" /></div>
-966 |               <div className="flex-1 space-y-2">
-967 |                 <h4 className="text-xs font-bold text-white">&apos;{(nodes.find(n => n.id === pendingApproval.nodeId)?.data as any)?.name}&apos; wants to use <span className="text-amber-400 font-mono">[{pendingApproval.toolName}]</span></h4>
-968 |                 <p className="text-[10px] text-neutral-400 leading-normal">Action: <span className="text-white font-semibold">{pendingApproval.action}</span> — {pendingApproval.detail}</p>
-969 |                 <div className="pt-3 flex gap-2">
-970 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "approve", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Approve</button>
-971 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "deny", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="px-4 py-2 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Deny</button>
-972 |                 </div>
-973 |               </div>
-974 |             </div>
-975 |           </div>
-976 |         )}
-977 |       </AnimatePresence>
-978 |     </div>
-979 |   );
-980 | }
-981 |
+   1 | 'use client';
+   2 | 
+   3 | import React, { useState, useEffect, useRef } from "react";
+   4 | import {
+   5 |   Bot, Zap, SquarePlus, Key, History, Settings, User, ChevronRight, ChevronLeft, ChevronDown,
+   6 |   HelpCircle, UploadCloud, Eye, Mic, GitFork, ArrowRight, Database, Sliders,
+   7 |   X, Trash2, Globe, Terminal, Sparkles, Copy, Check, Square, Pencil, RefreshCw
+   8 | } from "lucide-react";
+   9 | import { motion, AnimatePresence } from "motion/react";
+  10 | import { ReactFlowProvider } from '@xyflow/react';
+  11 | import { useWorkflowStore, ChatMessage, AgentTalkLog } from "@/store/workflowStore";
+  12 | import FlowArena from "@/components/FlowArena";
+  13 | import MarkdownRenderer from "@/components/MarkdownRenderer";
+  14 | import APIKeysModal from "@/components/APIKeysModal";
+  15 | import { useWebSocket } from "@/store/hooks/useWebSocket";
+  16 | 
+  17 | const ThinkingText = ({ prefix = "thinking", className }: { prefix?: string; className?: string }) => {
+  18 |   const [dots, setDots] = useState('.');
+  19 | 
+  20 |   useEffect(() => {
+  21 |     const interval = setInterval(() => {
+  22 |       setDots((prev) => {
+  23 |         if (prev === '.') return '..';
+  24 |         if (prev === '..') return '...';
+  25 |         return '.';
+  26 |       });
+  27 |     }, 500);
+  28 |     return () => clearInterval(interval);
+  29 |   }, []);
+  30 | 
+  31 |   return (
+  32 |     <span className={`${className} inline-flex items-baseline`}>
+  33 |       <span>{prefix}</span>
+  34 |       <span className="inline-block w-4 text-left">{dots}</span>
+  35 |     </span>
+  36 |   );
+  37 | };
+  38 | 
+  39 | const StreamingText = ({ text, isActive }: { text: string; isActive: boolean }) => {
+  40 |   const [isExpanded, setIsExpanded] = useState(false);
+  41 |   const statusMessage = useWorkflowStore((s) => s.statusMessage);
+  42 |   const liveThoughts = useWorkflowStore((s) => s.liveThoughts);
+  43 | 
+  44 |   if (isActive && !text) {
+  45 |     return (
+  46 |       <div className="flex flex-col items-start gap-2 select-none">
+  47 |         <div 
+  48 |           onClick={() => setIsExpanded(!isExpanded)} 
+  49 |           className="flex items-center cursor-pointer hover:text-white/80 transition-colors"
+  50 |         >
+  51 |           <ThinkingText prefix="Thinking" className="text-sm font-sans text-neutral-200" />
+  52 |           <span className="text-neutral-500 shrink-0 flex items-center justify-center ml-2">
+  53 |             {isExpanded ? <ChevronDown className="w-3.5 h-3.5 text-neutral-400" /> : <ChevronRight className="w-3.5 h-3.5 text-neutral-400" />}
+  54 |           </span>
+  55 |         </div>
+  56 |         {isExpanded && (
+  57 |           <div className="w-full bg-[#050505] border border-[#1f1f1f] rounded-2xl p-4 space-y-2 max-h-60 overflow-y-auto custom-scrollbar font-mono text-[10px] text-neutral-400 leading-relaxed shadow-lg">
+  58 |             {statusMessage && (
+  59 |               <div className="flex items-start gap-2 text-white">
+  60 |                 <span className="text-neutral-500 font-semibold shrink-0">Status:</span>
+  61 |                 <span className="text-neutral-300">{statusMessage}</span>
+  62 |               </div>
+  63 |             )}
+  64 |             {liveThoughts ? (
+  65 |               <div className="space-y-1">
+  66 |                 <div className="text-neutral-500 font-semibold">Live Thoughts:</div>
+  67 |                 <div className="text-cyan-400 whitespace-pre-wrap bg-neutral-950/50 p-2.5 rounded-xl border border-neutral-900 leading-normal font-sans">
+  68 |                   {liveThoughts}
+  69 |                 </div>
+  70 |               </div>
+  71 |             ) : (
+  72 |               <div className="text-neutral-500 italic">No live thoughts streaming...</div>
+  73 |             )}
+  74 |           </div>
+  75 |         )}
+  76 |       </div>
+  77 |     );
+  78 |   }
+  79 | 
+  80 |   return (
+  81 |     <span className="whitespace-pre-wrap font-sans text-neutral-200">
+  82 |       {text}
+  83 |       {isActive && <span className="ml-1 inline-block w-1.5 h-4 bg-white align-middle animate-blink" />}
+  84 |     </span>
+  85 |   );
+  86 | };
+  87 | 
+  88 | export default function SolospaceApp() {
+  89 |   return (
+  90 |     <ReactFlowProvider>
+  91 |       <SolospaceContent />
+  92 |     </ReactFlowProvider>
+  93 |   );
+  94 | }
+  95 | 
+  96 | function SolospaceContent() {
+  97 |   const sessions = useWorkflowStore((s) => s.sessions);
+  98 |   const activeSessionId = useWorkflowStore((s) => s.activeSessionId);
+  99 |   const nodes = useWorkflowStore((s) => s.nodes);
+ 100 |   const edges = useWorkflowStore((s) => s.edges);
+ 101 |   const selectedNodeId = useWorkflowStore((s) => s.selectedNodeId);
+ 102 |   const isOrchestrating = useWorkflowStore((s) => s.isOrchestrating);
+ 103 |   const isThinking = useWorkflowStore((s) => s.isThinking);
+ 104 |   const statusMessage = useWorkflowStore((s) => s.statusMessage);
+ 105 |   const chatMessages = useWorkflowStore((s) => s.chatMessages);
+ 106 |   const agentTalkLogs = useWorkflowStore((s) => s.agentTalkLogs);
+ 107 |   const pendingApproval = useWorkflowStore((s) => s.pendingApproval);
+ 108 |   const liveThoughts = useWorkflowStore((s) => s.liveThoughts);
+ 109 |   const provider = useWorkflowStore((s) => s.provider);
+ 110 |   const model = useWorkflowStore((s) => s.model);
+ 111 |   const followUpSuggestions = useWorkflowStore((s) => s.followUpSuggestions);
+ 112 | 
+ 113 |   const setSelectedNodeId = useWorkflowStore((s) => s.setSelectedNodeId);
+ 114 |   const setNodes = useWorkflowStore((s) => s.setNodes);
+ 115 |   const setEdges = useWorkflowStore((s) => s.setEdges);
+ 116 |   const setExecutionState = useWorkflowStore((s) => s.setExecutionState);
+ 117 |   const updateNodeField = useWorkflowStore((s) => s.updateNodeField);
+ 118 |   const addRule = useWorkflowStore((s) => s.addRule);
+ 119 |   const deleteRule = useWorkflowStore((s) => s.deleteRule);
+ 120 |   const deleteEdge = useWorkflowStore((s) => s.deleteEdge);
+ 121 |   const setChatMessages = useWorkflowStore((s) => s.setChatMessages);
+ 122 |   const createSession = useWorkflowStore((s) => s.createSession);
+ 123 |   const cancelOrchestration = useWorkflowStore((s) => s.cancelOrchestration);
+ 124 |   const fetchSessions = useWorkflowStore((s) => s.fetchSessions);
+ 125 |   const loadSessionFromDb = useWorkflowStore((s) => s.loadSessionFromDb);
+ 126 |   const deleteSessionFromDb = useWorkflowStore((s) => s.deleteSessionFromDb);
+ 127 |   const fetchAvailableProviders = useWorkflowStore((s) => s.fetchAvailableProviders);
+ 128 |   const triggerSteerOrchestration = useWorkflowStore((s) => s.triggerSteerOrchestration);
+ 129 |   const loadPersistedKeys = useWorkflowStore((s) => s.loadPersistedKeys);
+ 130 |   const loadPersistedState = useWorkflowStore((s) => s.loadPersistedState);
+ 131 | 
+ 132 |   const { isConnected, sendApprovalResponse } = useWebSocket(activeSessionId);
+ 133 | 
+ 134 |   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+ 135 |   const chatContainerRef = useRef<HTMLDivElement>(null);
+ 136 |   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
+ 137 |   const textareaRef = useRef<HTMLTextAreaElement>(null);
+ 138 |   const chatEndRef = useRef<HTMLDivElement>(null);
+ 139 | 
+ 140 |   const [workspaceState, setWorkspaceState] = useState<"home" | "active">("home");
+ 141 |   const [currentTab, setCurrentTab] = useState<"chat" | "arena">("chat");
+ 142 |   const [executionMode, setExecutionMode] = useState<"auto" | "custom">("auto");
+ 143 |   const [isSidebarExpanded, setIsSidebarExpanded] = useState<boolean>(true);
+ 144 |   const [isLoadingSession, setIsLoadingSession] = useState<boolean>(false);
+ 145 |   const [userQuery, setUserQuery] = useState<string>("");
+ 146 |   const [isSecretOpen, setIsSecretOpen] = useState<boolean>(false);
+ 147 |   const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
+ 148 |   const [hoveredSidebarItem, setHoveredSidebarItem] = useState<string | null>(null);
+ 149 |   const [isConfigPanelOpen, setIsConfigPanelOpen] = useState<boolean>(false);
+ 150 |   const [newRuleText, setNewRuleText] = useState<string>("");
+ 151 |   const [isTemplatesExpanded, setIsTemplatesExpanded] = useState<boolean>(true);
+ 152 | 
+ 153 |   const isEchoHouseMode = useWorkflowStore(s => s.activeSessionId ? s.sessions[s.activeSessionId]?.mode === 'echohouse' : false);
+ 154 | 
+ 155 |   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
+ 156 | 
+ 157 |   // EchoHouse guided intake state
+ 158 |   const [echoStep, setEchoStep] = useState<1 | 2 | 3>(1);
+ 159 |   const [echoSituation, setEchoSituation] = useState("");
+ 160 |   const [echoFocus, setEchoFocus] = useState("");
+ 161 |   const [echoCast, setEchoCast] = useState<any[]>([]);
+ 162 |   const [isLoadingCast, setIsLoadingCast] = useState(false);
+ 163 |   const [editingCastIdx, setEditingCastIdx] = useState<number | null>(null);
+ 164 | 
+ 165 |   useEffect(() => {
+ 166 |     if (textareaRef.current) {
+ 167 |       textareaRef.current.style.height = "auto";
+ 168 |       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+ 169 |     }
+ 170 |   }, [userQuery]);
+ 171 | 
+ 172 |   useEffect(() => {
+ 173 |     if (selectedNodeId) setIsConfigPanelOpen(true);
+ 174 |     else setIsConfigPanelOpen(false);
+ 175 |   }, [selectedNodeId]);
+ 176 | 
+ 177 |   useEffect(() => {
+ 178 |     if (shouldAutoScroll) chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+ 179 |   }, [chatMessages, isThinking, shouldAutoScroll]);
+ 180 | 
+ 181 |   useEffect(() => {
+ 182 |     if (workspaceState === "active" && activeSessionId === null) {
+ 183 |       setWorkspaceState("home");
+ 184 |       setCurrentTab("chat");
+ 185 |       setUserQuery("");
+ 186 |     }
+ 187 |   }, [activeSessionId, workspaceState]);
+ 188 | 
+ 189 |   useEffect(() => {
+ 190 |     const init = async () => {
+ 191 |       await fetchSessions().catch(e => console.error("Failed to load sessions:", e));
+ 192 |       await fetchAvailableProviders().catch(e => console.error("Failed to load providers:", e));
+ 193 |       await loadPersistedKeys().catch(e => console.error("Failed to load API keys:", e));
+ 194 |       await loadPersistedState().catch(e => console.error("Failed to load state:", e));
+ 195 |       if (useWorkflowStore.getState().isOrchestrating) {
+ 196 |         useWorkflowStore.setState({
+ 197 |           isOrchestrating: false,
+ 198 |           isThinking: false,
+ 199 |           abortController: null
+ 200 |         });
+ 201 |       }
+ 202 |     };
+ 203 |     init();
+ 204 | 
+ 205 |     const handleUnload = () => {
+ 206 |       useWorkflowStore.getState().saveCurrentSession();
+ 207 |     };
+ 208 |     window.addEventListener("beforeunload", handleUnload);
+ 209 |     return () => {
+ 210 |       window.removeEventListener("beforeunload", handleUnload);
+ 211 |     };
+ 212 |   }, []);
+ 213 | 
+ 214 |   useEffect(() => {
+ 215 |     const handleResize = () => setIsSidebarExpanded(window.innerWidth >= 768);
+ 216 |     handleResize();
+ 217 |     window.addEventListener("resize", handleResize);
+ 218 |     return () => window.removeEventListener("resize", handleResize);
+ 219 |   }, []);
+ 220 | 
+ 221 |   // Reset EchoHouse intake when session changes
+ 222 |   useEffect(() => {
+ 223 |     if (isEchoHouseMode && (!activeSessionId || !sessions[activeSessionId] || !sessions[activeSessionId].chatMessages || sessions[activeSessionId].chatMessages.length === 0)) {
+ 224 |       setEchoStep(1);
+ 225 |       setEchoSituation("");
+ 226 |       setEchoFocus("");
+ 227 |       setEchoCast([]);
+ 228 |       setEditingCastIdx(null);
+ 229 |     }
+ 230 |   }, [activeSessionId, isEchoHouseMode, sessions]);
+ 231 | 
+ 232 |   const fetchEchoCast = async (situationText: string, focusText: string) => {
+ 233 |     setIsLoadingCast(true);
+ 234 |     try {
+ 235 |       const activeProv = useWorkflowStore.getState().provider;
+ 236 |       const apiKey = useWorkflowStore.getState().apiKeys[activeProv] || useWorkflowStore.getState().apiKey || "";
+ 237 |       const resp = await fetch("/api/gemini/echohouse/init", {
+ 238 |         method: "POST",
+ 239 |         headers: { "Content-Type": "application/json" },
+ 240 |         body: JSON.stringify({
+ 241 |           problem_text: `${situationText}\n\nFocus: ${focusText}`,
+ 242 |           provider: activeProv,
+ 243 |           model: useWorkflowStore.getState().model,
+ 244 |           api_key: apiKey,
+ 245 |           api_keys: useWorkflowStore.getState().apiKeys,
+ 246 |           base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null,
+ 247 |           backup_api_keys: useWorkflowStore.getState().backupApiKeys[activeProv] || []
+ 248 |         })
+ 249 |       });
+ 250 |       if (resp.ok) {
+ 251 |         const castData = await resp.json();
+ 252 |         if (Array.isArray(castData)) {
+ 253 |           setEchoCast(castData);
+ 254 |         }
+ 255 |       }
+ 256 |     } catch (e) {
+ 257 |       console.error("Failed to fetch cast:", e);
+ 258 |     } finally {
+ 259 |       setIsLoadingCast(false);
+ 260 |     }
+ 261 |   };
+ 262 | 
+ 263 |   const beginEchoHouseSimulation = () => {
+ 264 |     const selfMember = echoCast.find(m => m.is_self || m.role === "self");
+ 265 |     const selfNode = {
+ 266 |       id: "self-node",
+ 267 |       type: "custom",
+ 268 |       position: { x: 300, y: 200 },
+ 269 |       data: {
+ 270 |         name: selfMember?.inferred_name || "You (Self)",
+ 271 |         tag: "SELF",
+ 272 |         icon: "bot",
+ 273 |         objective: echoSituation.length > 120 ? echoSituation.substring(0, 120) + "..." : echoSituation,
+ 274 |         systemPrompt: "You are the user themselves, experiencing this problem from the inside.",
+ 275 |         status: "IDLE" as const,
+ 276 |         enabled: true,
+ 277 |         isEchoHouseAgent: true,
+ 278 |         echohouseRole: "self",
+ 279 |         echohouseProblem: echoSituation,
+ 280 |         emotional_core: selfMember?.emotional_core || "",
+ 281 |         rules: [],
+ 282 |         dependencies: [],
+ 283 |         tools: [],
+ 284 |         toolPermissions: {},
+ 285 |         temp: 0.7,
+ 286 |         logic: 70,
+ 287 |         empathy: 50,
+ 288 |         priority: 5,
+ 289 |         toolLogs: [],
+ 290 |         personality: "",
+ 291 |         senderId: "self-node"
+ 292 |       }
+ 293 |     };
+ 294 |     const nodesList: any[] = [selfNode];
+ 295 |     echoCast.forEach((member: any, idx: number) => {
+ 296 |       if (member.is_self || member.role === "self") return;
+ 297 |       const angle = (idx * 2 * Math.PI) / Math.max(echoCast.length - 1, 1);
+ 298 |       const x = 300 + Math.cos(angle) * 250;
+ 299 |       const y = 200 + Math.sin(angle) * 200;
+ 300 |       nodesList.push({
+ 301 |         id: `echo-agent-${idx}-${Date.now()}`,
+ 302 |         type: "custom",
+ 303 |         position: { x: Math.max(50, x), y: Math.max(50, y) },
+ 304 |         data: {
+ 305 |           name: member.inferred_name,
+ 306 |           tag: member.role.toUpperCase().replace(/\s+/g, "_"),
+ 307 |           icon: "science",
+ 308 |           objective: `Provide perspective as ${member.inferred_name} (${member.role}).`,
+ 309 |           systemPrompt: `You are ${member.inferred_name}, whose role in the user's life is ${member.role}. From your perspective about their situation: ${member.inferred_problem}`,
+ 310 |           status: "IDLE" as const,
+ 311 |           enabled: true,
+ 312 |           isEchoHouseAgent: true,
+ 313 |           echohouseRole: member.role,
+ 314 |           echohouseProblem: member.inferred_problem,
+ 315 |           emotional_core: member.emotional_core || "",
+ 316 |           rules: [],
+ 317 |           dependencies: [],
+ 318 |           tools: [],
+ 319 |           toolPermissions: {},
+ 320 |           temp: 0.8,
+ 321 |           logic: 70,
+ 322 |           empathy: 50,
+ 323 |           priority: 5,
+ 324 |           toolLogs: [],
+ 325 |           personality: "",
+ 326 |           senderId: `echo-agent-${idx}-${Date.now()}`
+ 327 |         }
+ 328 |       });
+ 329 |     });
+ 330 |     setNodes(nodesList);
+ 331 |     setEdges([]);
+ 332 |     setWorkspaceState("active");
+ 333 |     setCurrentTab("arena");
+ 334 |   };
+ 335 | 
+ 336 |   const startOrchestration = async (promptText: string) => {
+ 337 |     if (!promptText.trim()) return;
+ 338 | 
+ 339 |     if (isEchoHouseMode) {
+ 340 |       const userMsgId = Date.now().toString();
+ 341 |       const userMsg: ChatMessage = {
+ 342 |         id: userMsgId,
+ 343 |         sender: "user",
+ 344 |         text: promptText,
+ 345 |         speakerName: "You (Self)",
+ 346 |         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+ 347 |       };
+ 348 |       setChatMessages((prev) => [...prev, userMsg]);
+ 349 |       setUserQuery("");
+ 350 |       setCurrentTab("arena");
+ 351 | 
+ 352 |       const selfNode = {
+ 353 |         id: "self-node",
+ 354 |         type: "custom",
+ 355 |         position: { x: 300, y: 200 },
+ 356 |         data: {
+ 357 |           name: "You (Self)",
+ 358 |           tag: "SELF",
+ 359 |           icon: "bot",
+ 360 |           objective: promptText.length > 120 ? promptText.substring(0, 120) + "..." : promptText,
+ 361 |           systemPrompt: "You are the user themselves, experiencing this problem from the inside.",
+ 362 |           status: "IDLE" as const,
+ 363 |           enabled: true,
+ 364 |           isEchoHouseAgent: true,
+ 365 |           echohouseRole: "self",
+ 366 |           echohouseProblem: promptText,
+ 367 |           rules: [],
+ 368 |           dependencies: [],
+ 369 |           tools: [],
+ 370 |           toolPermissions: {},
+ 371 |           temp: 0.7,
+ 372 |           logic: 70,
+ 373 |           empathy: 50,
+ 374 |           priority: 5,
+ 375 |           toolLogs: [],
+ 376 |           personality: "",
+ 377 |           senderId: "self-node"
+ 378 |         }
+ 379 |       };
+ 380 |       setNodes([selfNode]);
+ 381 |       setEdges([]);
+ 382 | 
+ 383 |       try {
+ 384 |         const activeProv = useWorkflowStore.getState().provider;
+ 385 |         const apiKey = useWorkflowStore.getState().apiKeys[activeProv] || useWorkflowStore.getState().apiKey || "";
+ 386 |         const resp = await fetch("/api/gemini/echohouse/init", {
+ 387 |           method: "POST",
+ 388 |           headers: { "Content-Type": "application/json" },
+ 389 |           body: JSON.stringify({
+ 390 |             problem_text: promptText,
+ 391 |             provider: activeProv,
+ 392 |             model: useWorkflowStore.getState().model,
+ 393 |             api_key: apiKey,
+ 394 |             api_keys: useWorkflowStore.getState().apiKeys,
+ 395 |             base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null,
+ 396 |             backup_api_keys: useWorkflowStore.getState().backupApiKeys[activeProv] || []
+ 397 |           })
+ 398 |         });
+ 399 |         if (resp.ok) {
+ 400 |           const suggestedCast = await resp.json();
+ 401 |           const nodesList = [selfNode];
+ 402 |           suggestedCast.forEach((member: any, idx: number) => {
+ 403 |             if (member.is_self || member.role === "self") return;
+ 404 |             
+ 405 |             const angle = (idx * 2 * Math.PI) / (suggestedCast.length - 1 || 1);
+ 406 |             const x = 300 + Math.cos(angle) * 250;
+ 407 |             const y = 200 + Math.sin(angle) * 200;
+ 408 |             
+ 409 |             nodesList.push({
+ 410 |               id: `echo-agent-${idx}-${Date.now()}`,
+ 411 |               type: "custom",
+ 412 |               position: { x: Math.max(50, x), y: Math.max(50, y) },
+ 413 |               data: {
+ 414 |                 name: member.inferred_name,
+ 415 |                 tag: member.role.toUpperCase().replace(/\s+/g, "_"),
+ 416 |                 icon: "science",
+ 417 |                 objective: `Provide perspective as ${member.inferred_name} (${member.role}).`,
+ 418 |                 systemPrompt: `You are ${member.inferred_name}, whose role in the user's life is ${member.role}. From your perspective about their situation: ${member.inferred_problem}`,
+ 419 |                 status: "IDLE" as const,
+ 420 |                 enabled: true,
+ 421 |                 isEchoHouseAgent: true,
+ 422 |                 echohouseRole: member.role,
+ 423 |                 echohouseProblem: member.inferred_problem,
+ 424 |                 rules: [],
+ 425 |                 dependencies: [],
+ 426 |                 tools: [],
+ 427 |                 toolPermissions: {},
+ 428 |                 temp: 0.8,
+ 429 |                 logic: 70,
+ 430 |                 empathy: 50,
+ 431 |                 priority: 5,
+ 432 |                 toolLogs: [],
+ 433 |                 personality: "",
+ 434 |                 senderId: `echo-agent-${idx}-${Date.now()}`
+ 435 |               }
+ 436 |             });
+ 437 |           });
+ 438 |           setNodes(nodesList);
+ 439 |         }
+ 440 |       } catch (e) {
+ 441 |         console.error("Failed to suggest cast:", e);
+ 442 |       }
+ 443 |       return;
+ 444 |     }
+ 445 | 
+ 446 |     setWorkspaceState("active");
+ 447 |     let sessionId = activeSessionId;
+ 448 |     if (!sessionId) sessionId = createSession(promptText, executionMode);
+ 449 |     setExecutionState("running");
+ 450 |     if (executionMode === "custom") {
+ 451 |       setCurrentTab("arena");
+ 452 |       triggerSteerOrchestration(promptText, false, "custom");
+ 453 |       // executionState will be set to "paused" by the store after the plan arrives
+ 454 |     } else {
+ 455 |       setCurrentTab("chat");
+ 456 |       triggerSteerOrchestration(promptText, true, "auto");
+ 457 |     }
+ 458 |     setUserQuery("");
+ 459 |   };
+ 460 | 
+ 461 |   const handleRegenerate = () => {
+ 462 |     const lastAIIdx = chatMessages.findLastIndex(m => m.sender === "ai");
+ 463 |     if (lastAIIdx === -1) return;
+ 464 |     
+ 465 |     const lastUserMsg = chatMessages.slice(0, lastAIIdx).findLast(m => m.sender === "user");
+ 466 |     if (!lastUserMsg) return;
+ 467 | 
+ 468 |     setChatMessages((prev) => prev.slice(0, lastAIIdx));
+ 469 |     startOrchestration(lastUserMsg.text);
+ 470 |   };
+ 471 | 
+ 472 |   const handleAddRule = () => {
+ 473 |     if (!newRuleText.trim() || !selectedNodeId) return;
+ 474 |     addRule(selectedNodeId, newRuleText.trim());
+ 475 |     setNewRuleText("");
+ 476 |   };
+ 477 | 
+ 478 |   const activeNodeDetail = nodes.find(n => n.id === selectedNodeId) as any;
+ 479 | 
+ 480 |   const ModeSelector = () => (
+ 481 |     <div className="flex items-center gap-1 bg-neutral-900/40 rounded-full p-0.5 border border-[#1f1f1f]">
+ 482 |       <button onClick={() => setExecutionMode("auto")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "auto" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Smart</button>
+ 483 |       <button onClick={() => setExecutionMode("custom")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "custom" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Custom</button>
+ 484 |     </div>
+ 485 |   );
+ 486 | 
+ 487 |   const handleFileAttach = () => {
+ 488 |     const input = document.createElement("input");
+ 489 |     input.type = "file";
+ 490 |     input.accept = ".txt,.md,.json,.csv,.py,.js,.ts,.tsx,.html,.css,.yaml,.yml,.xml,.ini,.cfg,.pdf,.jpg,.png";
+ 491 |     input.onchange = (e: any) => {
+ 492 |       const file = e.target.files?.[0];
+ 493 |       if (!file) return;
+ 494 |       const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+ 495 |       if (['.txt', '.md', '.json', '.csv', '.py', '.js', '.ts', '.tsx', '.html', '.css', '.yaml', '.yml', '.xml', '.ini', '.cfg'].includes(ext)) {
+ 496 |         const reader = new FileReader();
+ 497 |         reader.onload = (ev) => setUserQuery((prev) => prev + `\n[Attached: ${file.name}]\n${ev.target?.result as string}\n`);
+ 498 |         reader.readAsText(file);
+ 499 |       }
+ 500 |     };
+ 501 |     input.click();
+ 502 |   };
+ 503 | 
+ 504 |   return (
+ 505 |     <div className="flex h-screen w-full bg-black text-[#f5f5f5] overflow-hidden font-sans">
+ 506 |       <aside onClick={() => { if (!isSidebarExpanded) setIsSidebarExpanded(true); }} className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-30 select-none cursor-pointer ${isSidebarExpanded ? "w-64 cursor-default" : "w-[60px]"}`}>
+ 507 |         <div className="flex items-center gap-3 h-16 border-b border-[#1f1f1f] px-4 justify-between">
+ 508 |           {isSidebarExpanded ? (
+ 509 |             <div className="flex items-center gap-2.5">
+ 510 |               <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
+ 511 |               <h1 className="text-sm font-bold text-white tracking-tight leading-none">Solospace</h1>
+ 512 |             </div>
+ 513 |           ) : (
+ 514 |             <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center mx-auto"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
+ 515 |           )}
+ 516 |           {isSidebarExpanded && <button onClick={(e) => { e.stopPropagation(); setIsSidebarExpanded(false); }} className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>}
+ 517 |         </div>
+ 518 | 
+ 519 |         <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto custom-scrollbar">
+ 520 |           <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); useWorkflowStore.getState().abortController?.abort(); setWorkspaceState("home"); setUserQuery(""); useWorkflowStore.setState({ activeSessionId: null, nodes: [], edges: [], chatMessages: [], agentTalkLogs: [], executionState: "setup", statusMessage: "", isThinking: false, isOrchestrating: false, liveThoughts: "", pendingApproval: null, followUpSuggestions: [], abortController: null }); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
+ 521 |             <SquarePlus className="w-5 h-5 stroke-[1.8]" />
+ 522 |             {isSidebarExpanded && <span className="text-xs font-semibold">New Chat</span>}
+ 523 |           </button>
+ 524 | 
+ 525 |           <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsSecretOpen(true); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
+ 526 |             <Key className="w-5 h-5 stroke-[1.8]" />
+ 527 |             {isSidebarExpanded && <span className="text-xs font-semibold">API Keys</span>}
+ 528 |           </button>
+ 529 | 
+ 530 |           {/* Templates Section */}
+ 531 |           <div className="pt-2 select-none">
+ 532 |             {isSidebarExpanded ? (
+ 533 |               <>
+ 534 |                 <button
+ 535 |                   onClick={(e) => { e.stopPropagation(); setIsTemplatesExpanded(!isTemplatesExpanded); }}
+ 536 |                   className="w-full flex items-center justify-between px-3 py-1.5 text-neutral-600 hover:text-neutral-400 cursor-pointer"
+ 537 |                 >
+ 538 |                   <span className="text-[10px] font-bold uppercase tracking-widest font-mono">Templates</span>
+ 539 |                   <ChevronRight className={`w-3.5 h-3.5 transition-transform duration-200 ${isTemplatesExpanded ? "rotate-90" : ""}`} />
+ 540 |                 </button>
+ 541 |                 {isTemplatesExpanded && (
+ 542 |                   <button
+ 543 |                     onClick={(e) => {
+ 544 |                       e.stopPropagation();
+ 545 |                       createSession("EchoHouse Simulation", "echohouse");
+ 546 |                       setWorkspaceState("active");
+ 547 |                       setCurrentTab("chat");
+ 548 |                     }}
+ 549 |                     className="w-full flex items-center rounded-lg transition-all duration-150 py-2.5 px-3 gap-3 hover:bg-neutral-900 text-neutral-200 cursor-pointer"
+ 550 |                   >
+ 551 |                     <Globe className="w-5 h-5 stroke-[1.8]" />
+ 552 |                     <span className="text-xs font-semibold">EchoHouse</span>
+ 553 |                   </button>
+ 554 |                 )}
+ 555 |               </>
+ 556 |             ) : (
+ 557 |               <button
+ 558 |                 onClick={() => {
+ 559 |                   createSession("EchoHouse Simulation", "echohouse");
+ 560 |                   setWorkspaceState("active");
+ 561 |                   setCurrentTab("chat");
+ 562 |                 }}
+ 563 |                 className="w-full flex items-center justify-center rounded-lg transition-all duration-150 py-2.5 hover:bg-neutral-900 text-neutral-400 cursor-pointer"
+ 564 |                 title="EchoHouse Template"
+ 565 |               >
+ 566 |                 <Globe className="w-5 h-5 stroke-[1.8]" />
+ 567 |               </button>
+ 568 |             )}
+ 569 |           </div>
+ 570 | 
+ 571 |           {isSidebarExpanded && (
+ 572 |             <div className="pt-6 space-y-2 select-none">
+ 573 |               <div className="flex items-center gap-1.5 px-3"><History className="w-3.5 h-3.5 text-neutral-600" /><span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest font-mono">Recents</span></div>
+ 574 |               <div className="space-y-1 max-h-[220px] overflow-y-auto custom-scrollbar">
+ 575 |                 {Object.values(sessions).length === 0 ? <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span> : (
+ 576 |                   Object.values(sessions).reverse().map((s) => (
+ 577 |                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
+ 578 |                       <button disabled={isLoadingSession} onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsLoadingSession(true); try { await loadSessionFromDb(s.id); setWorkspaceState("active"); setCurrentTab("chat"); } catch (err) { console.error(err); } finally { setIsLoadingSession(false); } } }} className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${activeSessionId === s.id ? "text-white font-bold" : "text-neutral-500 hover:text-white"}`} title={s.prompt}>{s.mode === 'echohouse' ? `${s.title} [Echo]` : s.title}</button>
+ 579 |                       <button onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); if (confirm(`Delete "${s.title}"?`)) await deleteSessionFromDb(s.id); } }} className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+ 580 |                     </div>
+ 581 |                   ))
+ 582 |                 )}
+ 583 |               </div>
+ 584 |             </div>
+ 585 |           )}
+ 586 |         </nav>
+ 587 |       </aside>
+ 588 | 
+ 589 |       <main onClick={() => { if (isSidebarExpanded && window.innerWidth < 768) setIsSidebarExpanded(false); }} className="flex-1 flex flex-col min-w-0 bg-[#000000] relative transition-all duration-300">
+ 590 |         <header className="flex justify-between items-center w-full px-6 h-16 border-b border-[#141414] shrink-0 z-10 bg-black/85 backdrop-blur-md">
+ 591 |           <div className="flex items-center gap-2" />
+ 592 |           <div className="flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-[2px] rounded-full select-none">
+ 593 |             <button onClick={() => { if (workspaceState !== "home") setCurrentTab("chat"); }} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${currentTab === "chat" || workspaceState === "home" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>Chat</button>
+ 594 |             {workspaceState === "active" && (
+ 595 |               <button onClick={() => setCurrentTab("arena")} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${currentTab === "arena" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>
+ 596 |                 <GitFork className="w-3 h-3" /> Flow {nodes.length > 0 && (
+ 597 |                   <span className="ml-1 px-1.5 py-0.5 bg-cyan-500/20 border border-cyan-500/30 rounded text-[9px] font-mono text-cyan-400 font-bold">{nodes.length}</span>
+ 598 |                 )}
+ 599 |               </button>
+ 600 |             )}
+ 601 |           </div>
+ 602 |           <div className="flex items-center gap-2 select-none">
+ 603 |             <button onClick={() => alert("Solospace AI OS")} className="text-neutral-400 hover:text-white p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer"><HelpCircle className="w-4 h-4 stroke-[1.8]" /></button>
+ 604 |           </div>
+ 605 |         </header>
+ 606 | 
+ 607 |         <div className="flex-1 relative overflow-hidden">
+ 608 |           {workspaceState === "home" && !isEchoHouseMode && (
+ 609 |             <div className="absolute inset-0 flex flex-col justify-between overflow-y-auto custom-scrollbar">
+ 610 |               <div />
+ 611 |               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
+ 612 |                 <div className="text-center mb-10 space-y-2 select-none">
+ 613 |                   <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">What do you want to build?</h1>
+ 614 |                   <p className="text-sm text-neutral-400 font-sans">Multi-agent AI OS · 20+ providers · Real tool execution</p>
+ 615 |                 </div>
+ 616 |                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
+ 617 |                   <div className="flex items-center gap-3">
+ 618 |                     <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
+ 619 |                     <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder="Ask anything. Be specific. (Enter to send, Shift+Enter for newline)" className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
+ 620 |                     <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim()} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
+ 621 |                   </div>
+ 622 |                 </div>
+ 623 |                 <div className="flex items-center gap-3 mt-5 select-none">
+ 624 |                   <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">Mode:</span>
+ 625 |                   <button onClick={() => setExecutionMode("auto")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "auto" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sparkles className="w-3 h-3 stroke-[2]" /><span>Smart Auto</span></button>
+ 626 |                   <button onClick={() => setExecutionMode("custom")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "custom" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sliders className="w-3 h-3" /><span>Custom Agent</span></button>
+ 627 |                 </div>
+ 628 | 
+ 629 |                 {/* EchoHouse Feature Card */}
+ 630 |                 <div className="w-full mt-4">
+ 631 |                   <button
+ 632 |                     onClick={(e) => {
+ 633 |                       createSession("EchoHouse Simulation", "echohouse");
+ 634 |                       setWorkspaceState("active");
+ 635 |                       setCurrentTab("chat");
+ 636 |                     }}
+ 637 |                     className="w-full p-4 bg-gradient-to-r from-neutral-950 to-neutral-900 border border-neutral-800 hover:border-neutral-600 rounded-2xl text-left transition-all cursor-pointer group"
+ 638 |                   >
+ 639 |                     <div className="flex items-center gap-3">
+ 640 |                       <div className="w-8 h-8 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center justify-center text-base">🌀</div>
+ 641 |                       <div className="flex-1 min-w-0">
+ 642 |                         <p className="text-xs font-bold text-white">EchoHouse — Social Dynamics Simulator</p>
+ 643 |                         <p className="text-[10px] text-neutral-500 mt-0.5">Simulate conversations with people in your life. Get therapeutic insights.</p>
+ 644 |                       </div>
+ 645 |                       <ArrowRight className="w-4 h-4 text-neutral-600 group-hover:text-white transition-colors shrink-0" />
+ 646 |                     </div>
+ 647 |                   </button>
+ 648 |                 </div>
+ 649 | 
+ 650 |               </div>
+ 651 |               <div />
+ 652 |             </div>
+ 653 |           )}
+ 654 | 
+ 655 |           {workspaceState === "home" && isEchoHouseMode && (
+ 656 |             <div className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto custom-scrollbar px-6 py-12">
+ 657 |               <div className="w-full max-w-xl space-y-8">
+ 658 |                 {/* Step indicator */}
+ 659 |                 <div className="flex items-center gap-2 select-none">
+ 660 |                   {[1, 2, 3].map((s) => (
+ 661 |                     <div key={s} className="flex items-center gap-2">
+ 662 |                       <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-mono font-bold transition-all ${echoStep >= s ? 'bg-white text-black' : 'bg-neutral-800 text-neutral-500'}`}>{s}</div>
+ 663 |                       {s < 3 && <div className={`w-8 h-px transition-all ${echoStep > s ? 'bg-white' : 'bg-neutral-800'}`} />}
+ 664 |                     </div>
+ 665 |                   ))}
+ 666 |                   <span className="text-[10px] font-mono text-neutral-500 ml-2 uppercase tracking-wider">
+ 667 |                     {echoStep === 1 ? 'Situation' : echoStep === 2 ? 'Focus' : 'Cast Review'}
+ 668 |                   </span>
+ 669 |                 </div>
+ 670 | 
+ 671 |                 {/* Step 1 — Situation */}
+ 672 |                 {echoStep === 1 && (
+ 673 |                   <div className="space-y-4">
+ 674 |                     <div className="space-y-1">
+ 675 |                       <h1 className="text-2xl font-bold text-white tracking-tight">Describe the situation you are navigating.</h1>
+ 676 |                       <p className="text-xs text-neutral-500 font-sans">Write freely. This is private. The more specific, the more useful the simulation.</p>
+ 677 |                     </div>
+ 678 |                     <textarea
+ 679 |                       rows={6}
+ 680 |                       value={echoSituation}
+ 681 |                       onChange={(e) => setEchoSituation(e.target.value)}
+ 682 |                       placeholder="My manager keeps dismissing my ideas in meetings. Last week they took credit for a suggestion I made and..."
+ 683 |                       className="w-full bg-neutral-950 border border-[#1f1f1f] rounded-2xl p-4 text-sm text-neutral-200 outline-none placeholder:text-neutral-700 focus:border-neutral-600 resize-none leading-relaxed transition-colors custom-scrollbar"
+ 684 |                     />
+ 685 |                     <button
+ 686 |                       onClick={() => { if (echoSituation.trim()) setEchoStep(2); }}
+ 687 |                       disabled={!echoSituation.trim()}
+ 688 |                       className="w-full py-3 bg-white text-black font-semibold text-sm rounded-2xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
+ 689 |                     >
+ 690 |                       Continue
+ 691 |                     </button>
+ 692 |                   </div>
+ 693 |                 )}
+ 694 | 
+ 695 |                 {/* Step 2 — Focus */}
+ 696 |                 {echoStep === 2 && (
+ 697 |                   <div className="space-y-4">
+ 698 |                     <div className="space-y-1">
+ 699 |                       <h1 className="text-2xl font-bold text-white tracking-tight">What do you want from this simulation?</h1>
+ 700 |                       <p className="text-xs text-neutral-500 font-sans">Select the focus that best fits your goal.</p>
+ 701 |                     </div>
+ 702 |                     <div className="space-y-2">
+ 703 |                       {[
+ 704 |                         "Understand why this keeps happening",
+ 705 |                         "Prepare for a difficult conversation",
+ 706 |                         "Process feelings about a past event"
+ 707 |                       ].map((option) => (
+ 708 |                         <button
+ 709 |                           key={option}
+ 710 |                           onClick={() => setEchoFocus(option)}
+ 711 |                           className={`w-full text-left px-4 py-3 rounded-xl border text-sm transition-all cursor-pointer ${echoFocus === option ? 'border-white bg-white/[0.06] text-white font-semibold' : 'border-[#1f1f1f] text-neutral-400 hover:border-neutral-600 hover:text-white'}`}
+ 712 |                         >
+ 713 |                           {option}
+ 714 |                         </button>
+ 715 |                       ))}
+ 716 |                     </div>
+ 717 |                     <div className="flex gap-2">
+ 718 |                       <button onClick={() => setEchoStep(1)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
+ 719 |                       <button
+ 720 |                         onClick={async () => {
+ 721 |                           if (echoFocus.trim()) {
+ 722 |                             setEchoStep(3);
+ 723 |                             if (executionMode === "auto") {
+ 724 |                               await fetchEchoCast(echoSituation, echoFocus);
+ 725 |                             } else {
+ 726 |                               setEchoCast([]);
+ 727 |                             }
+ 728 |                           }
+ 729 |                         }}
+ 730 |                         disabled={!echoFocus.trim()}
+ 731 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
+ 732 |                       >
+ 733 |                         {isLoadingCast ? "Inferring cast..." : "Next"}
+ 734 |                       </button>
+ 735 |                     </div>
+ 736 |                   </div>
+ 737 |                 )}
+ 738 | 
+ 739 |                 {/* Step 3 — Cast Review */}
+ 740 |                 {echoStep === 3 && (
+ 741 |                   <div className="space-y-4">
+ 742 |                     <div className="space-y-1">
+ 743 |                       <h1 className="text-2xl font-bold text-white tracking-tight">Review the cast.</h1>
+ 744 |                       <p className="text-xs text-neutral-500 font-sans">These are the people who will participate in the simulation. Edit, remove, or add as needed.</p>
+ 745 |                     </div>
+ 746 |                     {isLoadingCast ? (
+ 747 |                       <div className="flex items-center justify-center py-12">
+ 748 |                         <div className="w-5 h-5 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
+ 749 |                         <span className="text-xs text-neutral-500 ml-3 font-mono">Inferring cast...</span>
+ 750 |                       </div>
+ 751 |                     ) : (executionMode === "custom" && echoCast.length === 0) ? (
+ 752 |                       <p>You are in Custom mode. Add people directly on the canvas after starting the simulation.</p>
+ 753 |                     ) : (
+ 754 |                       <div className="space-y-2">
+ 755 |                         {echoCast.map((member, idx) => (
+ 756 |                           <div key={idx} className="bg-neutral-950 border border-[#1f1f1f] rounded-xl p-3 space-y-2">
+ 757 |                             {editingCastIdx === idx ? (
+ 758 |                               <div className="space-y-2">
+ 759 |                                 <input
+ 760 |                                   type="text"
+ 761 |                                   value={member.inferred_name}
+ 762 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_name: e.target.value } : m))}
+ 763 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
+ 764 |                                   placeholder="Name"
+ 765 |                                 />
+ 766 |                                 <input
+ 767 |                                   type="text"
+ 768 |                                   value={member.role}
+ 769 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, role: e.target.value } : m))}
+ 770 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
+ 771 |                                   placeholder="Role"
+ 772 |                                 />
+ 773 |                                 <textarea
+ 774 |                                   value={member.inferred_problem}
+ 775 |                                   rows={2}
+ 776 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_problem: e.target.value } : m))}
+ 777 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2.5 text-xs text-white outline-none focus:border-neutral-500 resize-none"
+ 778 |                                   placeholder="Their perspective..."
+ 779 |                                 />
+ 780 |                                 <button onClick={() => setEditingCastIdx(null)} className="text-[10px] font-mono text-neutral-400 hover:text-white cursor-pointer">Done</button>
+ 781 |                               </div>
+ 782 |                             ) : (
+ 783 |                               <div className="flex items-start justify-between gap-2">
+ 784 |                                 <div className="min-w-0 flex-1">
+ 785 |                                   <div className="flex items-center gap-2">
+ 786 |                                     <span className="text-xs font-semibold text-white">{member.inferred_name}</span>
+ 787 |                                     <span className="text-[9px] font-mono text-neutral-500 uppercase tracking-wider">{member.role}</span>
+ 788 |                                   </div>
+ 789 |                                   <p className="text-[11px] text-neutral-500 leading-relaxed mt-0.5 line-clamp-2">{member.inferred_problem}</p>
+ 790 |                                 </div>
+ 791 |                                 {!member.is_self && (
+ 792 |                                   <div className="flex gap-1 shrink-0">
+ 793 |                                     <button onClick={() => setEditingCastIdx(idx)} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><Pencil className="w-3 h-3" /></button>
+ 794 |                                     <button onClick={() => setEchoCast(prev => prev.filter((_, i) => i !== idx))} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><X className="w-3 h-3" /></button>
+ 795 |                                   </div>
+ 796 |                                 )}
+ 797 |                               </div>
+ 798 |                             )}
+ 799 |                           </div>
+ 800 |                         ))}
+ 801 |                         <button
+ 802 |                           onClick={() => setEchoCast(prev => [...prev, { inferred_name: "New Person", role: "acquaintance", inferred_problem: "Enter their perspective...", emotional_core: "", is_self: false }])}
+ 803 |                           className="w-full py-2.5 border border-dashed border-[#1f1f1f] rounded-xl text-xs text-neutral-500 hover:text-white hover:border-neutral-600 transition-all cursor-pointer"
+ 804 |                         >
+ 805 |                           Add Person
+ 806 |                         </button>
+ 807 |                       </div>
+ 808 |                     )}
+ 809 |                     <div className="flex gap-2">
+ 810 |                       <button onClick={() => setEchoStep(2)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
+ 811 |                       <button
+ 812 |                         onClick={beginEchoHouseSimulation}
+ 813 |                         disabled={isLoadingCast || (executionMode !== "custom" && echoCast.filter(m => !m.is_self).length === 0)}
+ 814 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
+ 815 |                       >
+ 816 |                         Begin Simulation
+ 817 |                       </button>
+ 818 |                     </div>
+ 819 |                   </div>
+ 820 |                 )}
+ 821 |               </div>
+ 822 |             </div>
+ 823 |           )}
+ 824 | 
+ 825 |           {workspaceState === "active" && (
+ 826 |             <div className="absolute inset-0 flex">
+ 827 |               {currentTab === "chat" && (
+ 828 |                 <div className="flex-1 flex flex-col justify-between overflow-hidden bg-black">
+ 829 |                   <div ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
+ 830 |                     {isLoadingSession ? (
+ 831 |                       <div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" /></div>
+ 832 |                     ) : (
+ 833 |                       <div className="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto space-y-4 select-text">
+ 834 |                         {chatMessages.length === 0 ? (
+ 835 |                           <div className="flex flex-col items-center justify-center py-20 text-center space-y-2 select-none">
+ 836 |                             <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">
+ 837 |                               {isEchoHouseMode ? "What is your problem in life?" : "What's on your mind?"}
+ 838 |                             </h1>
+ 839 |                             <p className="text-sm text-neutral-400 font-sans">
+ 840 |                               {isEchoHouseMode ? "Type your struggle below to initialize the simulation." : "Start a conversation to see AI response."}
+ 841 |                             </p>
+ 842 |                           </div>
+ 843 |                         ) : (
+ 844 |                           chatMessages.map((msg, msgIdx) => (
+ 845 |                             <motion.div key={msg.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={`flex w-full ${msg.sender === "divider" ? "justify-center" : msg.sender === "user" ? "justify-end" : "justify-start"}`}>
+ 846 |                               {msg.sender === "divider" ? (
+ 847 |                                 <div className="w-full flex items-center gap-4 my-4 select-none">
+ 848 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
+ 849 |                                   <span className="text-[10px] font-mono text-neutral-500 tracking-wider uppercase">{msg.text}</span>
+ 850 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
+ 851 |                                 </div>
+ 852 |                               ) : msg.sender === "user" ? (
+ 853 |                                 <div className="flex flex-col items-end space-y-1 max-w-[72%] group">
+ 854 |                                   {msg.speakerName && (
+ 855 |                                     <span className="text-[10px] font-mono text-neutral-500 mr-2">{msg.speakerName}</span>
+ 856 |                                   )}
+ 857 |                                   <div className={`rounded-3xl px-5 py-3 text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'bg-neutral-800' : 'bg-[#2f2f2f]'}`}><p className="whitespace-pre-wrap">{msg.text}</p></div>
+ 858 |                                   <div className="flex items-center gap-3 mt-1.5 text-neutral-500 select-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 mr-2">
+ 859 |                                     <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
+ 860 |                                       {copiedMsgId === msg.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+ 861 |                                       <span>{copiedMsgId === msg.id ? "Copied" : "Copy"}</span>
+ 862 |                                     </button>
+ 863 |                                     <button onClick={() => { setUserQuery(msg.text); textareaRef.current?.focus(); textareaRef.current?.scrollIntoView({ behavior: "smooth" }); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
+ 864 |                                       <Pencil className="w-3 h-3" />
+ 865 |                                       <span>Edit</span>
+ 866 |                                     </button>
+ 867 |                                   </div>
+ 868 |                                 </div>
+ 869 |                               ) : (
+ 870 |                                 <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
+ 871 |                                   {msg.speakerName && msg.speakerName !== "insight" && msg.speakerName !== "takeaways" && (
+ 872 |                                     <span className="text-[10px] font-mono text-neutral-500 ml-1">{msg.speakerName}</span>
+ 873 |                                   )}
+ 874 |                                   {msg.speakerName === "takeaways" && msg.takeaways ? (
+ 875 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 space-y-3 mt-2">
+ 876 |                                       <span className="text-[10px] font-mono text-neutral-400 uppercase tracking-wider font-bold block">What you can try</span>
+ 877 |                                       <ol className="space-y-2">
+ 878 |                                         {msg.takeaways.map((item, ti) => (
+ 879 |                                           <li key={ti} className="flex gap-2.5 text-xs text-neutral-300 leading-relaxed">
+ 880 |                                             <span className="font-mono text-neutral-600 shrink-0">{ti + 1}.</span>
+ 881 |                                             <span>{item}</span>
+ 882 |                                           </li>
+ 883 |                                         ))}
+ 884 |                                       </ol>
+ 885 |                                     </div>
+ 886 |                                   ) : msg.speakerName === "insight" ? (
+ 887 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+ 888 |                                       {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
+ 889 |                                     </div>
+ 890 |                                   ) : (
+ 891 |                                     <div className={`w-full text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'rounded-2xl px-4 py-3 bg-neutral-900' : 'px-1 py-2'}`}>
+ 892 |                                       {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
+ 893 |                                       {msg.text && (!isOrchestrating || msgIdx !== chatMessages.length - 1) && (
+ 894 |                                         <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
+ 895 |                                           <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
+ 896 |                                             {copiedMsgId === msg.id ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400 font-medium">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
+ 897 |                                           </button>
+ 898 |                                           {!isEchoHouseMode && msgIdx === chatMessages.length - 1 && !isOrchestrating && (
+ 899 |                                             <button onClick={handleRegenerate} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
+ 900 |                                               <RefreshCw className="w-3.5 h-3.5" />
+ 901 |                                               <span>Regenerate</span>
+ 902 |                                             </button>
+ 903 |                                           )}
+ 904 |                                         </div>
+ 905 |                                       )}
+ 906 |                                     </div>
+ 907 |                                   )}
+ 908 |                                   {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && nodes.length > 0 && (
+ 909 |                                     <div className="flex gap-3 mt-4 select-none">
+ 910 |                                       <button onClick={() => setCurrentTab("arena")} className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max">
+ 911 |                                         <GitFork className="w-3.5 h-3.5 text-cyan-400" /><span>See Agent Flow</span>
+ 912 |                                       </button>
+ 913 |                                       {!isEchoHouseMode && useWorkflowStore.getState().executionState === "paused" && (
+ 914 |                                         <button
+ 915 |                                           onClick={async () => {
+ 916 |                                             setExecutionState("running");
+ 917 |                                             await useWorkflowStore.getState().triggerCustomExecution();
+ 918 |                                           }}
+ 919 |                                           className="px-4 py-2 bg-white hover:bg-neutral-200 rounded-xl text-xs font-bold text-black transition-all flex items-center gap-1.5 cursor-pointer max-w-max"
+ 920 |                                         >
+ 921 |                                           Proceed
+ 922 |                                         </button>
+ 923 |                                       )}
+ 924 |                                     </div>
+ 925 |                                   )}
+ 926 |                                 </div>
+ 927 |                               )}
+ 928 |                             </motion.div>
+ 929 |                           ))
+ 930 |                         )}
+ 931 |                         {/* Live agent thinking indicator */}
+ 932 |                         {isThinking && chatMessages[chatMessages.length - 1]?.sender !== 'ai' && (
+ 933 |                           <motion.div 
+ 934 |                             initial={{ opacity: 0, y: 8 }} 
+ 935 |                             animate={{ opacity: 1, y: 0 }} 
+ 936 |                             className="flex justify-start"
+ 937 |                           >
+ 938 |                             <div className="flex items-center gap-2 px-4 py-3 bg-neutral-950 border border-[#1f1f1f] rounded-2xl max-w-[200px]">
+ 939 |                               <div className="flex gap-1">
+ 940 |                                 {[0, 1, 2].map(i => (
+ 941 |                                   <div key={i} className="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+ 942 |                                 ))}
+ 943 |                               </div>
+ 944 |                               <ThinkingText prefix="thinking" className="text-[10px] text-neutral-500 font-mono" />
+ 945 |                             </div>
+ 946 |                           </motion.div>
+ 947 |                         )}
+ 948 |                         <div ref={chatEndRef} />
+ 949 |                       </div>
+ 950 |                     )}
+ 951 |                   </div>
+ 952 |                   <div className="px-4 sm:px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
+ 953 |                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
+ 954 |                       <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
+ 955 |                       <textarea ref={textareaRef} rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery); } }} placeholder={isOrchestrating ? "Streaming..." : isEchoHouseMode ? "What is your problem in life?" : "Ask a follow-up..."} disabled={isOrchestrating} className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar" />
+ 956 |                       <div className="flex items-center gap-2 shrink-0">
+ 957 |                         <ModeSelector />
+ 958 |                         {isOrchestrating ? (
+ 959 |                           <button onClick={cancelOrchestration} className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all cursor-pointer"><Square className="w-3.5 h-3.5 text-white fill-white" /></button>
+ 960 |                         ) : (
+ 961 |                           <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim() || isThinking} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
+ 962 |                         )}
+ 963 |                       </div>
+ 964 |                     </div>
+ 965 |                   </div>
+ 966 |                 </div>
+ 967 |               )}
+ 968 |               {currentTab === "arena" && (
+ 969 |                 <div className="flex-1 relative overflow-hidden bg-[#000000] flex">
+ 970 |                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#0d0d0d]/90 border border-[#1f1f1f] rounded-full px-4 py-2 backdrop-blur-md shadow-xl pointer-events-auto">
+ 971 |                     <button onClick={() => setCurrentTab("chat")} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-mono"><ChevronLeft className="w-3.5 h-3.5" /> Back to Chat</button>
+ 972 |                   </div>
+ 973 |                   <FlowArena onProceed={() => setCurrentTab("chat")} />
+ 974 |                 </div>
+ 975 |               )}
+ 976 |             </div>
+ 977 |           )}
+ 978 |         </div>
+ 979 |       </main>
+ 980 | 
+ 981 |       {currentTab === "arena" && isConfigPanelOpen && activeNodeDetail && (
+ 982 |         <div className="fixed top-0 right-0 h-full w-80 bg-[#0c0c0c]/95 border-l border-[#1f1f1f] z-40 flex flex-col justify-between shadow-2xl transition-transform duration-300 right-panel select-none">
+ 983 |           <div className="p-5 border-b border-[#1f1f1f] flex justify-between items-center bg-[#0d0d0d]">
+ 984 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider">{activeNodeDetail.data.name}</h3>
+ 985 |             <button onClick={() => { setIsConfigPanelOpen(false); setSelectedNodeId(null); }} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
+ 986 |           </div>
+ 987 |           <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
+ 988 |             {activeNodeDetail.data.isEchoHouseAgent ? (
+ 989 |               <>
+ 990 |                 <div className="space-y-1.5">
+ 991 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label>
+ 992 |                   <input
+ 993 |                     type="text"
+ 994 |                     value={activeNodeDetail.data.name}
+ 995 |                     onChange={(e) => {
+ 996 |                       const nameVal = e.target.value;
+ 997 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
+ 998 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
+ 999 |                       updateNodeField(activeNodeDetail.id, {
+1000 |                         name: nameVal,
+1001 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+1002 |                         objective: nameVal === "You (Self)" || roleVal === "self"
+1003 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
+1004 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
+1005 |                       });
+1006 |                     }}
+1007 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
+1008 |                   />
+1009 |                 </div>
+1010 |                 <div className="space-y-1.5">
+1011 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Role</label>
+1012 |                   <input
+1013 |                     type="text"
+1014 |                     value={activeNodeDetail.data.echohouseRole}
+1015 |                     disabled={activeNodeDetail.data.echohouseRole === "self"}
+1016 |                     onChange={(e) => {
+1017 |                       const nameVal = activeNodeDetail.data.name || "";
+1018 |                       const roleVal = e.target.value;
+1019 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
+1020 |                       updateNodeField(activeNodeDetail.id, {
+1021 |                         echohouseRole: roleVal,
+1022 |                         tag: roleVal.toUpperCase().replace(/\s+/g, '_'),
+1023 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+1024 |                         objective: `Provide perspective as ${nameVal} (${roleVal}).`
+1025 |                       });
+1026 |                     }}
+1027 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none disabled:opacity-40"
+1028 |                   />
+1029 |                 </div>
+1030 |                 <div className="space-y-1.5">
+1031 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">
+1032 |                     {activeNodeDetail.data.echohouseRole === "self" ? "Your problem in life" : "What do they think about your situation?"}
+1033 |                   </label>
+1034 |                   <textarea
+1035 |                     value={activeNodeDetail.data.echohouseProblem}
+1036 |                     onChange={(e) => {
+1037 |                       const nameVal = activeNodeDetail.data.name || "";
+1038 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
+1039 |                       const probVal = e.target.value;
+1040 |                       updateNodeField(activeNodeDetail.id, {
+1041 |                         echohouseProblem: probVal,
+1042 |                         systemPrompt: roleVal === "self"
+1043 |                           ? "You are the user themselves, experiencing this problem from the inside."
+1044 |                           : `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+1045 |                         objective: roleVal === "self"
+1046 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
+1047 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
+1048 |                       });
+1049 |                     }}
+1050 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[100px] resize-none leading-relaxed"
+1051 |                   />
+1052 |                 </div>
+1053 |               </>
+1054 |             ) : (
+1055 |               <>
+1056 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label><input type="text" value={activeNodeDetail.data.name} onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none" /></div>
+1057 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label><textarea value={activeNodeDetail.data.systemPrompt} onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed" /></div>
+1058 |               </>
+1059 |             )}
+1060 |           </div>
+1061 |         </div>
+1062 |       )}
+1063 | 
+1064 |       <AnimatePresence>
+1065 |         {isSecretOpen && <APIKeysModal isOpen={isSecretOpen} onClose={() => setIsSecretOpen(false)} />}
+1066 |         
+1067 |         {pendingApproval && (
+1068 |           <div className="fixed bottom-6 right-6 w-96 bg-[#0d0d0d] border border-amber-500/50 shadow-[0_0_50px_rgba(245,158,11,0.15)] rounded-2xl p-5 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300 select-none">
+1069 |             <div className="flex gap-4 items-start">
+1070 |               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 shrink-0"><Sliders className="w-5 h-5 animate-pulse" /></div>
+1071 |               <div className="flex-1 space-y-2">
+1072 |                 <h4 className="text-xs font-bold text-white">&apos;{(nodes.find(n => n.id === pendingApproval.nodeId)?.data as any)?.name}&apos; wants to use <span className="text-amber-400 font-mono">[{pendingApproval.toolName}]</span></h4>
+1073 |                 <p className="text-[10px] text-neutral-400 leading-normal">Action: <span className="text-white font-semibold">{pendingApproval.action}</span> — {pendingApproval.detail}</p>
+1074 |                 <div className="pt-3 flex gap-2">
+1075 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "approve", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Approve</button>
+1076 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "deny", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="px-4 py-2 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Deny</button>
+1077 |                 </div>
+1078 |               </div>
+1079 |             </div>
+1080 |           </div>
+1081 |         )}
+1082 |       </AnimatePresence>
+1083 |     </div>
+1084 |   );
+1085 | }
+1086 |
 ```
 
 ### File: `Frontend/components/edges/CustomEdge.tsx`
@@ -7380,7 +7519,7 @@ SoloSpace/
 
 ### File: `Frontend/components/APIKeysModal.tsx`
 
-> 775 lines | 34.1 KB
+> 778 lines | 34.3 KB
 
 ```tsx
   1 | 'use client';
@@ -7415,749 +7554,752 @@ SoloSpace/
  30 |   },
  31 |   openai: {
  32 |     name: "OpenAI",
- 33 |     description: "GPT-4o and o-series reasoning models",
+ 33 |     description: "GPT-4.1, Codex, and o-series reasoning models (Recommended)",
  34 |     key_url: "https://platform.openai.com/api-keys",
  35 |     key_hint: "sk-...",
- 36 |     default_model: "gpt-4o",
+ 36 |     default_model: "gpt-4.1",
  37 |     models: [
- 38 |       { id: "gpt-4o", name: "GPT-4o", tier: "advanced" },
- 39 |       { id: "gpt-4o-mini", name: "GPT-4o Mini", tier: "fast" },
- 40 |       { id: "o3-mini", name: "o3-mini", tier: "reasoning" },
- 41 |       { id: "o1", name: "o1", tier: "reasoning" }
- 42 |     ]
- 43 |   },
- 44 |   claude: {
- 45 |     name: "Anthropic Claude",
- 46 |     description: "Sovereign intelligence with Claude 3.5 & 3.7 family",
- 47 |     key_url: "https://console.anthropic.com/settings/keys",
- 48 |     key_hint: "sk-ant-...",
- 49 |     default_model: "claude-sonnet-4-20250514",
- 50 |     models: [
- 51 |       { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", tier: "advanced" },
- 52 |       { id: "claude-3-7-sonnet-20250219", name: "Claude 3.7 Sonnet", tier: "advanced" },
- 53 |       { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet", tier: "advanced" },
- 54 |       { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku", tier: "fast" }
- 55 |     ]
- 56 |   },
- 57 |   deepseek: {
- 58 |     name: "DeepSeek",
- 59 |     description: "High-intelligence open reasoning and chat models",
- 60 |     key_url: "https://platform.deepseek.com/api_keys",
- 61 |     key_hint: "sk-...",
- 62 |     default_model: "deepseek-chat",
- 63 |     models: [
- 64 |       { id: "deepseek-chat", name: "DeepSeek V3", tier: "advanced" },
- 65 |       { id: "deepseek-reasoner", name: "DeepSeek R1", tier: "reasoning" }
- 66 |     ]
- 67 |   },
- 68 |   groq: {
- 69 |     name: "Groq",
- 70 |     description: "Ultra-low-latency LPU model execution",
- 71 |     key_url: "https://console.groq.com/keys",
- 72 |     key_hint: "gsk_...",
- 73 |     default_model: "llama-3.3-70b-versatile",
- 74 |     models: [
- 75 |       { id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B", tier: "fast" },
- 76 |       { id: "deepseek-r1-distill-llama-70b", name: "DeepSeek R1 Distill Llama 70B", tier: "reasoning" },
- 77 |       { id: "llama-3.1-8b-instant", name: "Llama 3.1 8B Instant", tier: "fast" }
- 78 |     ]
- 79 |   },
- 80 |   openrouter: {
- 81 |     name: "OpenRouter",
- 82 |     description: "Consolidated API for hundreds of LLMs",
- 83 |     key_url: "https://openrouter.ai/keys",
- 84 |     key_hint: "sk-or-...",
- 85 |     default_model: "openai/gpt-4o",
- 86 |     models: [
- 87 |       { id: "openai/gpt-4o", name: "GPT-4o", tier: "advanced" },
- 88 |       { id: "anthropic/claude-3.7-sonnet", name: "Claude 3.7 Sonnet", tier: "advanced" },
- 89 |       { id: "deepseek/deepseek-chat", name: "DeepSeek V3", tier: "open" }
- 90 |     ]
- 91 |   },
- 92 |   ollama: {
- 93 |     name: "Ollama (Local)",
- 94 |     description: "Local model hosting engine running on your system",
- 95 |     key_url: "https://ollama.com",
- 96 |     key_hint: "No credentials needed",
- 97 |     default_model: "llama3",
- 98 |     models: [
- 99 |       { id: "llama3", name: "Llama 3", tier: "open" },
-100 |       { id: "mistral", name: "Mistral", tier: "open" },
-101 |       { id: "phi3", name: "Phi 3", tier: "open" }
-102 |     ]
-103 |   },
-104 |   ollama_cloud: {
-105 |     name: "Ollama Cloud",
-106 |     description: "Hosted Ollama Cloud models via https://ollama.com",
-107 |     key_url: "https://ollama.com",
-108 |     key_hint: "Ollama API Key",
-109 |     default_model: "llama3",
-110 |     models: [
-111 |       { id: "llama3", name: "Llama 3", tier: "cloud" },
-112 |       { id: "mistral", name: "Mistral", tier: "cloud" },
-113 |       { id: "phi3", name: "Phi 3", tier: "cloud" }
-114 |     ]
-115 |   },
-116 |   alibaba: {
-117 |     name: "Alibaba Cloud (Qwen)",
-118 |     description: "Qwen model family via DashScope OpenAI-compatible endpoint",
-119 |     key_url: "https://www.alibabacloud.com/help/en/model-studio/developer-reference/api-key",
-120 |     key_hint: "sk-...",
-121 |     default_model: "qwen-turbo",
-122 |     models: [
-123 |       { id: "qwen-turbo", name: "Qwen Turbo", tier: "fast" },
-124 |       { id: "qwen-plus", name: "Qwen Plus", tier: "advanced" },
-125 |       { id: "qwen-max", name: "Qwen Max", tier: "advanced" },
-126 |       { id: "qwen-long", name: "Qwen Long", tier: "advanced" },
-127 |       { id: "qwen2.5-72b-instruct", name: "Qwen 2.5 72B Instruct", tier: "advanced" },
-128 |       { id: "qwen2.5-14b-instruct", name: "Qwen 2.5 14B Instruct", tier: "fast" }
-129 |     ]
-130 |   },
-131 |   nvidia: {
-132 |     name: "NVIDIA NIM",
-133 |     description: "NVIDIA NIM inference microservices — optimized open models",
-134 |     key_url: "https://build.nvidia.com",
-135 |     key_hint: "nvapi-...",
-136 |     default_model: "meta/llama-3.1-70b-instruct",
-137 |     models: [
-138 |       { id: "meta/llama-3.1-70b-instruct", name: "Llama 3.1 70B Instruct", tier: "advanced" },
-139 |       { id: "meta/llama-3.1-8b-instruct", name: "Llama 3.1 8B Instruct", tier: "fast" },
-140 |       { id: "mistralai/mixtral-8x7b-instruct-v0.1", name: "Mixtral 8x7B Instruct", tier: "fast" },
-141 |       { id: "microsoft/phi-3-mini-128k-instruct", name: "Phi-3 Mini 128K", tier: "fast" },
-142 |       { id: "google/gemma-2-9b-it", name: "Gemma 2 9B IT", tier: "fast" },
-143 |       { id: "nvidia/llama3-chatqa-1.5-70b", name: "ChatQA 1.5 70B", tier: "advanced" }
-144 |     ]
-145 |   },
-146 |   glm: {
-147 |     name: "Zhipu GLM",
-148 |     description: "GLM models from Zhipu AI (via z.ai)",
-149 |     key_url: "https://api.z.ai/",
-150 |     key_hint: "",
-151 |     default_model: "glm-4-flash",
-152 |     models: [
-153 |       { id: "glm-4-flash", name: "GLM 4 Flash", tier: "fast" },
-154 |       { id: "glm-4-plus", name: "GLM 4 Plus", tier: "advanced" },
-155 |       { id: "glm-4-air", name: "GLM 4 Air", tier: "fast" },
-156 |       { id: "glm-4", name: "GLM 4", tier: "advanced" }
-157 |     ]
-158 |   },
-159 |   "z.ai": {
-160 |     name: "z.ai",
-161 |     description: "GLM models from z.ai",
-162 |     key_url: "https://api.z.ai/",
-163 |     key_hint: "",
-164 |     default_model: "glm-4-flash",
-165 |     models: [
-166 |       { id: "glm-4-flash", name: "GLM 4 Flash", tier: "fast" },
-167 |       { id: "glm-4-plus", name: "GLM 4 Plus", tier: "advanced" },
-168 |       { id: "glm-4-air", name: "GLM 4 Air", tier: "fast" },
-169 |       { id: "glm-4", name: "GLM 4", tier: "advanced" }
-170 |     ]
-171 |   }
-172 | };
-173 | 
-174 | export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
-175 |   const apiKeys = useWorkflowStore((s) => s.apiKeys);
-176 |   const setProviderApiKey = useWorkflowStore((s) => s.setProviderApiKey);
-177 |   const backupApiKeys = useWorkflowStore((s) => s.backupApiKeys);
-178 |   const setBackupApiKey = useWorkflowStore((s) => s.setBackupApiKey);
-179 |   const activeProvider = useWorkflowStore((s) => s.provider);
-180 |   const setProvider = useWorkflowStore((s) => s.setProvider);
-181 |   const activeModel = useWorkflowStore((s) => s.model);
-182 |   const setModel = useWorkflowStore((s) => s.setModel);
-183 |   const availableProvidersFromStore = useWorkflowStore((s) => s.availableProviders);
-184 |   const providerBaseUrls = useWorkflowStore((s) => s.providerBaseUrls);
-185 |   const setProviderBaseUrl = useWorkflowStore((s) => s.setProviderBaseUrl);
-186 |   const providerModels = useWorkflowStore((s) => s.providerModels);
-187 |   const fetchProviderModels = useWorkflowStore((s) => s.fetchProviderModels);
-188 |   const fallbackProvider = useWorkflowStore((s) => s.fallbackProvider);
-189 |   const setFallbackProvider = useWorkflowStore((s) => s.setFallbackProvider);
-190 | 
-191 |   // Local Form State
-192 |   const [selectedProvider, setSelectedProvider] = useState<string>("gemini");
-193 |   const [selectedModel, setSelectedModel] = useState<string>("");
-194 |   const [isCustomModelInput, setIsCustomModelInput] = useState<boolean>(false);
-195 |   const [customModelText, setCustomModelText] = useState<string>("");
-196 |   const [apiKeyInput, setApiKeyInput] = useState<string>("");
-197 |   const [backupKey1Input, setBackupKey1Input] = useState<string>("");
-198 |   const [backupKey2Input, setBackupKey2Input] = useState<string>("");
-199 |   const [showBackupKey1, setShowBackupKey1] = useState<boolean>(false);
-200 |   const [showBackupKey2, setShowBackupKey2] = useState<boolean>(false);
-201 |   const [showBackupExpander, setShowBackupExpander] = useState<boolean>(false);
-202 |   const [showSecondBackup, setShowSecondBackup] = useState<boolean>(false);
-203 |   const [baseUrlInput, setUrlInput] = useState<string>("");
-204 |   const [fallbackProv, setFallbackProv] = useState<string>("");
-205 |   const [showKey, setShowKey] = useState<boolean>(false);
-206 |   
-207 |   // Ollama status check state
-208 |   const [ollamaStatus, setOllamaStatus] = useState<'checking' | 'available' | 'unavailable'>('checking');
+ 38 |       { id: "gpt-4.1", name: "GPT-4.1", tier: "advanced" },
+ 39 |       { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", tier: "fast" },
+ 40 |       { id: "gpt-4.1-nano", name: "GPT-4.1 Nano", tier: "fast" },
+ 41 |       { id: "gpt-4o", name: "GPT-4o", tier: "advanced" },
+ 42 |       { id: "gpt-4o-mini", name: "GPT-4o Mini", tier: "fast" },
+ 43 |       { id: "o3-mini", name: "o3-mini", tier: "reasoning" },
+ 44 |       { id: "o1", name: "o1", tier: "reasoning" }
+ 45 |     ]
+ 46 |   },
+ 47 |   claude: {
+ 48 |     name: "Anthropic Claude",
+ 49 |     description: "Sovereign intelligence with Claude 3.5 & 3.7 family",
+ 50 |     key_url: "https://console.anthropic.com/settings/keys",
+ 51 |     key_hint: "sk-ant-...",
+ 52 |     default_model: "claude-sonnet-4-20250514",
+ 53 |     models: [
+ 54 |       { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", tier: "advanced" },
+ 55 |       { id: "claude-3-7-sonnet-20250219", name: "Claude 3.7 Sonnet", tier: "advanced" },
+ 56 |       { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet", tier: "advanced" },
+ 57 |       { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku", tier: "fast" }
+ 58 |     ]
+ 59 |   },
+ 60 |   deepseek: {
+ 61 |     name: "DeepSeek",
+ 62 |     description: "High-intelligence open reasoning and chat models",
+ 63 |     key_url: "https://platform.deepseek.com/api_keys",
+ 64 |     key_hint: "sk-...",
+ 65 |     default_model: "deepseek-chat",
+ 66 |     models: [
+ 67 |       { id: "deepseek-chat", name: "DeepSeek V3", tier: "advanced" },
+ 68 |       { id: "deepseek-reasoner", name: "DeepSeek R1", tier: "reasoning" }
+ 69 |     ]
+ 70 |   },
+ 71 |   groq: {
+ 72 |     name: "Groq",
+ 73 |     description: "Ultra-low-latency LPU model execution",
+ 74 |     key_url: "https://console.groq.com/keys",
+ 75 |     key_hint: "gsk_...",
+ 76 |     default_model: "llama-3.3-70b-versatile",
+ 77 |     models: [
+ 78 |       { id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B", tier: "fast" },
+ 79 |       { id: "deepseek-r1-distill-llama-70b", name: "DeepSeek R1 Distill Llama 70B", tier: "reasoning" },
+ 80 |       { id: "llama-3.1-8b-instant", name: "Llama 3.1 8B Instant", tier: "fast" }
+ 81 |     ]
+ 82 |   },
+ 83 |   openrouter: {
+ 84 |     name: "OpenRouter",
+ 85 |     description: "Consolidated API for hundreds of LLMs",
+ 86 |     key_url: "https://openrouter.ai/keys",
+ 87 |     key_hint: "sk-or-...",
+ 88 |     default_model: "openai/gpt-4o",
+ 89 |     models: [
+ 90 |       { id: "openai/gpt-4o", name: "GPT-4o", tier: "advanced" },
+ 91 |       { id: "anthropic/claude-3.7-sonnet", name: "Claude 3.7 Sonnet", tier: "advanced" },
+ 92 |       { id: "deepseek/deepseek-chat", name: "DeepSeek V3", tier: "open" }
+ 93 |     ]
+ 94 |   },
+ 95 |   ollama: {
+ 96 |     name: "Ollama (Local)",
+ 97 |     description: "Local model hosting engine running on your system",
+ 98 |     key_url: "https://ollama.com",
+ 99 |     key_hint: "No credentials needed",
+100 |     default_model: "llama3",
+101 |     models: [
+102 |       { id: "llama3", name: "Llama 3", tier: "open" },
+103 |       { id: "mistral", name: "Mistral", tier: "open" },
+104 |       { id: "phi3", name: "Phi 3", tier: "open" }
+105 |     ]
+106 |   },
+107 |   ollama_cloud: {
+108 |     name: "Ollama Cloud",
+109 |     description: "Hosted Ollama Cloud models via https://ollama.com",
+110 |     key_url: "https://ollama.com",
+111 |     key_hint: "Ollama API Key",
+112 |     default_model: "llama3",
+113 |     models: [
+114 |       { id: "llama3", name: "Llama 3", tier: "cloud" },
+115 |       { id: "mistral", name: "Mistral", tier: "cloud" },
+116 |       { id: "phi3", name: "Phi 3", tier: "cloud" }
+117 |     ]
+118 |   },
+119 |   alibaba: {
+120 |     name: "Alibaba Cloud (Qwen)",
+121 |     description: "Qwen model family via DashScope OpenAI-compatible endpoint",
+122 |     key_url: "https://www.alibabacloud.com/help/en/model-studio/developer-reference/api-key",
+123 |     key_hint: "sk-...",
+124 |     default_model: "qwen-turbo",
+125 |     models: [
+126 |       { id: "qwen-turbo", name: "Qwen Turbo", tier: "fast" },
+127 |       { id: "qwen-plus", name: "Qwen Plus", tier: "advanced" },
+128 |       { id: "qwen-max", name: "Qwen Max", tier: "advanced" },
+129 |       { id: "qwen-long", name: "Qwen Long", tier: "advanced" },
+130 |       { id: "qwen2.5-72b-instruct", name: "Qwen 2.5 72B Instruct", tier: "advanced" },
+131 |       { id: "qwen2.5-14b-instruct", name: "Qwen 2.5 14B Instruct", tier: "fast" }
+132 |     ]
+133 |   },
+134 |   nvidia: {
+135 |     name: "NVIDIA NIM",
+136 |     description: "NVIDIA NIM inference microservices — optimized open models",
+137 |     key_url: "https://build.nvidia.com",
+138 |     key_hint: "nvapi-...",
+139 |     default_model: "meta/llama-3.1-70b-instruct",
+140 |     models: [
+141 |       { id: "meta/llama-3.1-70b-instruct", name: "Llama 3.1 70B Instruct", tier: "advanced" },
+142 |       { id: "meta/llama-3.1-8b-instruct", name: "Llama 3.1 8B Instruct", tier: "fast" },
+143 |       { id: "mistralai/mixtral-8x7b-instruct-v0.1", name: "Mixtral 8x7B Instruct", tier: "fast" },
+144 |       { id: "microsoft/phi-3-mini-128k-instruct", name: "Phi-3 Mini 128K", tier: "fast" },
+145 |       { id: "google/gemma-2-9b-it", name: "Gemma 2 9B IT", tier: "fast" },
+146 |       { id: "nvidia/llama3-chatqa-1.5-70b", name: "ChatQA 1.5 70B", tier: "advanced" }
+147 |     ]
+148 |   },
+149 |   glm: {
+150 |     name: "Zhipu GLM",
+151 |     description: "GLM models from Zhipu AI (via z.ai)",
+152 |     key_url: "https://api.z.ai/",
+153 |     key_hint: "",
+154 |     default_model: "glm-4-flash",
+155 |     models: [
+156 |       { id: "glm-4-flash", name: "GLM 4 Flash", tier: "fast" },
+157 |       { id: "glm-4-plus", name: "GLM 4 Plus", tier: "advanced" },
+158 |       { id: "glm-4-air", name: "GLM 4 Air", tier: "fast" },
+159 |       { id: "glm-4", name: "GLM 4", tier: "advanced" }
+160 |     ]
+161 |   },
+162 |   "z.ai": {
+163 |     name: "z.ai",
+164 |     description: "GLM models from z.ai",
+165 |     key_url: "https://api.z.ai/",
+166 |     key_hint: "",
+167 |     default_model: "glm-4-flash",
+168 |     models: [
+169 |       { id: "glm-4-flash", name: "GLM 4 Flash", tier: "fast" },
+170 |       { id: "glm-4-plus", name: "GLM 4 Plus", tier: "advanced" },
+171 |       { id: "glm-4-air", name: "GLM 4 Air", tier: "fast" },
+172 |       { id: "glm-4", name: "GLM 4", tier: "advanced" }
+173 |     ]
+174 |   }
+175 | };
+176 | 
+177 | export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
+178 |   const apiKeys = useWorkflowStore((s) => s.apiKeys);
+179 |   const setProviderApiKey = useWorkflowStore((s) => s.setProviderApiKey);
+180 |   const backupApiKeys = useWorkflowStore((s) => s.backupApiKeys);
+181 |   const setBackupApiKey = useWorkflowStore((s) => s.setBackupApiKey);
+182 |   const activeProvider = useWorkflowStore((s) => s.provider);
+183 |   const setProvider = useWorkflowStore((s) => s.setProvider);
+184 |   const activeModel = useWorkflowStore((s) => s.model);
+185 |   const setModel = useWorkflowStore((s) => s.setModel);
+186 |   const availableProvidersFromStore = useWorkflowStore((s) => s.availableProviders);
+187 |   const providerBaseUrls = useWorkflowStore((s) => s.providerBaseUrls);
+188 |   const setProviderBaseUrl = useWorkflowStore((s) => s.setProviderBaseUrl);
+189 |   const providerModels = useWorkflowStore((s) => s.providerModels);
+190 |   const fetchProviderModels = useWorkflowStore((s) => s.fetchProviderModels);
+191 |   const fallbackProvider = useWorkflowStore((s) => s.fallbackProvider);
+192 |   const setFallbackProvider = useWorkflowStore((s) => s.setFallbackProvider);
+193 | 
+194 |   // Local Form State
+195 |   const [selectedProvider, setSelectedProvider] = useState<string>("gemini");
+196 |   const [selectedModel, setSelectedModel] = useState<string>("");
+197 |   const [isCustomModelInput, setIsCustomModelInput] = useState<boolean>(false);
+198 |   const [customModelText, setCustomModelText] = useState<string>("");
+199 |   const [apiKeyInput, setApiKeyInput] = useState<string>("");
+200 |   const [backupKey1Input, setBackupKey1Input] = useState<string>("");
+201 |   const [backupKey2Input, setBackupKey2Input] = useState<string>("");
+202 |   const [showBackupKey1, setShowBackupKey1] = useState<boolean>(false);
+203 |   const [showBackupKey2, setShowBackupKey2] = useState<boolean>(false);
+204 |   const [showBackupExpander, setShowBackupExpander] = useState<boolean>(false);
+205 |   const [showSecondBackup, setShowSecondBackup] = useState<boolean>(false);
+206 |   const [baseUrlInput, setUrlInput] = useState<string>("");
+207 |   const [fallbackProv, setFallbackProv] = useState<string>("");
+208 |   const [showKey, setShowKey] = useState<boolean>(false);
 209 |   
-210 |   // Connection Testing State
-211 |   const [isTesting, setIsTesting] = useState<boolean>(false);
-212 |   const [testResult, setTestResult] = useState<{ status: 'idle' | 'success' | 'error'; message: string }>({ status: 'idle', message: '' });
-213 | 
-214 |   // Load backend providers config or fallback
-215 |   const providersConfig: Record<string, any> = Object.keys(availableProvidersFromStore || {}).length > 0 
-216 |     ? availableProvidersFromStore 
-217 |     : FALLBACK_PROVIDERS;
-218 | 
-219 |   const checkOllama = async () => {
-220 |     setOllamaStatus('checking');
-221 |     try {
-222 |       const resp = await fetch("/api/gemini/ollama");
-223 |       if (resp.ok) {
-224 |         const data = await resp.json();
-225 |         if (data.ollama_available || (Array.isArray(data.models) && data.models.length > 0)) {
-226 |           setOllamaStatus('available');
-227 |         } else {
-228 |           setOllamaStatus('unavailable');
-229 |         }
-230 |       } else {
-231 |         setOllamaStatus('unavailable');
-232 |       }
-233 |     } catch (e) {
-234 |       setOllamaStatus('unavailable');
-235 |     }
-236 |   };
-237 | 
-238 |   // Initialize fields when modal opens
-239 |   useEffect(() => {
-240 |     if (isOpen) {
-241 |       const currentProv = activeProvider || "gemini";
-242 |       setSelectedProvider(currentProv);
-243 |       setSelectedModel(activeModel || "");
-244 |       setFallbackProv(fallbackProvider || "");
-245 |       setApiKeyInput(apiKeys[currentProv] || "");
-246 |       
-247 |       const backupKeys = backupApiKeys[currentProv] || [];
-248 |       setBackupKey1Input(backupKeys[0] || "");
-249 |       setBackupKey2Input(backupKeys[1] || "");
-250 |       setShowBackupExpander(!!(backupKeys[0] || backupKeys[1]));
-251 |       setShowSecondBackup(!!backupKeys[1]);
-252 | 
-253 |       const defaultUrl = currentProv === 'ollama' ? "http://localhost:11434/v1" : "";
-254 |       setUrlInput(providerBaseUrls[currentProv] || defaultUrl);
-255 |       setShowKey(false);
-256 |       setTestResult({ status: 'idle', message: '' });
-257 | 
-258 |       const provConfig = providersConfig[currentProv] || {};
-259 |       const modelsList = providerModels[currentProv] || provConfig.models || [];
-260 |       const isPredefined = modelsList.some((m: any) => m.id === activeModel);
-261 |       if (!isPredefined && activeModel) {
-262 |         setIsCustomModelInput(true);
-263 |         setCustomModelText(activeModel);
-264 |       } else {
-265 |         setIsCustomModelInput(false);
-266 |         setCustomModelText("");
-267 |       }
-268 | 
-269 |       fetchProviderModels(currentProv).catch(() => {});
-270 |       if (currentProv === 'ollama') {
-271 |         checkOllama();
-272 |       }
-273 |     }
-274 |   }, [isOpen]);
-275 | 
-276 |   // Sync inputs when selected provider changes
-277 |   const handleProviderChange = (newProvider: string) => {
-278 |     setSelectedProvider(newProvider);
-279 |     setApiKeyInput(apiKeys[newProvider] || "");
-280 |     
-281 |     const backupKeys = backupApiKeys[newProvider] || [];
-282 |     setBackupKey1Input(backupKeys[0] || "");
-283 |     setBackupKey2Input(backupKeys[1] || "");
-284 |     setShowBackupExpander(!!(backupKeys[0] || backupKeys[1]));
-285 |     setShowSecondBackup(!!backupKeys[1]);
-286 |     
-287 |     const defaultUrl = newProvider === 'ollama' ? "http://localhost:11434/v1" : "";
-288 |     setUrlInput(providerBaseUrls[newProvider] || defaultUrl);
-289 |     setTestResult({ status: 'idle', message: '' });
-290 | 
-291 |     // Pick default model or first model for this new provider
-292 |     const provConfig = providersConfig[newProvider] || {};
-293 |     const modelsList = providerModels[newProvider] || provConfig.models || [];
-294 |     const defaultMod = modelsList.length > 0 ? modelsList[0].id : (provConfig.default_model || "");
-295 |     setSelectedModel(defaultMod);
-296 |     setIsCustomModelInput(modelsList.length === 0 && newProvider !== 'ollama');
-297 |     setCustomModelText("");
-298 | 
-299 |     // Fetch latest models list in the background
-300 |     fetchProviderModels(newProvider).catch(() => {});
-301 |     if (newProvider === 'ollama') {
-302 |       checkOllama();
-303 |     }
-304 |   };
-305 | 
-306 |   const handleTestConnection = async () => {
-307 |     setIsTesting(true);
-308 |     setTestResult({ status: 'idle', message: '' });
-309 | 
-310 |     try {
-311 |       const response = await fetch("/api/gemini/test_agent", {
-312 |         method: "POST",
-313 |         headers: { "Content-Type": "application/json" },
-314 |         body: JSON.stringify({
-315 |           node: {
-316 |             id: "test",
-317 |             data: {
-318 |               name: "Test Connection Agent",
-319 |               systemPrompt: "You are a friendly connection validation utility. Keep answers brief.",
-320 |               model: selectedModel
-321 |             }
-322 |           },
-323 |           provider: selectedProvider,
-324 |           api_key: apiKeyInput.trim(),
-325 |           api_keys: { ...apiKeys, [selectedProvider]: apiKeyInput.trim() },
-326 |           base_url: baseUrlInput.trim() || undefined
-327 |         })
-328 |       });
-329 | 
-330 |       const data = await response.json();
-331 |       if (response.ok && data.status === "success") {
-332 |         setTestResult({
-333 |           status: 'success',
-334 |           message: `Connection successful! Output: "${data.response?.substring(0, 50) || 'Success'}"`
-335 |         });
-336 |       } else {
-337 |         setTestResult({
-338 |           status: 'error',
-339 |           message: data.detail || data.error || "Connection failed. Please check credentials and endpoint."
-340 |         });
-341 |       }
-342 |     } catch (e: any) {
-343 |       setTestResult({
-344 |         status: 'error',
-345 |         message: e.message || "Failed to reach the API server. Ensure your backend is running."
-346 |       });
-347 |     } finally {
-348 |       setIsTesting(false);
-349 |     }
-350 |   };
-351 | 
-352 |   const handleSaveSettings = async () => {
-353 |     // Save to Zustand store & IndexedDB
-354 |     await setProviderApiKey(selectedProvider, apiKeyInput.trim());
-355 |     await setBackupApiKey(selectedProvider, 0, backupKey1Input.trim());
-356 |     await setBackupApiKey(selectedProvider, 1, backupKey2Input.trim());
-357 |     setProviderBaseUrl(selectedProvider, baseUrlInput.trim());
-358 |     await setProvider(selectedProvider);
-359 |     await setModel(selectedModel);
-360 |     setFallbackProvider(fallbackProv);
-361 | 
-362 |     // Save custom model custom string if user selected custom
-363 |     if (isCustomModelInput && customModelText.trim()) {
-364 |       await idbSet(`solospace_custom_model_${selectedProvider}`, customModelText.trim());
-365 |     } else {
-366 |       await idbDel(`solospace_custom_model_${selectedProvider}`);
-367 |     }
-368 | 
-369 |     onClose();
-370 |   };
+210 |   // Ollama status check state
+211 |   const [ollamaStatus, setOllamaStatus] = useState<'checking' | 'available' | 'unavailable'>('checking');
+212 |   
+213 |   // Connection Testing State
+214 |   const [isTesting, setIsTesting] = useState<boolean>(false);
+215 |   const [testResult, setTestResult] = useState<{ status: 'idle' | 'success' | 'error'; message: string }>({ status: 'idle', message: '' });
+216 | 
+217 |   // Load backend providers config or fallback
+218 |   const providersConfig: Record<string, any> = Object.keys(availableProvidersFromStore || {}).length > 0 
+219 |     ? availableProvidersFromStore 
+220 |     : FALLBACK_PROVIDERS;
+221 | 
+222 |   const checkOllama = async () => {
+223 |     setOllamaStatus('checking');
+224 |     try {
+225 |       const resp = await fetch("/api/gemini/ollama");
+226 |       if (resp.ok) {
+227 |         const data = await resp.json();
+228 |         if (data.ollama_available || (Array.isArray(data.models) && data.models.length > 0)) {
+229 |           setOllamaStatus('available');
+230 |         } else {
+231 |           setOllamaStatus('unavailable');
+232 |         }
+233 |       } else {
+234 |         setOllamaStatus('unavailable');
+235 |       }
+236 |     } catch (e) {
+237 |       setOllamaStatus('unavailable');
+238 |     }
+239 |   };
+240 | 
+241 |   // Initialize fields when modal opens
+242 |   useEffect(() => {
+243 |     if (isOpen) {
+244 |       const currentProv = activeProvider || "gemini";
+245 |       setSelectedProvider(currentProv);
+246 |       setSelectedModel(activeModel || "");
+247 |       setFallbackProv(fallbackProvider || "");
+248 |       setApiKeyInput(apiKeys[currentProv] || "");
+249 |       
+250 |       const backupKeys = backupApiKeys[currentProv] || [];
+251 |       setBackupKey1Input(backupKeys[0] || "");
+252 |       setBackupKey2Input(backupKeys[1] || "");
+253 |       setShowBackupExpander(!!(backupKeys[0] || backupKeys[1]));
+254 |       setShowSecondBackup(!!backupKeys[1]);
+255 | 
+256 |       const defaultUrl = currentProv === 'ollama' ? "http://localhost:11434/v1" : "";
+257 |       setUrlInput(providerBaseUrls[currentProv] || defaultUrl);
+258 |       setShowKey(false);
+259 |       setTestResult({ status: 'idle', message: '' });
+260 | 
+261 |       const provConfig = providersConfig[currentProv] || {};
+262 |       const modelsList = providerModels[currentProv] || provConfig.models || [];
+263 |       const isPredefined = modelsList.some((m: any) => m.id === activeModel);
+264 |       if (!isPredefined && activeModel) {
+265 |         setIsCustomModelInput(true);
+266 |         setCustomModelText(activeModel);
+267 |       } else {
+268 |         setIsCustomModelInput(false);
+269 |         setCustomModelText("");
+270 |       }
+271 | 
+272 |       fetchProviderModels(currentProv).catch(() => {});
+273 |       if (currentProv === 'ollama') {
+274 |         checkOllama();
+275 |       }
+276 |     }
+277 |   }, [isOpen]);
+278 | 
+279 |   // Sync inputs when selected provider changes
+280 |   const handleProviderChange = (newProvider: string) => {
+281 |     setSelectedProvider(newProvider);
+282 |     setApiKeyInput(apiKeys[newProvider] || "");
+283 |     
+284 |     const backupKeys = backupApiKeys[newProvider] || [];
+285 |     setBackupKey1Input(backupKeys[0] || "");
+286 |     setBackupKey2Input(backupKeys[1] || "");
+287 |     setShowBackupExpander(!!(backupKeys[0] || backupKeys[1]));
+288 |     setShowSecondBackup(!!backupKeys[1]);
+289 |     
+290 |     const defaultUrl = newProvider === 'ollama' ? "http://localhost:11434/v1" : "";
+291 |     setUrlInput(providerBaseUrls[newProvider] || defaultUrl);
+292 |     setTestResult({ status: 'idle', message: '' });
+293 | 
+294 |     // Pick default model or first model for this new provider
+295 |     const provConfig = providersConfig[newProvider] || {};
+296 |     const modelsList = providerModels[newProvider] || provConfig.models || [];
+297 |     const defaultMod = modelsList.length > 0 ? modelsList[0].id : (provConfig.default_model || "");
+298 |     setSelectedModel(defaultMod);
+299 |     setIsCustomModelInput(modelsList.length === 0 && newProvider !== 'ollama');
+300 |     setCustomModelText("");
+301 | 
+302 |     // Fetch latest models list in the background
+303 |     fetchProviderModels(newProvider).catch(() => {});
+304 |     if (newProvider === 'ollama') {
+305 |       checkOllama();
+306 |     }
+307 |   };
+308 | 
+309 |   const handleTestConnection = async () => {
+310 |     setIsTesting(true);
+311 |     setTestResult({ status: 'idle', message: '' });
+312 | 
+313 |     try {
+314 |       const response = await fetch("/api/gemini/test_agent", {
+315 |         method: "POST",
+316 |         headers: { "Content-Type": "application/json" },
+317 |         body: JSON.stringify({
+318 |           node: {
+319 |             id: "test",
+320 |             data: {
+321 |               name: "Test Connection Agent",
+322 |               systemPrompt: "You are a friendly connection validation utility. Keep answers brief.",
+323 |               model: selectedModel
+324 |             }
+325 |           },
+326 |           provider: selectedProvider,
+327 |           api_key: apiKeyInput.trim(),
+328 |           api_keys: { ...apiKeys, [selectedProvider]: apiKeyInput.trim() },
+329 |           base_url: baseUrlInput.trim() || undefined
+330 |         })
+331 |       });
+332 | 
+333 |       const data = await response.json();
+334 |       if (response.ok && data.status === "success") {
+335 |         setTestResult({
+336 |           status: 'success',
+337 |           message: `Connection successful! Output: "${data.response?.substring(0, 50) || 'Success'}"`
+338 |         });
+339 |       } else {
+340 |         setTestResult({
+341 |           status: 'error',
+342 |           message: data.detail || data.error || "Connection failed. Please check credentials and endpoint."
+343 |         });
+344 |       }
+345 |     } catch (e: any) {
+346 |       setTestResult({
+347 |         status: 'error',
+348 |         message: e.message || "Failed to reach the API server. Ensure your backend is running."
+349 |       });
+350 |     } finally {
+351 |       setIsTesting(false);
+352 |     }
+353 |   };
+354 | 
+355 |   const handleSaveSettings = async () => {
+356 |     // Save to Zustand store & IndexedDB
+357 |     await setProviderApiKey(selectedProvider, apiKeyInput.trim());
+358 |     await setBackupApiKey(selectedProvider, 0, backupKey1Input.trim());
+359 |     await setBackupApiKey(selectedProvider, 1, backupKey2Input.trim());
+360 |     setProviderBaseUrl(selectedProvider, baseUrlInput.trim());
+361 |     await setProvider(selectedProvider);
+362 |     await setModel(selectedModel);
+363 |     setFallbackProvider(fallbackProv);
+364 | 
+365 |     // Save custom model custom string if user selected custom
+366 |     if (isCustomModelInput && customModelText.trim()) {
+367 |       await idbSet(`solospace_custom_model_${selectedProvider}`, customModelText.trim());
+368 |     } else {
+369 |       await idbDel(`solospace_custom_model_${selectedProvider}`);
+370 |     }
 371 | 
-372 |   if (!isOpen) return null;
-373 | 
-374 |   const currentProviderInfo = providersConfig[selectedProvider] || {};
-375 |   const modelsList = providerModels[selectedProvider] || currentProviderInfo.models || [];
-376 |   
-377 |   // Custom or local providers require base URL
-378 |   const isCustomOrLocal = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || selectedProvider === 'custom' || currentProviderInfo.is_custom || currentProviderInfo.is_local;
-379 |   const isLocalProvider = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || !!currentProviderInfo.is_local;
-380 | 
-381 |   return (
-382 |     <motion.div
-383 |       initial={{ opacity: 0 }}
-384 |       animate={{ opacity: 1 }}
-385 |       exit={{ opacity: 0 }}
-386 |       className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
-387 |     >
-388 |       <motion.div
-389 |         initial={{ scale: 0.95 }}
-390 |         animate={{ scale: 1 }}
-391 |         exit={{ scale: 0.95 }}
-392 |         className="w-full max-w-md bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl text-white overflow-y-auto max-h-[90vh] custom-scrollbar"
-393 |       >
-394 |         {/* Close Button */}
-395 |         <button onClick={onClose} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer transition-colors">
-396 |           <X className="w-5 h-5" />
-397 |         </button>
-398 | 
-399 |         {/* Header */}
-400 |         <div className="flex gap-4 items-center mb-6">
-401 |           <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
-402 |             <Key className="w-6 h-6 text-white" />
-403 |           </div>
-404 |           <div>
-405 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">AI Engine Settings</h3>
-406 |             <p className="text-xs text-neutral-400 font-sans mt-0.5">Configure your active AI provider, model routing, and keys.</p>
-407 |           </div>
-408 |         </div>
-409 | 
-410 |         <div className="space-y-4">
-411 |           {/* 1. Provider Selector */}
-412 |           <div className="space-y-1.5">
-413 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Provider</label>
-414 |             <select
-415 |               value={selectedProvider}
-416 |               onChange={(e) => handleProviderChange(e.target.value)}
-417 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
-418 |             >
-419 |               {Object.keys(providersConfig).map((pKey) => (
-420 |                 <option key={pKey} value={pKey}>
-421 |                   {providersConfig[pKey]?.name || pKey}
-422 |                 </option>
-423 |               ))}
-424 |             </select>
-425 |           </div>
-426 | 
-427 |           {/* 2. Model Selector */}
-428 |           <div className="space-y-1.5">
-429 |             <div className="flex justify-between items-center">
-430 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Model</label>
-431 |               {(modelsList.length > 0 || selectedProvider === 'ollama') && (
-432 |                 <button
-433 |                   type="button"
-434 |                   onClick={() => {
-435 |                     const willBeCustom = !isCustomModelInput;
-436 |                     setIsCustomModelInput(willBeCustom);
-437 |                     if (willBeCustom) {
-438 |                       setCustomModelText(selectedModel);
-439 |                     } else {
-440 |                       const defaultMod = modelsList[0]?.id || currentProviderInfo.default_model || "";
-441 |                       setSelectedModel(defaultMod);
-442 |                     }
-443 |                   }}
-444 |                   className="text-[9px] text-cyan-400 hover:underline font-mono cursor-pointer"
-445 |                 >
-446 |                   {isCustomModelInput ? "Select from list" : "Enter custom model ID"}
-447 |                 </button>
-448 |               )}
-449 |             </div>
-450 |             {isCustomModelInput || (modelsList.length === 0 && selectedProvider !== 'ollama') ? (
-451 |               <input
-452 |                 type="text"
-453 |                 placeholder="e.g. custom-fine-tune-v1, llama3"
-454 |                 value={isCustomModelInput ? customModelText : selectedModel}
-455 |                 onChange={(e) => {
-456 |                   const val = e.target.value;
-457 |                   if (isCustomModelInput) {
-458 |                     setCustomModelText(val);
-459 |                   }
-460 |                   setSelectedModel(val);
-461 |                 }}
-462 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-463 |               />
-464 |             ) : (
-465 |               <select
-466 |                 value={selectedModel}
-467 |                 onChange={(e) => {
-468 |                   const val = e.target.value;
-469 |                   if (val === "__custom__") {
-470 |                     setIsCustomModelInput(true);
-471 |                     setCustomModelText(selectedModel);
-472 |                   } else {
-473 |                     setSelectedModel(val);
-474 |                   }
-475 |                 }}
-476 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
-477 |               >
-478 |                 {selectedProvider === "ollama" && modelsList.length === 0 ? (
-479 |                   <option value="" disabled>
-480 |                     No local models detected
-481 |                   </option>
-482 |                 ) : (
-483 |                   modelsList.map((m: any) => (
-484 |                     <option key={m.id} value={m.id}>
-485 |                       {m.name || m.id} ({m.tier || "standard"})
-486 |                     </option>
-487 |                   ))
-488 |                 )}
-489 |                 <option value="__custom__">Custom Model ID...</option>
-490 |               </select>
-491 |             )}
-492 |           </div>
-493 | 
-494 |           {/* 3. Custom Base URL Gateway */}
-495 |           <div className="space-y-1.5">
-496 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold flex items-center gap-1">
-497 |               <Globe className="w-3.5 h-3.5" /> Base URL {isCustomOrLocal ? "(Required)" : "(Optional)"}
-498 |             </label>
-499 |             <input
-500 |               type="text"
-501 |               placeholder={currentProviderInfo.base_url || "https://api.provider.com/v1"}
-502 |               value={baseUrlInput}
-503 |               onChange={(e) => setUrlInput(e.target.value)}
-504 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-505 |             />
-506 |           </div>
-507 | 
-508 |           {/* 4. API Key Input or Status Box (Ollama) */}
-509 |           {selectedProvider === "ollama" ? (
-510 |             <div className="space-y-1.5">
-511 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
-512 |                 Ollama Status
-513 |               </label>
-514 |               <div className="bg-black border border-[#1f1f1f] rounded-xl p-4 flex flex-col gap-2">
-515 |                 <div className="flex items-center gap-2 text-xs">
-516 |                   {ollamaStatus === "checking" && (
-517 |                     <>
-518 |                       <div className="w-3.5 h-3.5 border-2 border-neutral-400 border-t-transparent rounded-full animate-spin shrink-0" />
-519 |                       <span className="text-neutral-400 font-mono">Checking local Ollama availability...</span>
-520 |                     </>
-521 |                   )}
-522 |                   {ollamaStatus === "available" && (
-523 |                     <>
-524 |                       <Check className="w-4 h-4 text-emerald-500 shrink-0" />
-525 |                       <span className="text-emerald-400 font-mono font-bold">Ollama running locally</span>
-526 |                     </>
-527 |                   )}
-528 |                   {ollamaStatus === "unavailable" && (
-529 |                     <>
-530 |                       <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
-531 |                       <span className="text-rose-400 font-mono font-bold">Ollama not detected</span>
-532 |                     </>
-533 |                   )}
-534 |                 </div>
-535 |                 {ollamaStatus === "unavailable" && (
-536 |                   <p className="text-[10px] text-neutral-400 leading-normal font-sans">
-537 |                     Make sure Ollama is running on your machine. You can download it from{" "}
-538 |                     <a
-539 |                       href="https://ollama.com"
-540 |                       target="_blank"
-541 |                       rel="noreferrer"
-542 |                       className="text-cyan-400 hover:underline inline-flex items-center gap-0.5"
-543 |                     >
-544 |                       ollama.com <ExternalLink className="w-2.5 h-2.5" />
-545 |                     </a>
-546 |                   </p>
-547 |                 )}
-548 |               </div>
-549 |             </div>
-550 |           ) : (
-551 |             <div className="space-y-1.5">
-552 |               <div className="flex justify-between items-center">
-553 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
-554 |                   {selectedProvider.toUpperCase()}_API_KEY
-555 |                 </label>
-556 |                 {currentProviderInfo.key_url && (
-557 |                   <a
-558 |                     href={currentProviderInfo.key_url}
-559 |                     target="_blank"
-560 |                     rel="noreferrer"
-561 |                     className="text-[9px] text-cyan-400 hover:underline flex items-center gap-1 cursor-pointer"
-562 |                   >
-563 |                     Get key <ExternalLink className="w-3 h-3" />
-564 |                   </a>
-565 |                 )}
-566 |               </div>
-567 |               <div className="relative">
-568 |                 <input
-569 |                   type={showKey ? "text" : "password"}
-570 |                   placeholder={
-571 |                     currentProviderInfo.key_hint
-572 |                       ? `Enter key (starts with ${currentProviderInfo.key_hint})`
-573 |                       : "Enter API key"
-574 |                   }
-575 |                   value={apiKeyInput}
-576 |                   onChange={(e) => setApiKeyInput(e.target.value)}
-577 |                   className="w-full bg-black border border-[#1f1f1f] rounded-xl pl-4 pr-12 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-578 |                 />
-579 |                 <button
-580 |                   type="button"
-581 |                   onClick={() => setShowKey(!showKey)}
-582 |                   className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
-583 |                 >
-584 |                   {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-585 |                 </button>
-586 |               </div>
-587 |             </div>
-588 |           )}
-589 | 
-590 |           {/* Backup API Keys Expandable Section */}
-591 |           {selectedProvider !== "ollama" && (
-592 |             <div className="space-y-2 mt-2">
-593 |               {!showBackupExpander ? (
-594 |                 <button
-595 |                   type="button"
-596 |                   onClick={() => setShowBackupExpander(true)}
-597 |                   className="text-[10px] text-cyan-400 hover:underline font-mono cursor-pointer flex items-center gap-1"
-598 |                 >
-599 |                   + Add backup key
-600 |                 </button>
-601 |               ) : (
-602 |                 <div className="border border-[#1f1f1f] bg-black/40 rounded-xl p-3 space-y-3">
-603 |                   <div className="flex justify-between items-center">
-604 |                     <span className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Backup Keys</span>
-605 |                     <button
-606 |                       type="button"
-607 |                       onClick={() => {
-608 |                         setShowBackupExpander(false);
-609 |                         setBackupKey1Input("");
-610 |                         setBackupKey2Input("");
-611 |                         setShowSecondBackup(false);
-612 |                       }}
-613 |                       className="text-[9px] text-rose-400 hover:underline font-mono cursor-pointer"
-614 |                     >
-615 |                       Remove all
-616 |                     </button>
-617 |                   </div>
-618 |                   
-619 |                   {/* Backup Key 1 */}
-620 |                   <div className="space-y-1">
-621 |                     <label className="text-[9px] font-mono uppercase text-neutral-500">Backup Key 1</label>
-622 |                     <div className="relative">
-623 |                       <input
-624 |                         type={showBackupKey1 ? "text" : "password"}
-625 |                         placeholder="Enter backup key 1"
-626 |                         value={backupKey1Input}
-627 |                         onChange={(e) => setBackupKey1Input(e.target.value)}
-628 |                         className="w-full bg-black border border-[#1f1f1f] rounded-lg pl-3 pr-10 py-2 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-629 |                       />
-630 |                       <button
-631 |                         type="button"
-632 |                         onClick={() => setShowBackupKey1(!showBackupKey1)}
-633 |                         className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
-634 |                       >
-635 |                         {showBackupKey1 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-636 |                       </button>
-637 |                     </div>
-638 |                   </div>
-639 | 
-640 |                   {/* Backup Key 2 */}
-641 |                   {!showSecondBackup ? (
-642 |                     <button
-643 |                       type="button"
-644 |                       onClick={() => setShowSecondBackup(true)}
-645 |                       className="text-[10px] text-cyan-400 hover:underline font-mono cursor-pointer flex items-center gap-1"
-646 |                     >
-647 |                       + Add another backup key
-648 |                     </button>
-649 |                   ) : (
-650 |                     <div className="space-y-1">
-651 |                       <div className="flex justify-between items-center">
-652 |                         <label className="text-[9px] font-mono uppercase text-neutral-500">Backup Key 2</label>
-653 |                         <button
-654 |                           type="button"
-655 |                           onClick={() => {
-656 |                             setShowSecondBackup(false);
-657 |                             setBackupKey2Input("");
-658 |                           }}
-659 |                           className="text-[9px] text-neutral-500 hover:text-neutral-300 font-mono cursor-pointer"
-660 |                         >
-661 |                           Remove
-662 |                         </button>
-663 |                       </div>
-664 |                       <div className="relative">
-665 |                         <input
-666 |                           type={showBackupKey2 ? "text" : "password"}
-667 |                           placeholder="Enter backup key 2"
-668 |                           value={backupKey2Input}
-669 |                           onChange={(e) => setBackupKey2Input(e.target.value)}
-670 |                           className="w-full bg-black border border-[#1f1f1f] rounded-lg pl-3 pr-10 py-2 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-671 |                         />
-672 |                         <button
-673 |                           type="button"
-674 |                           onClick={() => setShowBackupKey2(!showBackupKey2)}
-675 |                           className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
-676 |                         >
-677 |                           {showBackupKey2 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-678 |                         </button>
-679 |                       </div>
-680 |                     </div>
-681 |                   )}
-682 |                 </div>
-683 |               )}
-684 |             </div>
-685 |           )}
-686 | 
-687 |           {/* 5. Fallback Provider Selector */}
-688 |           <div className="space-y-1.5">
-689 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Automatic Fallback</label>
-690 |             <select
-691 |               value={fallbackProv}
-692 |               onChange={(e) => setFallbackProv(e.target.value)}
-693 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
-694 |             >
-695 |               <option value="">No Fallback (Error immediately)</option>
-696 |               {Object.keys(providersConfig)
-697 |                 .filter((pKey) => pKey !== selectedProvider)
-698 |                 .map((pKey) => (
-699 |                   <option key={pKey} value={pKey}>
-700 |                     Fallback: {providersConfig[pKey]?.name || pKey}
-701 |                   </option>
-702 |                 ))}
-703 |             </select>
-704 |           </div>
-705 | 
-706 |           {/* Connection Test pipeline */}
-707 |           {isLocalProvider ? (
-708 |             <div className="p-3 bg-neutral-950/40 border border-[#1f1f1f] rounded-xl text-[10px] text-neutral-400 font-mono leading-normal">
-709 |               ℹ️ Local models run directly on your machine and do not require API connection testing.
-710 |             </div>
-711 |           ) : (
-712 |             <div className="pt-2">
-713 |               <button
-714 |                 type="button"
-715 |                 onClick={handleTestConnection}
-716 |                 disabled={isTesting || (!apiKeyInput && selectedProvider !== "ollama" && selectedProvider !== "lmstudio")}
-717 |                 className="w-full py-2 bg-neutral-900 hover:bg-neutral-800 border border-[#1f1f1f] text-neutral-300 hover:text-white font-bold rounded-xl text-xs font-mono transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-20 disabled:scale-100"
-718 |               >
-719 |                 {isTesting ? (
-720 |                   <>
-721 |                     <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-722 |                     Testing Pipeline...
-723 |                   </>
-724 |                 ) : (
-725 |                   "Test Connection"
-726 |                 )}
-727 |               </button>
-728 | 
-729 |               {/* Test Connection Results */}
-730 |               <AnimatePresence>
-731 |                 {testResult.status !== 'idle' && (
-732 |                   <motion.div
-733 |                     initial={{ opacity: 0, y: 5 }}
-734 |                     animate={{ opacity: 1, y: 0 }}
-735 |                     exit={{ opacity: 0, y: 5 }}
-736 |                     className={`mt-3 flex items-start gap-2.5 p-3 rounded-xl text-[10px] leading-normal font-mono border ${
-737 |                       testResult.status === 'success'
-738 |                         ? 'bg-emerald-950/20 border-emerald-950/30 text-emerald-400'
-739 |                         : 'bg-rose-950/20 border-rose-950/30 text-rose-400'
-740 |                     }`}
-741 |                   >
-742 |                     {testResult.status === 'success' ? (
-743 |                       <Check className="w-4 h-4 shrink-0 text-emerald-500 mt-0.5" />
-744 |                     ) : (
-745 |                       <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
-746 |                     )}
-747 |                     <span className="whitespace-pre-wrap">{testResult.message}</span>
-748 |                   </motion.div>
-749 |                 )}
-750 |               </AnimatePresence>
-751 |             </div>
-752 |           )}
-753 | 
-754 |           {/* 6. Save and Cancel Buttons */}
-755 |           <div className="pt-4 flex gap-3 border-t border-[#141414]">
-756 |             <button
-757 |               id="save-api-key-btn"
-758 |               onClick={handleSaveSettings}
-759 |               className="flex-1 py-2.5 bg-white hover:bg-neutral-100 text-black font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
-760 |             >
-761 |               Save Settings
-762 |             </button>
-763 |             <button
-764 |               onClick={onClose}
-765 |               className="px-5 py-2.5 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-xl text-xs font-mono transition-colors cursor-pointer"
-766 |             >
-767 |               Cancel
-768 |             </button>
-769 |           </div>
-770 |         </div>
-771 |       </motion.div>
-772 |     </motion.div>
-773 |   );
-774 | }
-775 |
+372 |     onClose();
+373 |   };
+374 | 
+375 |   if (!isOpen) return null;
+376 | 
+377 |   const currentProviderInfo = providersConfig[selectedProvider] || {};
+378 |   const modelsList = providerModels[selectedProvider] || currentProviderInfo.models || [];
+379 |   
+380 |   // Custom or local providers require base URL
+381 |   const isCustomOrLocal = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || selectedProvider === 'custom' || currentProviderInfo.is_custom || currentProviderInfo.is_local;
+382 |   const isLocalProvider = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || !!currentProviderInfo.is_local;
+383 | 
+384 |   return (
+385 |     <motion.div
+386 |       initial={{ opacity: 0 }}
+387 |       animate={{ opacity: 1 }}
+388 |       exit={{ opacity: 0 }}
+389 |       className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
+390 |     >
+391 |       <motion.div
+392 |         initial={{ scale: 0.95 }}
+393 |         animate={{ scale: 1 }}
+394 |         exit={{ scale: 0.95 }}
+395 |         className="w-full max-w-md bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl text-white overflow-y-auto max-h-[90vh] custom-scrollbar"
+396 |       >
+397 |         {/* Close Button */}
+398 |         <button onClick={onClose} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer transition-colors">
+399 |           <X className="w-5 h-5" />
+400 |         </button>
+401 | 
+402 |         {/* Header */}
+403 |         <div className="flex gap-4 items-center mb-6">
+404 |           <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
+405 |             <Key className="w-6 h-6 text-white" />
+406 |           </div>
+407 |           <div>
+408 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">AI Engine Settings</h3>
+409 |             <p className="text-xs text-neutral-400 font-sans mt-0.5">Powered by OpenAI GPT-4.1 & Codex. Configure your active AI provider, model routing, and keys.</p>
+410 |           </div>
+411 |         </div>
+412 | 
+413 |         <div className="space-y-4">
+414 |           {/* 1. Provider Selector */}
+415 |           <div className="space-y-1.5">
+416 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Provider</label>
+417 |             <select
+418 |               value={selectedProvider}
+419 |               onChange={(e) => handleProviderChange(e.target.value)}
+420 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
+421 |             >
+422 |               {Object.keys(providersConfig).map((pKey) => (
+423 |                 <option key={pKey} value={pKey}>
+424 |                   {providersConfig[pKey]?.name || pKey}
+425 |                 </option>
+426 |               ))}
+427 |             </select>
+428 |           </div>
+429 | 
+430 |           {/* 2. Model Selector */}
+431 |           <div className="space-y-1.5">
+432 |             <div className="flex justify-between items-center">
+433 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Model</label>
+434 |               {(modelsList.length > 0 || selectedProvider === 'ollama') && (
+435 |                 <button
+436 |                   type="button"
+437 |                   onClick={() => {
+438 |                     const willBeCustom = !isCustomModelInput;
+439 |                     setIsCustomModelInput(willBeCustom);
+440 |                     if (willBeCustom) {
+441 |                       setCustomModelText(selectedModel);
+442 |                     } else {
+443 |                       const defaultMod = modelsList[0]?.id || currentProviderInfo.default_model || "";
+444 |                       setSelectedModel(defaultMod);
+445 |                     }
+446 |                   }}
+447 |                   className="text-[9px] text-cyan-400 hover:underline font-mono cursor-pointer"
+448 |                 >
+449 |                   {isCustomModelInput ? "Select from list" : "Enter custom model ID"}
+450 |                 </button>
+451 |               )}
+452 |             </div>
+453 |             {isCustomModelInput || (modelsList.length === 0 && selectedProvider !== 'ollama') ? (
+454 |               <input
+455 |                 type="text"
+456 |                 placeholder="e.g. custom-fine-tune-v1, llama3"
+457 |                 value={isCustomModelInput ? customModelText : selectedModel}
+458 |                 onChange={(e) => {
+459 |                   const val = e.target.value;
+460 |                   if (isCustomModelInput) {
+461 |                     setCustomModelText(val);
+462 |                   }
+463 |                   setSelectedModel(val);
+464 |                 }}
+465 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+466 |               />
+467 |             ) : (
+468 |               <select
+469 |                 value={selectedModel}
+470 |                 onChange={(e) => {
+471 |                   const val = e.target.value;
+472 |                   if (val === "__custom__") {
+473 |                     setIsCustomModelInput(true);
+474 |                     setCustomModelText(selectedModel);
+475 |                   } else {
+476 |                     setSelectedModel(val);
+477 |                   }
+478 |                 }}
+479 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
+480 |               >
+481 |                 {selectedProvider === "ollama" && modelsList.length === 0 ? (
+482 |                   <option value="" disabled>
+483 |                     No local models detected
+484 |                   </option>
+485 |                 ) : (
+486 |                   modelsList.map((m: any) => (
+487 |                     <option key={m.id} value={m.id}>
+488 |                       {m.name || m.id} ({m.tier || "standard"})
+489 |                     </option>
+490 |                   ))
+491 |                 )}
+492 |                 <option value="__custom__">Custom Model ID...</option>
+493 |               </select>
+494 |             )}
+495 |           </div>
+496 | 
+497 |           {/* 3. Custom Base URL Gateway */}
+498 |           <div className="space-y-1.5">
+499 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold flex items-center gap-1">
+500 |               <Globe className="w-3.5 h-3.5" /> Base URL {isCustomOrLocal ? "(Required)" : "(Optional)"}
+501 |             </label>
+502 |             <input
+503 |               type="text"
+504 |               placeholder={currentProviderInfo.base_url || "https://api.provider.com/v1"}
+505 |               value={baseUrlInput}
+506 |               onChange={(e) => setUrlInput(e.target.value)}
+507 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+508 |             />
+509 |           </div>
+510 | 
+511 |           {/* 4. API Key Input or Status Box (Ollama) */}
+512 |           {selectedProvider === "ollama" ? (
+513 |             <div className="space-y-1.5">
+514 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
+515 |                 Ollama Status
+516 |               </label>
+517 |               <div className="bg-black border border-[#1f1f1f] rounded-xl p-4 flex flex-col gap-2">
+518 |                 <div className="flex items-center gap-2 text-xs">
+519 |                   {ollamaStatus === "checking" && (
+520 |                     <>
+521 |                       <div className="w-3.5 h-3.5 border-2 border-neutral-400 border-t-transparent rounded-full animate-spin shrink-0" />
+522 |                       <span className="text-neutral-400 font-mono">Checking local Ollama availability...</span>
+523 |                     </>
+524 |                   )}
+525 |                   {ollamaStatus === "available" && (
+526 |                     <>
+527 |                       <Check className="w-4 h-4 text-emerald-500 shrink-0" />
+528 |                       <span className="text-emerald-400 font-mono font-bold">Ollama running locally</span>
+529 |                     </>
+530 |                   )}
+531 |                   {ollamaStatus === "unavailable" && (
+532 |                     <>
+533 |                       <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+534 |                       <span className="text-rose-400 font-mono font-bold">Ollama not detected</span>
+535 |                     </>
+536 |                   )}
+537 |                 </div>
+538 |                 {ollamaStatus === "unavailable" && (
+539 |                   <p className="text-[10px] text-neutral-400 leading-normal font-sans">
+540 |                     Make sure Ollama is running on your machine. You can download it from{" "}
+541 |                     <a
+542 |                       href="https://ollama.com"
+543 |                       target="_blank"
+544 |                       rel="noreferrer"
+545 |                       className="text-cyan-400 hover:underline inline-flex items-center gap-0.5"
+546 |                     >
+547 |                       ollama.com <ExternalLink className="w-2.5 h-2.5" />
+548 |                     </a>
+549 |                   </p>
+550 |                 )}
+551 |               </div>
+552 |             </div>
+553 |           ) : (
+554 |             <div className="space-y-1.5">
+555 |               <div className="flex justify-between items-center">
+556 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
+557 |                   {selectedProvider.toUpperCase()}_API_KEY
+558 |                 </label>
+559 |                 {currentProviderInfo.key_url && (
+560 |                   <a
+561 |                     href={currentProviderInfo.key_url}
+562 |                     target="_blank"
+563 |                     rel="noreferrer"
+564 |                     className="text-[9px] text-cyan-400 hover:underline flex items-center gap-1 cursor-pointer"
+565 |                   >
+566 |                     Get key <ExternalLink className="w-3 h-3" />
+567 |                   </a>
+568 |                 )}
+569 |               </div>
+570 |               <div className="relative">
+571 |                 <input
+572 |                   type={showKey ? "text" : "password"}
+573 |                   placeholder={
+574 |                     currentProviderInfo.key_hint
+575 |                       ? `Enter key (starts with ${currentProviderInfo.key_hint})`
+576 |                       : "Enter API key"
+577 |                   }
+578 |                   value={apiKeyInput}
+579 |                   onChange={(e) => setApiKeyInput(e.target.value)}
+580 |                   className="w-full bg-black border border-[#1f1f1f] rounded-xl pl-4 pr-12 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+581 |                 />
+582 |                 <button
+583 |                   type="button"
+584 |                   onClick={() => setShowKey(!showKey)}
+585 |                   className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
+586 |                 >
+587 |                   {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+588 |                 </button>
+589 |               </div>
+590 |             </div>
+591 |           )}
+592 | 
+593 |           {/* Backup API Keys Expandable Section */}
+594 |           {selectedProvider !== "ollama" && (
+595 |             <div className="space-y-2 mt-2">
+596 |               {!showBackupExpander ? (
+597 |                 <button
+598 |                   type="button"
+599 |                   onClick={() => setShowBackupExpander(true)}
+600 |                   className="text-[10px] text-cyan-400 hover:underline font-mono cursor-pointer flex items-center gap-1"
+601 |                 >
+602 |                   + Add backup key
+603 |                 </button>
+604 |               ) : (
+605 |                 <div className="border border-[#1f1f1f] bg-black/40 rounded-xl p-3 space-y-3">
+606 |                   <div className="flex justify-between items-center">
+607 |                     <span className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Backup Keys</span>
+608 |                     <button
+609 |                       type="button"
+610 |                       onClick={() => {
+611 |                         setShowBackupExpander(false);
+612 |                         setBackupKey1Input("");
+613 |                         setBackupKey2Input("");
+614 |                         setShowSecondBackup(false);
+615 |                       }}
+616 |                       className="text-[9px] text-rose-400 hover:underline font-mono cursor-pointer"
+617 |                     >
+618 |                       Remove all
+619 |                     </button>
+620 |                   </div>
+621 |                   
+622 |                   {/* Backup Key 1 */}
+623 |                   <div className="space-y-1">
+624 |                     <label className="text-[9px] font-mono uppercase text-neutral-500">Backup Key 1</label>
+625 |                     <div className="relative">
+626 |                       <input
+627 |                         type={showBackupKey1 ? "text" : "password"}
+628 |                         placeholder="Enter backup key 1"
+629 |                         value={backupKey1Input}
+630 |                         onChange={(e) => setBackupKey1Input(e.target.value)}
+631 |                         className="w-full bg-black border border-[#1f1f1f] rounded-lg pl-3 pr-10 py-2 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+632 |                       />
+633 |                       <button
+634 |                         type="button"
+635 |                         onClick={() => setShowBackupKey1(!showBackupKey1)}
+636 |                         className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
+637 |                       >
+638 |                         {showBackupKey1 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+639 |                       </button>
+640 |                     </div>
+641 |                   </div>
+642 | 
+643 |                   {/* Backup Key 2 */}
+644 |                   {!showSecondBackup ? (
+645 |                     <button
+646 |                       type="button"
+647 |                       onClick={() => setShowSecondBackup(true)}
+648 |                       className="text-[10px] text-cyan-400 hover:underline font-mono cursor-pointer flex items-center gap-1"
+649 |                     >
+650 |                       + Add another backup key
+651 |                     </button>
+652 |                   ) : (
+653 |                     <div className="space-y-1">
+654 |                       <div className="flex justify-between items-center">
+655 |                         <label className="text-[9px] font-mono uppercase text-neutral-500">Backup Key 2</label>
+656 |                         <button
+657 |                           type="button"
+658 |                           onClick={() => {
+659 |                             setShowSecondBackup(false);
+660 |                             setBackupKey2Input("");
+661 |                           }}
+662 |                           className="text-[9px] text-neutral-500 hover:text-neutral-300 font-mono cursor-pointer"
+663 |                         >
+664 |                           Remove
+665 |                         </button>
+666 |                       </div>
+667 |                       <div className="relative">
+668 |                         <input
+669 |                           type={showBackupKey2 ? "text" : "password"}
+670 |                           placeholder="Enter backup key 2"
+671 |                           value={backupKey2Input}
+672 |                           onChange={(e) => setBackupKey2Input(e.target.value)}
+673 |                           className="w-full bg-black border border-[#1f1f1f] rounded-lg pl-3 pr-10 py-2 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+674 |                         />
+675 |                         <button
+676 |                           type="button"
+677 |                           onClick={() => setShowBackupKey2(!showBackupKey2)}
+678 |                           className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
+679 |                         >
+680 |                           {showBackupKey2 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+681 |                         </button>
+682 |                       </div>
+683 |                     </div>
+684 |                   )}
+685 |                 </div>
+686 |               )}
+687 |             </div>
+688 |           )}
+689 | 
+690 |           {/* 5. Fallback Provider Selector */}
+691 |           <div className="space-y-1.5">
+692 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Automatic Fallback</label>
+693 |             <select
+694 |               value={fallbackProv}
+695 |               onChange={(e) => setFallbackProv(e.target.value)}
+696 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
+697 |             >
+698 |               <option value="">No Fallback (Error immediately)</option>
+699 |               {Object.keys(providersConfig)
+700 |                 .filter((pKey) => pKey !== selectedProvider)
+701 |                 .map((pKey) => (
+702 |                   <option key={pKey} value={pKey}>
+703 |                     Fallback: {providersConfig[pKey]?.name || pKey}
+704 |                   </option>
+705 |                 ))}
+706 |             </select>
+707 |           </div>
+708 | 
+709 |           {/* Connection Test pipeline */}
+710 |           {isLocalProvider ? (
+711 |             <div className="p-3 bg-neutral-950/40 border border-[#1f1f1f] rounded-xl text-[10px] text-neutral-400 font-mono leading-normal">
+712 |               ℹ️ Local models run directly on your machine and do not require API connection testing.
+713 |             </div>
+714 |           ) : (
+715 |             <div className="pt-2">
+716 |               <button
+717 |                 type="button"
+718 |                 onClick={handleTestConnection}
+719 |                 disabled={isTesting || (!apiKeyInput && selectedProvider !== "ollama" && selectedProvider !== "lmstudio")}
+720 |                 className="w-full py-2 bg-neutral-900 hover:bg-neutral-800 border border-[#1f1f1f] text-neutral-300 hover:text-white font-bold rounded-xl text-xs font-mono transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-20 disabled:scale-100"
+721 |               >
+722 |                 {isTesting ? (
+723 |                   <>
+724 |                     <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+725 |                     Testing Pipeline...
+726 |                   </>
+727 |                 ) : (
+728 |                   "Test Connection"
+729 |                 )}
+730 |               </button>
+731 | 
+732 |               {/* Test Connection Results */}
+733 |               <AnimatePresence>
+734 |                 {testResult.status !== 'idle' && (
+735 |                   <motion.div
+736 |                     initial={{ opacity: 0, y: 5 }}
+737 |                     animate={{ opacity: 1, y: 0 }}
+738 |                     exit={{ opacity: 0, y: 5 }}
+739 |                     className={`mt-3 flex items-start gap-2.5 p-3 rounded-xl text-[10px] leading-normal font-mono border ${
+740 |                       testResult.status === 'success'
+741 |                         ? 'bg-emerald-950/20 border-emerald-950/30 text-emerald-400'
+742 |                         : 'bg-rose-950/20 border-rose-950/30 text-rose-400'
+743 |                     }`}
+744 |                   >
+745 |                     {testResult.status === 'success' ? (
+746 |                       <Check className="w-4 h-4 shrink-0 text-emerald-500 mt-0.5" />
+747 |                     ) : (
+748 |                       <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
+749 |                     )}
+750 |                     <span className="whitespace-pre-wrap">{testResult.message}</span>
+751 |                   </motion.div>
+752 |                 )}
+753 |               </AnimatePresence>
+754 |             </div>
+755 |           )}
+756 | 
+757 |           {/* 6. Save and Cancel Buttons */}
+758 |           <div className="pt-4 flex gap-3 border-t border-[#141414]">
+759 |             <button
+760 |               id="save-api-key-btn"
+761 |               onClick={handleSaveSettings}
+762 |               className="flex-1 py-2.5 bg-white hover:bg-neutral-100 text-black font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
+763 |             >
+764 |               Save Settings
+765 |             </button>
+766 |             <button
+767 |               onClick={onClose}
+768 |               className="px-5 py-2.5 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-xl text-xs font-mono transition-colors cursor-pointer"
+769 |             >
+770 |               Cancel
+771 |             </button>
+772 |           </div>
+773 |         </div>
+774 |       </motion.div>
+775 |     </motion.div>
+776 |   );
+777 | }
+778 |
 ```
 
 ### File: `Frontend/components/ContextMenu.tsx`
@@ -8454,10 +8596,10 @@ SoloSpace/
 
 ### File: `Frontend/components/FlowArena.tsx`
 
-> 570 lines | 22.3 KB
+> 627 lines | 24.9 KB
 
 ```tsx
-  1 | import React, { useState, useCallback, useEffect } from 'react';
+  1 | import React, { useState, useCallback, useEffect, useRef } from 'react';
   2 | import { 
   3 |   ReactFlow, 
   4 |   Background, 
@@ -8625,408 +8767,465 @@ SoloSpace/
 166 |   };
 167 | 
 168 |   const [initialLayoutDone, setInitialLayoutDone] = useState(false);
-169 | 
-170 |   // Context Menu State
-171 |   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: Node | null } | null>(null);
-172 | 
-173 |   // Reconnection state
-174 |   const onReconnect = useCallback((oldEdge: Edge, newConnection: Connection) => {
-175 |     setEdges((eds) => reconnectEdge(oldEdge, newConnection, eds));
-176 |   }, [setEdges]);
-177 | 
-178 |   // Context Menu triggers
-179 |   const onNodeContextMenu = useCallback((event: any, node: Node) => {
-180 |     event.preventDefault();
-181 |     setContextMenu({
-182 |       x: event.clientX,
-183 |       y: event.clientY,
-184 |       node,
-185 |     });
-186 |   }, []);
-187 | 
-188 |   const onPaneContextMenu = useCallback((event: any) => {
-189 |     event.preventDefault();
-190 |     setContextMenu({
-191 |       x: event.clientX,
-192 |       y: event.clientY,
-193 |       node: null,
-194 |     });
-195 |   }, []);
-196 | 
-197 |   const onPaneClick = useCallback(() => {
-198 |     setContextMenu(null);
-199 |   }, []);
-200 | 
-201 |   // Zoom/Viewport Controls
-202 |   const handleZoomIn = () => {
-203 |     zoomIn({ duration: 300 });
-204 |   };
-205 | 
-206 |   const handleZoomOut = () => {
-207 |     zoomOut({ duration: 300 });
-208 |   };
-209 | 
-210 |   const handleResetView = () => {
-211 |     setViewport({ x: 100, y: 50, zoom: 0.9 }, { duration: 400 });
-212 |   };
-213 | 
-214 |   const applyLayout = useCallback(() => {
-215 |     if (nodes.length === 0) return;
-216 |     const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
-217 |     setNodes(layoutedNodes);
-218 |   }, [nodes, edges, setNodes]);
-219 | 
-220 |   // Layout nodes once initially when loaded
-221 |   useEffect(() => {
-222 |     if (!initialLayoutDone && nodes.length > 0) {
-223 |       const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
-224 |       setNodes(layoutedNodes);
-225 |       setInitialLayoutDone(true);
-226 |     }
-227 |   }, [nodes, edges, initialLayoutDone, setNodes]);
-228 | 
-229 |   // Reset layout state if node length changes back to 0 (new chat)
-230 |   useEffect(() => {
-231 |     if (nodes.length === 0) {
-232 |       setInitialLayoutDone(false);
-233 |     }
-234 |   }, [nodes.length]);
-235 | 
-236 |   // Auto-fit viewport on node count changes
-237 |   useEffect(() => {
-238 |     if (nodes.length > 0) {
-239 |       const timer = setTimeout(() => {
-240 |         fitView({ padding: 0.3, duration: 400 });
-241 |       }, 300);
-242 |       return () => clearTimeout(timer);
-243 |     }
-244 |   }, [nodes.length, fitView]);
-245 | 
-246 |   const handleAddAgentNode = () => {
-247 |     const randomId = `custom_agent_${Date.now().toString().slice(-4)}`;
-248 |     const view = getViewport();
-249 |     // Center new node inside view coordinates
-250 |     let x = (-view.x + window.innerWidth / 2 - 120) / view.zoom;
-251 |     let y = (-view.y + window.innerHeight / 2 - 100) / view.zoom;
-252 | 
-253 |     // Avoid collision
-254 |     const NODE_W = 240;
-255 |     const NODE_H = 220;
-256 |     const existingPositions = nodes.map(n => n.position);
-257 |     for (const pos of existingPositions) {
-258 |       if (Math.abs(x - pos.x) < NODE_W && Math.abs(y - pos.y) < NODE_H) {
-259 |         y = pos.y + NODE_H + 40;
-260 |       }
-261 |     }
-262 | 
-263 |     const newNode = {
-264 |       id: randomId,
-265 |       type: 'custom',
-266 |       position: { x: Math.max(50, x), y: Math.max(50, y) },
-267 |       data: {
-268 |         name: "Custom Agent Node",
-269 |         tag: "USER_CUSTOM_NODE",
-270 |         status: "IDLE" as const,
-271 |         metricLabel: "Tasks Completed",
-272 |         metricVal: "0",
-273 |         icon: "science",
-274 |         objective: "Enter agent goals...",
-275 |         personality: "Pragmatic, logical, responsive",
-276 |         systemPrompt: "You are a custom assistant. Fulfill user demands precisely.",
-277 |         rules: ["Verify actions before launching"],
-278 |         tools: ["Web Search"],
-279 |         temp: 0.5,
-280 |         logic: 80,
-281 |         empathy: 50,
-282 |         context: "128k",
-283 |         enabled: true,
-284 |         priority: 5,
-285 |         toolPermissions: {
-286 |           "Web Search": "ALLOWED" as const
-287 |         },
-288 |         toolLogs: []
-289 |       }
-290 |     };
-291 |     addNode(newNode);
-292 |     setSelectedNodeId(newNode.id);
-293 |   };
-294 | 
-295 |   // Node styles for MiniMap representation
-296 |   const getMiniMapNodeColor = (node: Node) => {
-297 |     if (node.type === 'groupNode') return 'rgba(255, 255, 255, 0.03)';
-298 |     const data = node.data as CanvasNodeData;
-299 |     if (data && data.enabled === false) return '#262626';
-300 |     if (data && (data.status === 'ACTIVE' || data.status === 'PROCESSING')) return '#06b6d4';
-301 |     return '#404040';
-302 |   };
-303 | 
-304 |   return (
-305 |     <div className="w-full h-full flex-1 relative bg-black">
-306 |       <ReactFlow
-307 |         nodes={nodes}
-308 |         edges={edges}
-309 |         onNodesChange={onNodesChange}
-310 |         onEdgesChange={onEdgesChange}
-311 |         onConnect={onConnect}
-312 |         onReconnect={onReconnect}
-313 |         nodeTypes={nodeTypes}
-314 |         edgeTypes={edgeTypes}
-315 |         onNodeContextMenu={onNodeContextMenu}
-316 |         onPaneContextMenu={onPaneContextMenu}
-317 |         onPaneClick={onPaneClick}
-318 |         snapToGrid={true}
-319 |         snapGrid={[15, 15]}
-320 |         fitViewOptions={{ padding: 0.3 }}
-321 |         className="flow-arena-editor"
-322 |         minZoom={0.2}
-323 |         maxZoom={2.5}
-324 |         defaultViewport={{ x: 100, y: 50, zoom: 0.9 }}
-325 |       >
-326 |         {/* Subtle grid background dots */}
-327 |         <Background 
-328 |           variant={BackgroundVariant.Dots} 
-329 |           color="rgba(255, 255, 255, 0.06)" 
-330 |           gap={24} 
-331 |           size={1}
-332 |         />
-333 | 
-334 |         {/* Custom Minimap Overlay */}
-335 |         <MiniMap 
-336 |           zoomable 
-337 |           pannable 
-338 |           nodeColor={getMiniMapNodeColor}
-339 |           nodeStrokeWidth={3}
-340 |           nodeBorderRadius={8}
-341 |           maskColor="rgba(0, 0, 0, 0.65)"
-342 |           className="!right-4 !top-4"
-343 |         />
-344 | 
-345 |         {/* Custom Floating Zoom & Node controls */}
-346 |         <Panel position="bottom-left" className="!left-4 !bottom-14 flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-1 rounded-xl z-20 shadow-2xl">
-347 |           <button 
-348 |             onClick={handleZoomIn}
-349 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors cursor-pointer"
-350 |             title="Zoom In"
-351 |           >
-352 |             <Plus className="w-3.5 h-3.5" />
-353 |           </button>
-354 | 
-355 |           <button 
-356 |             onClick={handleZoomOut}
-357 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors cursor-pointer"
-358 |             title="Zoom Out"
-359 |           >
-360 |             <Minus className="w-3.5 h-3.5" />
-361 |           </button>
-362 | 
-363 |           <button 
-364 |             onClick={handleResetView}
-365 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 cursor-pointer"
-366 |             title="Reset Viewport"
-367 |           >
-368 |             <Maximize className="w-3.5 h-3.5" />
-369 |           </button>
-370 | 
-371 |           <button 
-372 |             onClick={applyLayout}
-373 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 cursor-pointer"
-374 |             title="Auto Layout Graph"
-375 |           >
-376 |             <LayoutGrid className="w-3.5 h-3.5" />
-377 |           </button>
-378 | 
-379 |           <button 
-380 |             onClick={isEchoHouseMode ? () => setIsEchoHouseCreateFormOpen(true) : handleAddAgentNode}
-381 |             className="p-2 text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 flex items-center gap-1 text-[10px] cursor-pointer"
-382 |             title={isEchoHouseMode ? "Add Person" : "Add Custom Agent Node"}
-383 |           >
-384 |             <PlusCircle className="w-3.5 h-3.5 text-white" />
-385 |             <span className="font-semibold pr-1">Node</span>
-386 |           </button>
-387 |         </Panel>
-388 | 
-389 |         {/* Right-click Context Menu */}
-390 |         {contextMenu && (
-391 |           <ContextMenu
-392 |             x={contextMenu.x}
-393 |             y={contextMenu.y}
-394 |             node={contextMenu.node}
-395 |             onClose={() => setContextMenu(null)}
-396 |           />
-397 |         )}
-398 | 
-399 | 
-400 |         {/* EchoHouse instructional panel moved to the top-left panel */}
-401 | 
-402 |         {/* Bottom-center Proceed Buttons */}
-403 |         {isEchoHouseMode ? (
-404 |           nodes.filter(n => (n.data as any).isEchoHouseAgent && (n.data as any).echohouseRole !== "self").length > 0 && (
-405 |             <Panel position="bottom-center" className="!bottom-14 z-20">
-406 |               <button
-407 |                 onClick={handleEchoHouseProceed}
-408 |                 disabled={isOrchestrating}
-409 |                 className="px-6 py-2.5 bg-white text-black font-bold text-xs rounded-full shadow-2xl hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2 select-none"
-410 |               >
-411 |                 {isOrchestrating ? (
-412 |                   <>
-413 |                     <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
-414 |                     <span>Running...</span>
-415 |                   </>
-416 |                 ) : (
-417 |                   <span>Proceed</span>
-418 |                 )}
-419 |               </button>
-420 |             </Panel>
-421 |           )
-422 |         ) : (
-423 |           nodes.length > 0 && executionState !== "running" && !isOrchestrating && (
-424 |             <Panel position="bottom-center" className="!bottom-14 z-20">
-425 |               <button
-426 |                 onClick={handleNormalProceed}
-427 |                 disabled={isOrchestrating}
-428 |                 className="px-6 py-2.5 bg-white text-black font-bold text-xs rounded-full shadow-2xl hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2 select-none"
-429 |               >
-430 |                 {isOrchestrating ? (
-431 |                   <>
-432 |                     <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
-433 |                     <span>Running...</span>
-434 |                   </>
-435 |                 ) : (
-436 |                   <span>Proceed</span>
-437 |                 )}
-438 |               </button>
-439 |             </Panel>
-440 |           )
-441 |         )}
-442 | 
-443 |         {/* Persistent legend and EchoHouse instructions — top left */}
-444 |         <Panel position="top-left" className="!left-4 !top-16 select-none z-20 flex flex-col gap-2.5">
-445 |           <div className="bg-[#0d0d0d]/80 border border-[#1f1f1f] rounded-lg p-2.5 backdrop-blur-md shadow-xl text-[9px] font-mono text-neutral-600 space-y-1.5 w-64">
-446 |             <div className="flex items-center gap-2">
-447 |               <span className="w-2.5 h-2.5 rounded-full bg-black border-2 border-rose-500 shrink-0" />
-448 |               <span>Input (data in)</span>
-449 |             </div>
-450 |             <div className="flex items-center gap-2">
-451 |               <span className="w-2.5 h-2.5 rounded-full bg-black border-2 border-emerald-500 shrink-0" />
-452 |               <span>Output (data out)</span>
-453 |             </div>
-454 |             <div className="flex items-center gap-2">
-455 |               <span className="w-3.5 h-0.5 bg-cyan-500 rounded shrink-0" />
-456 |               <span>Dependency wire</span>
-457 |             </div>
-458 |             <div className="flex items-center gap-2">
-459 |               <span className="text-[8px] leading-none">✥</span>
-460 |               <span>Drag card to reposition</span>
-461 |             </div>
-462 |           </div>
-463 | 
-464 |           {isEchoHouseMode && (
-465 |             <div className="bg-[#0d0d0d]/80 border border-[#1f1f1f] rounded-lg p-2.5 backdrop-blur-md shadow-xl space-y-3 w-64">
-466 |               <p className="text-xs text-neutral-300 leading-relaxed font-sans">
-467 |                 Add the people in your life — give each one a name, their role, and what they think about your situation. Then click Proceed to begin the simulation.
-468 |               </p>
-469 |               <div className="border-t border-[#1f1f1f] pt-3">
-470 |                 <button
-471 |                   onClick={() => setIsControlsOpen(!isControlsOpen)}
-472 |                   className="w-full flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-neutral-500 hover:text-neutral-300 transition-colors cursor-pointer"
-473 |                 >
-474 |                   <span>Simulation Settings</span>
-475 |                   <span className={`transition-transform duration-200 ${isControlsOpen ? 'rotate-180' : ''}`}>&#8964;</span>
-476 |                 </button>
-477 |                 {isControlsOpen && (
-478 |                   <div className="mt-3 space-y-3">
-479 |                     <div className="space-y-1.5">
-480 |                       <span className="text-[9px] font-mono uppercase tracking-wider text-neutral-600 font-bold block">Rounds</span>
-481 |                       <div className="flex gap-1">
-482 |                         {[1, 2, 3, 4, 5].map((n) => (
-483 |                           <button
-484 |                             key={n}
-485 |                             onClick={() => setEchoRounds(n)}
-486 |                             className={`w-8 h-8 rounded-lg text-xs font-semibold font-mono transition-all cursor-pointer ${
-487 |                               echoRounds === n ? 'bg-white text-black' : 'bg-neutral-900 text-neutral-400 hover:text-white border border-[#1f1f1f]'
-488 |                             }`}
-489 |                           >
-490 |                             {n}
-491 |                           </button>
-492 |                         ))}
-493 |                       </div>
-494 |                     </div>
-495 |                     <div className="space-y-1.5">
-496 |                       <span className="text-[9px] font-mono uppercase tracking-wider text-neutral-600 font-bold block">Tone</span>
-497 |                       <div className="flex gap-1 flex-wrap">
-498 |                         {(['Realistic', 'Compassionate', 'Confrontational'] as const).map((t) => (
-499 |                           <button
-500 |                             key={t}
-501 |                             onClick={() => setEchoTone(t)}
-502 |                             className={`px-2.5 py-1 rounded-lg text-[10px] font-mono transition-all cursor-pointer ${
-503 |                               echoTone === t ? 'bg-white text-black font-semibold' : 'bg-neutral-900 text-neutral-400 hover:text-white border border-[#1f1f1f]'
-504 |                             }`}
-505 |                           >
-506 |                             {t}
-507 |                           </button>
-508 |                         ))}
-509 |                       </div>
-510 |                     </div>
-511 |                   </div>
-512 |                 )}
-513 |               </div>
+169 |   const prevNodeCount = useRef(0);
+170 | 
+171 |   // Context Menu State
+172 |   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: Node | null } | null>(null);
+173 | 
+174 |   // Reconnection state
+175 |   const onReconnect = useCallback((oldEdge: Edge, newConnection: Connection) => {
+176 |     setEdges((eds) => reconnectEdge(oldEdge, newConnection, eds));
+177 |   }, [setEdges]);
+178 | 
+179 |   // Context Menu triggers
+180 |   const onNodeContextMenu = useCallback((event: any, node: Node) => {
+181 |     event.preventDefault();
+182 |     setContextMenu({
+183 |       x: event.clientX,
+184 |       y: event.clientY,
+185 |       node,
+186 |     });
+187 |   }, []);
+188 | 
+189 |   const onPaneContextMenu = useCallback((event: any) => {
+190 |     event.preventDefault();
+191 |     setContextMenu({
+192 |       x: event.clientX,
+193 |       y: event.clientY,
+194 |       node: null,
+195 |     });
+196 |   }, []);
+197 | 
+198 |   const onPaneClick = useCallback(() => {
+199 |     setContextMenu(null);
+200 |   }, []);
+201 | 
+202 |   // Zoom/Viewport Controls
+203 |   const handleZoomIn = () => {
+204 |     zoomIn({ duration: 300 });
+205 |   };
+206 | 
+207 |   const handleZoomOut = () => {
+208 |     zoomOut({ duration: 300 });
+209 |   };
+210 | 
+211 |   const handleResetView = () => {
+212 |     setViewport({ x: 100, y: 50, zoom: 0.9 }, { duration: 400 });
+213 |   };
+214 | 
+215 |   const applyLayout = useCallback(() => {
+216 |     if (nodes.length === 0) return;
+217 |     const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
+218 |     setNodes(layoutedNodes);
+219 |   }, [nodes, edges, setNodes]);
+220 | 
+221 |   // Layout nodes once initially when loaded and whenever node count increases
+222 |   useEffect(() => {
+223 |     if (nodes.length > prevNodeCount.current && nodes.length > 0) {
+224 |       const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
+225 |       setNodes(layoutedNodes);
+226 |       setInitialLayoutDone(true);
+227 |     }
+228 |     prevNodeCount.current = nodes.length;
+229 |   }, [nodes, edges, setNodes]);
+230 | 
+231 |   // Reset layout state if node length changes back to 0 (new chat)
+232 |   useEffect(() => {
+233 |     if (nodes.length === 0) {
+234 |       setInitialLayoutDone(false);
+235 |       prevNodeCount.current = 0;
+236 |     }
+237 |   }, [nodes.length]);
+238 | 
+239 |   // Auto-fit viewport on node count changes
+240 |   useEffect(() => {
+241 |     if (nodes.length > 0) {
+242 |       const timer = setTimeout(() => {
+243 |         fitView({ padding: 0.3, duration: 400 });
+244 |       }, 300);
+245 |       return () => clearTimeout(timer);
+246 |     }
+247 |   }, [nodes.length, fitView]);
+248 | 
+249 |   const handleAddAgentNode = () => {
+250 |     const randomId = `custom_agent_${Date.now().toString().slice(-4)}`;
+251 |     const view = getViewport();
+252 |     // Center new node inside view coordinates
+253 |     let x = (-view.x + window.innerWidth / 2 - 120) / view.zoom;
+254 |     let y = (-view.y + window.innerHeight / 2 - 100) / view.zoom;
+255 | 
+256 |     // Avoid collision
+257 |     const NODE_W = 240;
+258 |     const NODE_H = 220;
+259 |     const existingPositions = nodes.map(n => n.position);
+260 |     for (const pos of existingPositions) {
+261 |       if (Math.abs(x - pos.x) < NODE_W && Math.abs(y - pos.y) < NODE_H) {
+262 |         y = pos.y + NODE_H + 40;
+263 |       }
+264 |     }
+265 | 
+266 |     const newNode = {
+267 |       id: randomId,
+268 |       type: 'custom',
+269 |       position: { x: Math.max(50, x), y: Math.max(50, y) },
+270 |       data: {
+271 |         name: "Custom Agent Node",
+272 |         tag: "USER_CUSTOM_NODE",
+273 |         status: "IDLE" as const,
+274 |         metricLabel: "Tasks Completed",
+275 |         metricVal: "0",
+276 |         icon: "science",
+277 |         objective: "Enter agent goals...",
+278 |         personality: "Pragmatic, logical, responsive",
+279 |         systemPrompt: "You are a custom assistant. Fulfill user demands precisely.",
+280 |         rules: ["Verify actions before launching"],
+281 |         tools: ["Web Search"],
+282 |         temp: 0.5,
+283 |         logic: 80,
+284 |         empathy: 50,
+285 |         context: "128k",
+286 |         enabled: true,
+287 |         priority: 5,
+288 |         toolPermissions: {
+289 |           "Web Search": "ALLOWED" as const
+290 |         },
+291 |         toolLogs: []
+292 |       }
+293 |     };
+294 |     addNode(newNode);
+295 |     setSelectedNodeId(newNode.id);
+296 |   };
+297 | 
+298 |   // Node styles for MiniMap representation
+299 |   const getMiniMapNodeColor = (node: Node) => {
+300 |     if (node.type === 'groupNode') return 'rgba(255, 255, 255, 0.03)';
+301 |     const data = node.data as CanvasNodeData;
+302 |     if (data && data.enabled === false) return '#262626';
+303 |     if (data && (data.status === 'ACTIVE' || data.status === 'PROCESSING')) return '#06b6d4';
+304 |     return '#404040';
+305 |   };
+306 | 
+307 |   return (
+308 |     <div className="w-full h-full flex-1 relative bg-black">
+309 |       <ReactFlow
+310 |         nodes={nodes}
+311 |         edges={edges}
+312 |         onNodesChange={onNodesChange}
+313 |         onEdgesChange={onEdgesChange}
+314 |         onConnect={onConnect}
+315 |         onReconnect={onReconnect}
+316 |         nodeTypes={nodeTypes}
+317 |         edgeTypes={edgeTypes}
+318 |         onNodeContextMenu={onNodeContextMenu}
+319 |         onPaneContextMenu={onPaneContextMenu}
+320 |         onPaneClick={onPaneClick}
+321 |         snapToGrid={true}
+322 |         snapGrid={[15, 15]}
+323 |         fitViewOptions={{ padding: 0.3 }}
+324 |         className="flow-arena-editor"
+325 |         minZoom={0.2}
+326 |         maxZoom={2.5}
+327 |         defaultViewport={{ x: 100, y: 50, zoom: 0.9 }}
+328 |       >
+329 |         {/* Subtle grid background dots */}
+330 |         <Background 
+331 |           variant={BackgroundVariant.Dots} 
+332 |           color="rgba(255, 255, 255, 0.06)" 
+333 |           gap={24} 
+334 |           size={1}
+335 |         />
+336 | 
+337 |         {/* Custom Minimap Overlay */}
+338 |         <MiniMap 
+339 |           zoomable 
+340 |           pannable 
+341 |           nodeColor={getMiniMapNodeColor}
+342 |           nodeStrokeWidth={3}
+343 |           nodeBorderRadius={8}
+344 |           maskColor="rgba(0, 0, 0, 0.65)"
+345 |           className="!right-4 !top-4"
+346 |         />
+347 | 
+348 |         {/* Custom Floating Zoom & Node controls */}
+349 |         <Panel position="bottom-left" className="!left-4 !bottom-14 flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-1 rounded-xl z-20 shadow-2xl">
+350 |           <button 
+351 |             onClick={handleZoomIn}
+352 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors cursor-pointer"
+353 |             title="Zoom In"
+354 |           >
+355 |             <Plus className="w-3.5 h-3.5" />
+356 |           </button>
+357 | 
+358 |           <button 
+359 |             onClick={handleZoomOut}
+360 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors cursor-pointer"
+361 |             title="Zoom Out"
+362 |           >
+363 |             <Minus className="w-3.5 h-3.5" />
+364 |           </button>
+365 | 
+366 |           <button 
+367 |             onClick={handleResetView}
+368 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 cursor-pointer"
+369 |             title="Reset Viewport"
+370 |           >
+371 |             <Maximize className="w-3.5 h-3.5" />
+372 |           </button>
+373 | 
+374 |           <button 
+375 |             onClick={applyLayout}
+376 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 cursor-pointer"
+377 |             title="Auto Layout Graph"
+378 |           >
+379 |             <LayoutGrid className="w-3.5 h-3.5" />
+380 |           </button>
+381 | 
+382 |           <button 
+383 |             onClick={isEchoHouseMode ? () => setIsEchoHouseCreateFormOpen(true) : handleAddAgentNode}
+384 |             className="p-2 text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 flex items-center gap-1 text-[10px] cursor-pointer"
+385 |             title={isEchoHouseMode ? "Add Person" : "Add Custom Agent Node"}
+386 |           >
+387 |             <PlusCircle className="w-3.5 h-3.5 text-white" />
+388 |             <span className="font-semibold pr-1">Node</span>
+389 |           </button>
+390 | 
+391 |           <button
+392 |             onClick={() => {
+393 |               const state = useWorkflowStore.getState();
+394 |               const exportData = {
+395 |                 nodes: state.nodes,
+396 |                 edges: state.edges,
+397 |                 version: "1.0",
+398 |                 exported_at: new Date().toISOString(),
+399 |                 session_title: state.activeSessionId ? state.sessions[state.activeSessionId]?.title : "Solospace Workflow"
+400 |               };
+401 |               const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+402 |               const url = URL.createObjectURL(blob);
+403 |               const a = document.createElement('a');
+404 |               a.href = url;
+405 |               a.download = `solospace-workflow-${Date.now()}.json`;
+406 |               a.click();
+407 |               URL.revokeObjectURL(url);
+408 |             }}
+409 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 flex items-center gap-1 text-[10px] cursor-pointer"
+410 |             title="Export Workflow as JSON"
+411 |           >
+412 |             <span className="text-[10px] font-mono pr-1">↓JSON</span>
+413 |           </button>
+414 | 
+415 |           <button
+416 |             onClick={() => {
+417 |               const input = document.createElement('input');
+418 |               input.type = 'file';
+419 |               input.accept = '.json';
+420 |               input.onchange = (e: any) => {
+421 |                 const file = e.target.files?.[0];
+422 |                 if (!file) return;
+423 |                 const reader = new FileReader();
+424 |                 reader.onload = (ev) => {
+425 |                   try {
+426 |                     const data = JSON.parse(ev.target?.result as string);
+427 |                     if (data.nodes && data.edges) {
+428 |                       useWorkflowStore.getState().setNodes(data.nodes);
+429 |                       useWorkflowStore.getState().setEdges(data.edges);
+430 |                     }
+431 |                   } catch {
+432 |                     alert('Invalid workflow file.');
+433 |                   }
+434 |                 };
+435 |                 reader.readAsText(file);
+436 |               };
+437 |               input.click();
+438 |             }}
+439 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 flex items-center gap-1 text-[10px] cursor-pointer"
+440 |             title="Import Workflow from JSON"
+441 |           >
+442 |             <span className="text-[10px] font-mono pr-1">↑JSON</span>
+443 |           </button>
+444 |         </Panel>
+445 | 
+446 |         {/* Right-click Context Menu */}
+447 |         {contextMenu && (
+448 |           <ContextMenu
+449 |             x={contextMenu.x}
+450 |             y={contextMenu.y}
+451 |             node={contextMenu.node}
+452 |             onClose={() => setContextMenu(null)}
+453 |           />
+454 |         )}
+455 | 
+456 | 
+457 |         {/* EchoHouse instructional panel moved to the top-left panel */}
+458 | 
+459 |         {/* Bottom-center Proceed Buttons */}
+460 |         {isEchoHouseMode ? (
+461 |           nodes.filter(n => (n.data as any).isEchoHouseAgent && (n.data as any).echohouseRole !== "self").length > 0 && (
+462 |             <Panel position="bottom-center" className="!bottom-14 z-20">
+463 |               <button
+464 |                 onClick={handleEchoHouseProceed}
+465 |                 disabled={isOrchestrating}
+466 |                 className="px-6 py-2.5 bg-white text-black font-bold text-xs rounded-full shadow-2xl hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2 select-none"
+467 |               >
+468 |                 {isOrchestrating ? (
+469 |                   <>
+470 |                     <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+471 |                     <span>Running...</span>
+472 |                   </>
+473 |                 ) : (
+474 |                   <span>Proceed</span>
+475 |                 )}
+476 |               </button>
+477 |             </Panel>
+478 |           )
+479 |         ) : (
+480 |           nodes.length > 0 && executionState !== "running" && !isOrchestrating && (
+481 |             <Panel position="bottom-center" className="!bottom-14 z-20">
+482 |               <button
+483 |                 onClick={handleNormalProceed}
+484 |                 disabled={isOrchestrating}
+485 |                 className="px-6 py-2.5 bg-white text-black font-bold text-xs rounded-full shadow-2xl hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2 select-none"
+486 |               >
+487 |                 {isOrchestrating ? (
+488 |                   <>
+489 |                     <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+490 |                     <span>Running...</span>
+491 |                   </>
+492 |                 ) : (
+493 |                   <span>Proceed</span>
+494 |                 )}
+495 |               </button>
+496 |             </Panel>
+497 |           )
+498 |         )}
+499 | 
+500 |         {/* Persistent legend and EchoHouse instructions — top left */}
+501 |         <Panel position="top-left" className="!left-4 !top-16 select-none z-20 flex flex-col gap-2.5">
+502 |           <div className="bg-[#0d0d0d]/80 border border-[#1f1f1f] rounded-lg p-2.5 backdrop-blur-md shadow-xl text-[9px] font-mono text-neutral-600 space-y-1.5 w-64">
+503 |             <div className="flex items-center gap-2">
+504 |               <span className="w-2.5 h-2.5 rounded-full bg-black border-2 border-rose-500 shrink-0" />
+505 |               <span>Input (data in)</span>
+506 |             </div>
+507 |             <div className="flex items-center gap-2">
+508 |               <span className="w-2.5 h-2.5 rounded-full bg-black border-2 border-emerald-500 shrink-0" />
+509 |               <span>Output (data out)</span>
+510 |             </div>
+511 |             <div className="flex items-center gap-2">
+512 |               <span className="w-3.5 h-0.5 bg-cyan-500 rounded shrink-0" />
+513 |               <span>Dependency wire</span>
 514 |             </div>
-515 |           )}
-516 |         </Panel>
-517 |       </ReactFlow>
-518 | 
-519 |       {/* EchoHouse Inline Creation Form */}
-520 |       {isEchoHouseCreateFormOpen && isEchoHouseMode && (
-521 |         <div className="absolute bottom-28 left-4 w-72 bg-[#0c0c0c]/95 border border-[#1f1f1f] rounded-xl p-4 shadow-2xl z-30 space-y-3 select-none">
-522 |           <div className="flex justify-between items-center pb-2 border-b border-[#1f1f1f]">
-523 |             <span className="text-xs font-bold text-white uppercase tracking-wider">Add Person</span>
-524 |             <button onClick={() => setIsEchoHouseCreateFormOpen(false)} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-3.5 h-3.5" /></button>
-525 |           </div>
-526 |           <div className="space-y-2 text-xs">
-527 |             <div className="space-y-1">
-528 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">Name</label>
-529 |               <input
-530 |                 type="text"
-531 |                 value={formName}
-532 |                 onChange={(e) => setFormName(e.target.value)}
-533 |                 placeholder="Sarah, Dad, Crush..."
-534 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-white outline-none focus:border-neutral-500"
-535 |               />
-536 |             </div>
-537 |             <div className="space-y-1">
-538 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">Role in your life</label>
-539 |               <input
-540 |                 type="text"
-541 |                 value={formRole}
-542 |                 onChange={(e) => setFormRole(e.target.value)}
-543 |                 placeholder="Girlfriend, Father, Best Friend..."
-544 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-white outline-none focus:border-neutral-500"
-545 |               />
-546 |             </div>
-547 |             <div className="space-y-1">
-548 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">What do they think about your situation?</label>
-549 |               <textarea
-550 |                 value={formProblem}
-551 |                 onChange={(e) => setFormProblem(e.target.value)}
-552 |                 placeholder="Their perspective/context..."
-553 |                 rows={3}
-554 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2 text-white outline-none focus:border-neutral-500 resize-none"
-555 |               />
-556 |             </div>
-557 |             <button
-558 |               onClick={handleCreateEchoHousePerson}
-559 |               disabled={!formName.trim() || !formRole.trim() || !formProblem.trim()}
-560 |               className="w-full py-2 bg-white text-black font-bold rounded-lg text-xs hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-30 disabled:scale-100 cursor-pointer text-center"
-561 |             >
-562 |               Add Person
-563 |             </button>
-564 |           </div>
-565 |         </div>
-566 |       )}
-567 |     </div>
-568 |   );
-569 | }
-570 |
+515 |             <div className="flex items-center gap-2">
+516 |               <span className="text-[8px] leading-none">✥</span>
+517 |               <span>Drag card to reposition</span>
+518 |             </div>
+519 |           </div>
+520 | 
+521 |           {isEchoHouseMode && (
+522 |             <div className="bg-[#0d0d0d]/80 border border-[#1f1f1f] rounded-lg p-2.5 backdrop-blur-md shadow-xl space-y-3 w-64">
+523 |               <p className="text-xs text-neutral-300 leading-relaxed font-sans">
+524 |                 Add the people in your life — give each one a name, their role, and what they think about your situation. Then click Proceed to begin the simulation.
+525 |               </p>
+526 |               <div className="border-t border-[#1f1f1f] pt-3">
+527 |                 <button
+528 |                   onClick={() => setIsControlsOpen(!isControlsOpen)}
+529 |                   className="w-full flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-neutral-500 hover:text-neutral-300 transition-colors cursor-pointer"
+530 |                 >
+531 |                   <span>Simulation Settings</span>
+532 |                   <span className={`transition-transform duration-200 ${isControlsOpen ? 'rotate-180' : ''}`}>&#8964;</span>
+533 |                 </button>
+534 |                 {isControlsOpen && (
+535 |                   <div className="mt-3 space-y-3">
+536 |                     <div className="space-y-1.5">
+537 |                       <span className="text-[9px] font-mono uppercase tracking-wider text-neutral-600 font-bold block">Rounds</span>
+538 |                       <div className="flex gap-1">
+539 |                         {[1, 2, 3, 4, 5].map((n) => (
+540 |                           <button
+541 |                             key={n}
+542 |                             onClick={() => setEchoRounds(n)}
+543 |                             className={`w-8 h-8 rounded-lg text-xs font-semibold font-mono transition-all cursor-pointer ${
+544 |                               echoRounds === n ? 'bg-white text-black' : 'bg-neutral-900 text-neutral-400 hover:text-white border border-[#1f1f1f]'
+545 |                             }`}
+546 |                           >
+547 |                             {n}
+548 |                           </button>
+549 |                         ))}
+550 |                       </div>
+551 |                     </div>
+552 |                     <div className="space-y-1.5">
+553 |                       <span className="text-[9px] font-mono uppercase tracking-wider text-neutral-600 font-bold block">Tone</span>
+554 |                       <div className="flex gap-1 flex-wrap">
+555 |                         {(['Realistic', 'Compassionate', 'Confrontational'] as const).map((t) => (
+556 |                           <button
+557 |                             key={t}
+558 |                             onClick={() => setEchoTone(t)}
+559 |                             className={`px-2.5 py-1 rounded-lg text-[10px] font-mono transition-all cursor-pointer ${
+560 |                               echoTone === t ? 'bg-white text-black font-semibold' : 'bg-neutral-900 text-neutral-400 hover:text-white border border-[#1f1f1f]'
+561 |                             }`}
+562 |                           >
+563 |                             {t}
+564 |                           </button>
+565 |                         ))}
+566 |                       </div>
+567 |                     </div>
+568 |                   </div>
+569 |                 )}
+570 |               </div>
+571 |             </div>
+572 |           )}
+573 |         </Panel>
+574 |       </ReactFlow>
+575 | 
+576 |       {/* EchoHouse Inline Creation Form */}
+577 |       {isEchoHouseCreateFormOpen && isEchoHouseMode && (
+578 |         <div className="absolute bottom-28 left-4 w-72 bg-[#0c0c0c]/95 border border-[#1f1f1f] rounded-xl p-4 shadow-2xl z-30 space-y-3 select-none">
+579 |           <div className="flex justify-between items-center pb-2 border-b border-[#1f1f1f]">
+580 |             <span className="text-xs font-bold text-white uppercase tracking-wider">Add Person</span>
+581 |             <button onClick={() => setIsEchoHouseCreateFormOpen(false)} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+582 |           </div>
+583 |           <div className="space-y-2 text-xs">
+584 |             <div className="space-y-1">
+585 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">Name</label>
+586 |               <input
+587 |                 type="text"
+588 |                 value={formName}
+589 |                 onChange={(e) => setFormName(e.target.value)}
+590 |                 placeholder="Sarah, Dad, Crush..."
+591 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-white outline-none focus:border-neutral-500"
+592 |               />
+593 |             </div>
+594 |             <div className="space-y-1">
+595 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">Role in your life</label>
+596 |               <input
+597 |                 type="text"
+598 |                 value={formRole}
+599 |                 onChange={(e) => setFormRole(e.target.value)}
+600 |                 placeholder="Girlfriend, Father, Best Friend..."
+601 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-white outline-none focus:border-neutral-500"
+602 |               />
+603 |             </div>
+604 |             <div className="space-y-1">
+605 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">What do they think about your situation?</label>
+606 |               <textarea
+607 |                 value={formProblem}
+608 |                 onChange={(e) => setFormProblem(e.target.value)}
+609 |                 placeholder="Their perspective/context..."
+610 |                 rows={3}
+611 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2 text-white outline-none focus:border-neutral-500 resize-none"
+612 |               />
+613 |             </div>
+614 |             <button
+615 |               onClick={handleCreateEchoHousePerson}
+616 |               disabled={!formName.trim() || !formRole.trim() || !formProblem.trim()}
+617 |               className="w-full py-2 bg-white text-black font-bold rounded-lg text-xs hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-30 disabled:scale-100 cursor-pointer text-center"
+618 |             >
+619 |               Add Person
+620 |             </button>
+621 |           </div>
+622 |         </div>
+623 |       )}
+624 |     </div>
+625 |   );
+626 | }
+627 |
 ```
 
 ### File: `Frontend/components/MarkdownRenderer.tsx`
@@ -9494,144 +9693,189 @@ SoloSpace/
 
 ### File: `Frontend/store/hooks/useWebSocket.ts`
 
-> 135 lines | 4.7 KB
+> 180 lines | 6.6 KB
 
 ```typescript
   1 | import { useEffect, useRef, useState } from 'react';
   2 | import { useWorkflowStore } from '../workflowStore';
   3 | 
-  4 | export function useWebSocket(sessionId: string | null) {
-  5 |   const [isConnected, setIsConnected] = useState(false);
-  6 |   const socketRef = useRef<WebSocket | null>(null);
-  7 |   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  8 |   const delayRef = useRef(1000); // Start reconnect delay at 1s
-  9 | 
- 10 |   useEffect(() => {
- 11 |     if (!sessionId) {
- 12 |       if (socketRef.current) {
- 13 |         socketRef.current.close();
- 14 |       }
- 15 |       return;
- 16 |     }
- 17 | 
- 18 |     const connect = () => {
- 19 |       if (socketRef.current && (socketRef.current.readyState === WebSocket.OPEN || socketRef.current.readyState === WebSocket.CONNECTING)) {
- 20 |         return;
- 21 |       }
+  4 | function getWebSocketUrl(sessionId: string): string {
+  5 |   if (typeof window === 'undefined') return '';
+  6 | 
+  7 |   const { protocol, hostname, port, host } = window.location;
+  8 |   const isHttps = protocol === 'https:';
+  9 |   const wsProtocol = isHttps ? 'wss:' : 'ws:';
+ 10 | 
+ 11 |   // 1. If running locally on localhost or 127.0.0.1
+ 12 |   if (hostname === 'localhost' || hostname === '127.0.0.1') {
+ 13 |     return `${wsProtocol}//127.0.0.1:8000/ws/${sessionId}`;
+ 14 |   }
+ 15 | 
+ 16 |   // 2. If the port is in the subdomain or hostname (typical in cloud IDEs like IDX, Gitpod, Codespaces)
+ 17 |   // e.g. 3000-xyz.preview.domain.com -> 8000-xyz.preview.domain.com
+ 18 |   if (hostname.includes('3000')) {
+ 19 |     const backendHostname = hostname.replace('3000', '8000');
+ 20 |     return `${wsProtocol}//${backendHostname}/ws/${sessionId}`;
+ 21 |   }
  22 | 
- 23 |       console.log(`Connecting to WebSocket for session: ${sessionId}`);
- 24 |       const socket = new WebSocket(`ws://127.0.0.1:8000/ws/${sessionId}`);
- 25 |       socketRef.current = socket;
- 26 | 
- 27 |       socket.onopen = () => {
- 28 |         console.log(`WebSocket connected for session: ${sessionId}`);
- 29 |         setIsConnected(true);
- 30 |         delayRef.current = 1000; // Reset reconnection delay on successful connect
- 31 |       };
+ 23 |   // 3. If there is a port in the URL (e.g. localhost:3000 or custom-domain:3000)
+ 24 |   if (port && port !== '80' && port !== '443') {
+ 25 |     const backendHost = host.replace(port, '8000');
+ 26 |     return `${wsProtocol}//${backendHost}/ws/${sessionId}`;
+ 27 |   }
+ 28 | 
+ 29 |   // 4. Fallback default
+ 30 |   return `${wsProtocol}//${hostname}:8000/ws/${sessionId}`;
+ 31 | }
  32 | 
- 33 |       socket.onmessage = (event) => {
- 34 |         try {
- 35 |           const message = JSON.parse(event.data);
- 36 |           const { event: eventName, data } = message;
- 37 | 
- 38 |           if (eventName === 'state_sync') {
- 39 |             console.log('Received state synchronization via WebSocket:', data);
- 40 |             
- 41 |             // Sync state to store, merging instead of replacing if needed
- 42 |             useWorkflowStore.setState({
- 43 |               nodes: data.nodes || [],
- 44 |               edges: data.edges || [],
- 45 |               chatMessages: data.chatMessages || [],
- 46 |               agentTalkLogs: data.agentTalkLogs || [],
- 47 |               executionState: data.executionState || 'setup',
- 48 |               statusMessage: data.statusMessage || '',
- 49 |               followUpSuggestions: data.followUpSuggestions || [],
- 50 |             });
- 51 |           } else if (eventName === 'tool_approval_sync') {
- 52 |             console.log('Received tool approval sync via WebSocket:', data);
- 53 |             const storeState = useWorkflowStore.getState();
- 54 |             const updatedNodes = storeState.nodes.map((node) => {
- 55 |               if (node.id === data.nodeId) {
- 56 |                 const logs = ((node.data as any).toolLogs || []).map((log: any) => {
- 57 |                   if (log.id === data.logId) {
- 58 |                     return {
- 59 |                       ...log,
- 60 |                       status: data.status === 'approved' ? 'SUCCESS' : 'BLOCKED',
- 61 |                       detail: data.status === 'approved' ? `Approved: ${data.toolName}` : `Denied`,
- 62 |                     };
- 63 |                   }
- 64 |                   return log;
- 65 |                 });
- 66 |                 return { ...node, data: { ...node.data, toolLogs: logs } };
- 67 |               }
- 68 |               return node;
- 69 |             });
- 70 |             useWorkflowStore.setState({ nodes: updatedNodes });
- 71 |           }
- 72 |         } catch (err) {
- 73 |           console.error('Failed to parse WebSocket message:', err);
- 74 |         }
- 75 |       };
- 76 | 
- 77 |       socket.onclose = (event) => {
- 78 |         setIsConnected(false);
- 79 |         socketRef.current = null;
- 80 |         if (sessionId) {
- 81 |           console.log(`WebSocket closed: ${event.reason}. Retrying in ${delayRef.current}ms...`);
- 82 |           reconnectTimeoutRef.current = setTimeout(() => {
- 83 |             delayRef.current = Math.min(delayRef.current * 2, 30000); // Cap at 30s
- 84 |             connect();
- 85 |           }, delayRef.current);
- 86 |         }
- 87 |       };
- 88 | 
- 89 |       socket.onerror = (error) => {
- 90 |         console.error('WebSocket error:', error);
- 91 |         socket.close();
- 92 |       };
- 93 |     };
- 94 | 
- 95 |     connect();
- 96 | 
- 97 |     return () => {
- 98 |       if (reconnectTimeoutRef.current) {
- 99 |         clearTimeout(reconnectTimeoutRef.current);
-100 |       }
-101 |       if (socketRef.current) {
-102 |         socketRef.current.close();
-103 |       }
-104 |       setIsConnected(false);
-105 |     };
-106 |   }, [sessionId]);
-107 | 
-108 |   const sendApprovalResponse = (nodeId: string, toolName: string, action: 'approve' | 'deny', logId: string) => {
-109 |     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-110 |       socketRef.current.send(JSON.stringify({
-111 |         type: 'tool_approval_response',
-112 |         nodeId,
-113 |         toolName,
-114 |         action,
-115 |         logId,
-116 |       }));
-117 |     } else {
-118 |       console.warn('WebSocket is not open. Falling back to HTTP for tool approval.');
-119 |       fetch('/api/gemini/approve', {
-120 |         method: 'POST',
-121 |         headers: { 'Content-Type': 'application/json' },
-122 |         body: JSON.stringify({
-123 |           sessionId,
-124 |           nodeId,
-125 |           toolName,
-126 |           action,
-127 |           logId,
-128 |         }),
-129 |       }).catch((e) => console.error('Failed to approve tool via fallback:', e));
-130 |     }
-131 |   };
-132 | 
-133 |   return { isConnected, sendApprovalResponse };
-134 | }
-135 |
+ 33 | export function useWebSocket(sessionId: string | null) {
+ 34 |   const [isConnected, setIsConnected] = useState(false);
+ 35 |   const socketRef = useRef<WebSocket | null>(null);
+ 36 |   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+ 37 |   const delayRef = useRef(1000); // Start reconnect delay at 1s
+ 38 | 
+ 39 |   useEffect(() => {
+ 40 |     if (!sessionId) {
+ 41 |       if (socketRef.current) {
+ 42 |         socketRef.current.onopen = null;
+ 43 |         socketRef.current.onmessage = null;
+ 44 |         socketRef.current.onclose = null;
+ 45 |         socketRef.current.onerror = null;
+ 46 |         socketRef.current.close();
+ 47 |         socketRef.current = null;
+ 48 |       }
+ 49 |       setIsConnected(false);
+ 50 |       return;
+ 51 |     }
+ 52 | 
+ 53 |     const connect = () => {
+ 54 |       if (socketRef.current && (socketRef.current.readyState === WebSocket.OPEN || socketRef.current.readyState === WebSocket.CONNECTING)) {
+ 55 |         return;
+ 56 |       }
+ 57 | 
+ 58 |       const wsUrl = getWebSocketUrl(sessionId);
+ 59 |       console.log(`Connecting to WebSocket for session: ${sessionId} at ${wsUrl}`);
+ 60 |       const socket = new WebSocket(wsUrl);
+ 61 |       socketRef.current = socket;
+ 62 | 
+ 63 |       socket.onopen = () => {
+ 64 |         if (socketRef.current !== socket) return;
+ 65 |         console.log(`WebSocket connected for session: ${sessionId}`);
+ 66 |         setIsConnected(true);
+ 67 |         delayRef.current = 1000; // Reset reconnection delay on successful connect
+ 68 |       };
+ 69 | 
+ 70 |       socket.onmessage = (event) => {
+ 71 |         if (socketRef.current !== socket) return;
+ 72 |         try {
+ 73 |           const message = JSON.parse(event.data);
+ 74 |           const { event: eventName, data } = message;
+ 75 | 
+ 76 |           if (eventName === 'state_sync') {
+ 77 |             console.log('Received state synchronization via WebSocket:', data);
+ 78 |             
+ 79 |             // Sync state to store, merging instead of replacing if needed
+ 80 |             useWorkflowStore.setState({
+ 81 |               nodes: data.nodes || [],
+ 82 |               edges: data.edges || [],
+ 83 |               chatMessages: data.chatMessages || [],
+ 84 |               agentTalkLogs: data.agentTalkLogs || [],
+ 85 |               executionState: data.executionState || 'setup',
+ 86 |               statusMessage: data.statusMessage || '',
+ 87 |               followUpSuggestions: data.followUpSuggestions || [],
+ 88 |             });
+ 89 |           } else if (eventName === 'tool_approval_sync') {
+ 90 |             console.log('Received tool approval sync via WebSocket:', data);
+ 91 |             const storeState = useWorkflowStore.getState();
+ 92 |             const updatedNodes = storeState.nodes.map((node) => {
+ 93 |               if (node.id === data.nodeId) {
+ 94 |                 const logs = ((node.data as any).toolLogs || []).map((log: any) => {
+ 95 |                   if (log.id === data.logId) {
+ 96 |                     return {
+ 97 |                       ...log,
+ 98 |                       status: data.status === 'approved' ? 'SUCCESS' : 'BLOCKED',
+ 99 |                       detail: data.status === 'approved' ? `Approved: ${data.toolName}` : `Denied`,
+100 |                     };
+101 |                   }
+102 |                   return log;
+103 |                 });
+104 |                 return { ...node, data: { ...node.data, toolLogs: logs } };
+105 |               }
+106 |               return node;
+107 |             });
+108 |             useWorkflowStore.setState({ nodes: updatedNodes });
+109 |           }
+110 |         } catch (err) {
+111 |           console.error('Failed to parse WebSocket message:', err);
+112 |         }
+113 |       };
+114 | 
+115 |       socket.onclose = (event) => {
+116 |         if (socketRef.current !== socket) return;
+117 |         setIsConnected(false);
+118 |         socketRef.current = null;
+119 |         if (sessionId) {
+120 |           console.log(`WebSocket closed: ${event.reason}. Retrying in ${delayRef.current}ms...`);
+121 |           reconnectTimeoutRef.current = setTimeout(() => {
+122 |             if (socketRef.current !== null) return;
+123 |             delayRef.current = Math.min(delayRef.current * 2, 30000); // Cap at 30s
+124 |             connect();
+125 |           }, delayRef.current);
+126 |         }
+127 |       };
+128 | 
+129 |       socket.onerror = (error) => {
+130 |         if (socketRef.current !== socket) return;
+131 |         console.error(`WebSocket connection error for ${socket.url}:`, error);
+132 |       };
+133 |     };
+134 | 
+135 |     connect();
+136 | 
+137 |     return () => {
+138 |       if (reconnectTimeoutRef.current) {
+139 |         clearTimeout(reconnectTimeoutRef.current);
+140 |       }
+141 |       if (socketRef.current) {
+142 |         socketRef.current.onopen = null;
+143 |         socketRef.current.onmessage = null;
+144 |         socketRef.current.onclose = null;
+145 |         socketRef.current.onerror = null;
+146 |         socketRef.current.close();
+147 |         socketRef.current = null;
+148 |       }
+149 |       setIsConnected(false);
+150 |     };
+151 |   }, [sessionId]);
+152 | 
+153 |   const sendApprovalResponse = (nodeId: string, toolName: string, action: 'approve' | 'deny', logId: string) => {
+154 |     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+155 |       socketRef.current.send(JSON.stringify({
+156 |         type: 'tool_approval_response',
+157 |         nodeId,
+158 |         toolName,
+159 |         action,
+160 |         logId,
+161 |       }));
+162 |     } else {
+163 |       console.warn('WebSocket is not open. Falling back to HTTP for tool approval.');
+164 |       fetch('/api/gemini/approve', {
+165 |         method: 'POST',
+166 |         headers: { 'Content-Type': 'application/json' },
+167 |         body: JSON.stringify({
+168 |           sessionId,
+169 |           nodeId,
+170 |           toolName,
+171 |           action,
+172 |           logId,
+173 |         }),
+174 |       }).catch((e) => console.error('Failed to approve tool via fallback:', e));
+175 |     }
+176 |   };
+177 | 
+178 |   return { isConnected, sendApprovalResponse };
+179 | }
+180 |
 ```
 
 ### File: `Frontend/store/workflowStore.ts`
@@ -9877,8 +10121,8 @@ SoloSpace/
  236 |   pendingApproval: null,
  237 |   apiKey: null,
  238 |   setApiKey: (key) => set({ apiKey: key }),
- 239 |   provider: "gemini",
- 240 |   model: "gemini-2.5-flash",
+ 239 |   provider: "openai",
+ 240 |   model: "gpt-4.1",
  241 |   apiKeys: {},
  242 |   backupApiKeys: {},
  243 |   availableProviders: {},
@@ -11446,46 +11690,48 @@ SoloSpace/
 
 ### File: `.gitignore`
 
-> 37 lines | 0.3 KB
+> 39 lines | 0.3 KB
 
 ```text
- 1 | ```
- 2 | __pycache__/
- 3 | *.pyc
- 4 | *.pyo
- 5 | *.pyd
- 6 | 
- 7 | # Dependencies
- 8 | node_modules/
- 9 | venv/
-10 | .venv/
-11 | .env
-12 | .env.local
-13 | *.env.*
-14 | 
-15 | # IDE
-16 | .vscode/
-17 | .idea/
-18 | *.swp
-19 | *.swo
-20 | 
-21 | # Logs
-22 | *.log
-23 | 
-24 | # Build
-25 | dist/
-26 | build/
-27 | target/
-28 | 
-29 | # Coverage
-30 | .coverage
-31 | coverage/
-32 | htmlcov/
-33 | 
-34 | # Python cache
-35 | .mypy_cache/
-36 | .pytest_cache/
-37 | ```
+ 1 | __pycache__/
+ 2 | *.pyc
+ 3 | *.pyo
+ 4 | *.pyd
+ 5 | 
+ 6 | # Dependencies
+ 7 | node_modules/
+ 8 | venv/
+ 9 | .venv/
+10 | .env
+11 | .env.local
+12 | *.env.*
+13 | 
+14 | # IDE
+15 | .vscode/
+16 | .idea/
+17 | *.swp
+18 | *.swo
+19 | 
+20 | # Logs
+21 | *.log
+22 | 
+23 | # Build
+24 | dist/
+25 | build/
+26 | target/
+27 | 
+28 | # Coverage
+29 | .coverage
+30 | coverage/
+31 | htmlcov/
+32 | 
+33 | # Python cache
+34 | .mypy_cache/
+35 | .pytest_cache/
+36 | 
+37 | # Local databases and build caches
+38 | *.db
+39 | *.tsbuildinfo
 ```
 
 ### File: `README.md`

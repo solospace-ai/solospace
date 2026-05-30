@@ -1,4 +1,3 @@
-```
 __pycache__/
 *.pyc
 *.pyo
@@ -34,4 +33,7 @@ htmlcov/
 # Python cache
 .mypy_cache/
 .pytest_cache/
-```
+
+# Local databases and build caches
+*.db
+*.tsbuildinfo

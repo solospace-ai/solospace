@@ -30,11 +30,14 @@ const FALLBACK_PROVIDERS = {
   },
   openai: {
     name: "OpenAI",
-    description: "GPT-4o and o-series reasoning models",
+    description: "GPT-4.1, Codex, and o-series reasoning models (Recommended)",
     key_url: "https://platform.openai.com/api-keys",
     key_hint: "sk-...",
-    default_model: "gpt-4o",
+    default_model: "gpt-4.1",
     models: [
+      { id: "gpt-4.1", name: "GPT-4.1", tier: "advanced" },
+      { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", tier: "fast" },
+      { id: "gpt-4.1-nano", name: "GPT-4.1 Nano", tier: "fast" },
       { id: "gpt-4o", name: "GPT-4o", tier: "advanced" },
       { id: "gpt-4o-mini", name: "GPT-4o Mini", tier: "fast" },
       { id: "o3-mini", name: "o3-mini", tier: "reasoning" },
@@ -403,7 +406,7 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
           </div>
           <div>
             <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">AI Engine Settings</h3>
-            <p className="text-xs text-neutral-400 font-sans mt-0.5">Configure your active AI provider, model routing, and keys.</p>
+            <p className="text-xs text-neutral-400 font-sans mt-0.5">Powered by OpenAI GPT-4.1 & Codex. Configure your active AI provider, model routing, and keys.</p>
           </div>
         </div>
 

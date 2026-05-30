@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { 
   ReactFlow, 
   Background, 
@@ -166,6 +166,7 @@ export default function FlowArena({ onProceed }: { onProceed?: () => void }) {
   };
 
   const [initialLayoutDone, setInitialLayoutDone] = useState(false);
+  const prevNodeCount = useRef(0);
 
   // Context Menu State
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: Node | null } | null>(null);
@@ -217,19 +218,21 @@ export default function FlowArena({ onProceed }: { onProceed?: () => void }) {
     setNodes(layoutedNodes);
   }, [nodes, edges, setNodes]);
 
-  // Layout nodes once initially when loaded
+  // Layout nodes once initially when loaded and whenever node count increases
   useEffect(() => {
-    if (!initialLayoutDone && nodes.length > 0) {
+    if (nodes.length > prevNodeCount.current && nodes.length > 0) {
       const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
       setNodes(layoutedNodes);
       setInitialLayoutDone(true);
     }
-  }, [nodes, edges, initialLayoutDone, setNodes]);
+    prevNodeCount.current = nodes.length;
+  }, [nodes, edges, setNodes]);
 
   // Reset layout state if node length changes back to 0 (new chat)
   useEffect(() => {
     if (nodes.length === 0) {
       setInitialLayoutDone(false);
+      prevNodeCount.current = 0;
     }
   }, [nodes.length]);
 
@@ -383,6 +386,60 @@ export default function FlowArena({ onProceed }: { onProceed?: () => void }) {
           >
             <PlusCircle className="w-3.5 h-3.5 text-white" />
             <span className="font-semibold pr-1">Node</span>
+          </button>
+
+          <button
+            onClick={() => {
+              const state = useWorkflowStore.getState();
+              const exportData = {
+                nodes: state.nodes,
+                edges: state.edges,
+                version: "1.0",
+                exported_at: new Date().toISOString(),
+                session_title: state.activeSessionId ? state.sessions[state.activeSessionId]?.title : "Solospace Workflow"
+              };
+              const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `solospace-workflow-${Date.now()}.json`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 flex items-center gap-1 text-[10px] cursor-pointer"
+            title="Export Workflow as JSON"
+          >
+            <span className="text-[10px] font-mono pr-1">↓JSON</span>
+          </button>
+
+          <button
+            onClick={() => {
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.accept = '.json';
+              input.onchange = (e: any) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                  try {
+                    const data = JSON.parse(ev.target?.result as string);
+                    if (data.nodes && data.edges) {
+                      useWorkflowStore.getState().setNodes(data.nodes);
+                      useWorkflowStore.getState().setEdges(data.edges);
+                    }
+                  } catch {
+                    alert('Invalid workflow file.');
+                  }
+                };
+                reader.readAsText(file);
+              };
+              input.click();
+            }}
+            className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 flex items-center gap-1 text-[10px] cursor-pointer"
+            title="Import Workflow from JSON"
+          >
+            <span className="text-[10px] font-mono pr-1">↑JSON</span>
           </button>
         </Panel>
 

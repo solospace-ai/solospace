@@ -39,6 +39,28 @@ async def call_with_retry(func, *args, **kwargs):
 # ─── Provider Registry ───────────────────────────────────────────────
 
 PROVIDERS: Dict[str, Dict[str, Any]] = {
+    "openai": {
+        "name": "OpenAI",
+        "description": "GPT-4o, o3-mini, o1 reasoning models",
+        "base_url": "https://api.openai.com/v1",
+        "chat_path": "/chat/completions",
+        "default_model": "gpt-4.1",
+        "models": [
+            {"id": "gpt-4.1", "name": "GPT-4.1", "tier": "advanced"},
+            {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini", "tier": "fast"},
+            {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano", "tier": "fast"},
+            {"id": "gpt-4o", "name": "GPT-4o", "tier": "advanced"},
+            {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "tier": "fast"},
+            {"id": "o4-mini", "name": "o4-mini", "tier": "reasoning"},
+            {"id": "o3", "name": "o3", "tier": "reasoning"},
+            {"id": "o3-mini", "name": "o3-mini", "tier": "reasoning"},
+            {"id": "o1", "name": "o1", "tier": "reasoning"},
+        ],
+        "capabilities": ["chat", "streaming", "json_mode", "embeddings"],
+        "key_url": "https://platform.openai.com/api-keys",
+        "key_hint": "sk-...",
+        "adapter": "openai",
+    },
     "gemini": {
         "name": "Google Gemini",
         "description": "Multimodal AI with native JSON schema & embeddings",
@@ -59,28 +81,6 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "key_url": "https://aistudio.google.com/apikey",
         "key_hint": "AIzaSy...",
         "adapter": "gemini",
-    },
-    "openai": {
-        "name": "OpenAI",
-        "description": "GPT-4o, o3-mini, o1 reasoning models",
-        "base_url": "https://api.openai.com/v1",
-        "chat_path": "/chat/completions",
-        "default_model": "gpt-4o",
-        "models": [
-            {"id": "gpt-4.1", "name": "GPT-4.1", "tier": "advanced"},
-            {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini", "tier": "fast"},
-            {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano", "tier": "fast"},
-            {"id": "gpt-4o", "name": "GPT-4o", "tier": "advanced"},
-            {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "tier": "fast"},
-            {"id": "o4-mini", "name": "o4-mini", "tier": "reasoning"},
-            {"id": "o3", "name": "o3", "tier": "reasoning"},
-            {"id": "o3-mini", "name": "o3-mini", "tier": "reasoning"},
-            {"id": "o1", "name": "o1", "tier": "reasoning"},
-        ],
-        "capabilities": ["chat", "streaming", "json_mode", "embeddings"],
-        "key_url": "https://platform.openai.com/api-keys",
-        "key_hint": "sk-...",
-        "adapter": "openai",
     },
     "claude": {
         "name": "Anthropic Claude",

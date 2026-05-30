@@ -53,7 +53,7 @@ app.include_router(ws_router)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "https://*.vercel.app", "https://*.netlify.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -309,7 +309,7 @@ async def orchestrate(req: OrchestrateRequest):
         new_node = {
             "id": agent_id,
             "type": "custom",
-            "position": {"x": 180 + col_idx * 260, "y": 100 + (len(nodes) // 3) * 200},
+            "position": {"x": 100 + col_idx * 400, "y": 80 + (len(nodes) // 3) * 320},
             "data": {
                 "name": custom.get("name", agent.get("senderName", agent_id)),
                 "icon": custom.get("icon", "science"),

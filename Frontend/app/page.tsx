@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import {
-  Bot, Zap, SquarePlus, Key, History, Settings, User, ChevronRight, ChevronLeft,
+  Bot, Zap, SquarePlus, Key, History, Settings, User, ChevronRight, ChevronLeft, ChevronDown,
   HelpCircle, UploadCloud, Eye, Mic, GitFork, ArrowRight, Database, Sliders,
   X, Trash2, Globe, Terminal, Sparkles, Copy, Check, Square, Pencil, RefreshCw
 } from "lucide-react";
@@ -14,12 +14,76 @@ import MarkdownRenderer from "@/components/MarkdownRenderer";
 import APIKeysModal from "@/components/APIKeysModal";
 import { useWebSocket } from "@/store/hooks/useWebSocket";
 
-const StreamingText = ({ text, isActive }: { text: string; isActive: boolean }) => (
-  <span className="whitespace-pre-wrap font-sans text-neutral-200">
-    {text}
-    {isActive && <span className="ml-1 inline-block w-1.5 h-4 bg-white align-middle animate-blink" />}
-  </span>
-);
+const ThinkingText = ({ prefix = "thinking", className }: { prefix?: string; className?: string }) => {
+  const [dots, setDots] = useState('.');
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setDots((prev) => {
+        if (prev === '.') return '..';
+        if (prev === '..') return '...';
+        return '.';
+      });
+    }, 500);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <span className={`${className} inline-flex items-baseline`}>
+      <span>{prefix}</span>
+      <span className="inline-block w-4 text-left">{dots}</span>
+    </span>
+  );
+};
+
+const StreamingText = ({ text, isActive }: { text: string; isActive: boolean }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const statusMessage = useWorkflowStore((s) => s.statusMessage);
+  const liveThoughts = useWorkflowStore((s) => s.liveThoughts);
+
+  if (isActive && !text) {
+    return (
+      <div className="flex flex-col items-start gap-2 select-none">
+        <div 
+          onClick={() => setIsExpanded(!isExpanded)} 
+          className="flex items-center cursor-pointer hover:text-white/80 transition-colors"
+        >
+          <ThinkingText prefix="Thinking" className="text-sm font-sans text-neutral-200" />
+          <span className="text-neutral-500 shrink-0 flex items-center justify-center ml-2">
+            {isExpanded ? <ChevronDown className="w-3.5 h-3.5 text-neutral-400" /> : <ChevronRight className="w-3.5 h-3.5 text-neutral-400" />}
+          </span>
+        </div>
+        {isExpanded && (
+          <div className="w-full bg-[#050505] border border-[#1f1f1f] rounded-2xl p-4 space-y-2 max-h-60 overflow-y-auto custom-scrollbar font-mono text-[10px] text-neutral-400 leading-relaxed shadow-lg">
+            {statusMessage && (
+              <div className="flex items-start gap-2 text-white">
+                <span className="text-neutral-500 font-semibold shrink-0">Status:</span>
+                <span className="text-neutral-300">{statusMessage}</span>
+              </div>
+            )}
+            {liveThoughts ? (
+              <div className="space-y-1">
+                <div className="text-neutral-500 font-semibold">Live Thoughts:</div>
+                <div className="text-cyan-400 whitespace-pre-wrap bg-neutral-950/50 p-2.5 rounded-xl border border-neutral-900 leading-normal font-sans">
+                  {liveThoughts}
+                </div>
+              </div>
+            ) : (
+              <div className="text-neutral-500 italic">No live thoughts streaming...</div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <span className="whitespace-pre-wrap font-sans text-neutral-200">
+      {text}
+      {isActive && <span className="ml-1 inline-block w-1.5 h-4 bg-white align-middle animate-blink" />}
+    </span>
+  );
+};
 
 export default function SolospaceApp() {
   return (
@@ -156,14 +220,14 @@ function SolospaceContent() {
 
   // Reset EchoHouse intake when session changes
   useEffect(() => {
-    if (isEchoHouseMode) {
+    if (isEchoHouseMode && (!activeSessionId || !sessions[activeSessionId] || !sessions[activeSessionId].chatMessages || sessions[activeSessionId].chatMessages.length === 0)) {
       setEchoStep(1);
       setEchoSituation("");
       setEchoFocus("");
       setEchoCast([]);
       setEditingCastIdx(null);
     }
-  }, [activeSessionId]);
+  }, [activeSessionId, isEchoHouseMode, sessions]);
 
   const fetchEchoCast = async (situationText: string, focusText: string) => {
     setIsLoadingCast(true);
@@ -529,7 +593,9 @@ function SolospaceContent() {
             <button onClick={() => { if (workspaceState !== "home") setCurrentTab("chat"); }} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${currentTab === "chat" || workspaceState === "home" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>Chat</button>
             {workspaceState === "active" && (
               <button onClick={() => setCurrentTab("arena")} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${currentTab === "arena" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>
-                <GitFork className="w-3 h-3" /> Flow {nodes.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse ml-0.5" />}
+                <GitFork className="w-3 h-3" /> Flow {nodes.length > 0 && (
+                  <span className="ml-1 px-1.5 py-0.5 bg-cyan-500/20 border border-cyan-500/30 rounded text-[9px] font-mono text-cyan-400 font-bold">{nodes.length}</span>
+                )}
               </button>
             )}
           </div>
@@ -544,13 +610,13 @@ function SolospaceContent() {
               <div />
               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
                 <div className="text-center mb-10 space-y-2 select-none">
-                  <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">What do you want to know?</h1>
-                  <p className="text-sm text-neutral-400 font-sans">No filters. No hedging. Ask anything.</p>
+                  <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">What do you want to build?</h1>
+                  <p className="text-sm text-neutral-400 font-sans">Multi-agent AI OS · 20+ providers · Real tool execution</p>
                 </div>
                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
                   <div className="flex items-center gap-3">
                     <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
-                    <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder="Ask anything. Be specific." className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
+                    <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder="Ask anything. Be specific. (Enter to send, Shift+Enter for newline)" className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
                     <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim()} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
                   </div>
                 </div>
@@ -559,6 +625,28 @@ function SolospaceContent() {
                   <button onClick={() => setExecutionMode("auto")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "auto" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sparkles className="w-3 h-3 stroke-[2]" /><span>Smart Auto</span></button>
                   <button onClick={() => setExecutionMode("custom")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "custom" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sliders className="w-3 h-3" /><span>Custom Agent</span></button>
                 </div>
+
+                {/* EchoHouse Feature Card */}
+                <div className="w-full mt-4">
+                  <button
+                    onClick={(e) => {
+                      createSession("EchoHouse Simulation", "echohouse");
+                      setWorkspaceState("active");
+                      setCurrentTab("chat");
+                    }}
+                    className="w-full p-4 bg-gradient-to-r from-neutral-950 to-neutral-900 border border-neutral-800 hover:border-neutral-600 rounded-2xl text-left transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center justify-center text-base">🌀</div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold text-white">EchoHouse — Social Dynamics Simulator</p>
+                        <p className="text-[10px] text-neutral-500 mt-0.5">Simulate conversations with people in your life. Get therapeutic insights.</p>
+                      </div>
+                      <ArrowRight className="w-4 h-4 text-neutral-600 group-hover:text-white transition-colors shrink-0" />
+                    </div>
+                  </button>
+                </div>
+
               </div>
               <div />
             </div>
@@ -839,6 +927,23 @@ function SolospaceContent() {
                               )}
                             </motion.div>
                           ))
+                        )}
+                        {/* Live agent thinking indicator */}
+                        {isThinking && chatMessages[chatMessages.length - 1]?.sender !== 'ai' && (
+                          <motion.div 
+                            initial={{ opacity: 0, y: 8 }} 
+                            animate={{ opacity: 1, y: 0 }} 
+                            className="flex justify-start"
+                          >
+                            <div className="flex items-center gap-2 px-4 py-3 bg-neutral-950 border border-[#1f1f1f] rounded-2xl max-w-[200px]">
+                              <div className="flex gap-1">
+                                {[0, 1, 2].map(i => (
+                                  <div key={i} className="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+                                ))}
+                              </div>
+                              <ThinkingText prefix="thinking" className="text-[10px] text-neutral-500 font-mono" />
+                            </div>
+                          </motion.div>
                         )}
                         <div ref={chatEndRef} />
                       </div>

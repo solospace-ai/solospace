@@ -42,7 +42,7 @@ async def _call_claude(
     headers = {
         "Content-Type": "application/json",
         "x-api-key": api_key,
-        "anthropic-version": "2024-10-22",
+        "anthropic-version": "2023-06-01",
     }
 
     payload: Dict[str, Any] = {
@@ -88,7 +88,7 @@ async def _stream_claude(
     headers = {
         "Content-Type": "application/json",
         "x-api-key": api_key,
-        "anthropic-version": "2024-10-22",
+        "anthropic-version": "2023-06-01",
     }
 
     payload: Dict[str, Any] = {

@@ -1,6 +1,35 @@
 import { useEffect, useRef, useState } from 'react';
 import { useWorkflowStore } from '../workflowStore';
 
+function getWebSocketUrl(sessionId: string): string {
+  if (typeof window === 'undefined') return '';
+
+  const { protocol, hostname, port, host } = window.location;
+  const isHttps = protocol === 'https:';
+  const wsProtocol = isHttps ? 'wss:' : 'ws:';
+
+  // 1. If running locally on localhost or 127.0.0.1
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    return `${wsProtocol}//127.0.0.1:8000/ws/${sessionId}`;
+  }
+
+  // 2. If the port is in the subdomain or hostname (typical in cloud IDEs like IDX, Gitpod, Codespaces)
+  // e.g. 3000-xyz.preview.domain.com -> 8000-xyz.preview.domain.com
+  if (hostname.includes('3000')) {
+    const backendHostname = hostname.replace('3000', '8000');
+    return `${wsProtocol}//${backendHostname}/ws/${sessionId}`;
+  }
+
+  // 3. If there is a port in the URL (e.g. localhost:3000 or custom-domain:3000)
+  if (port && port !== '80' && port !== '443') {
+    const backendHost = host.replace(port, '8000');
+    return `${wsProtocol}//${backendHost}/ws/${sessionId}`;
+  }
+
+  // 4. Fallback default
+  return `${wsProtocol}//${hostname}:8000/ws/${sessionId}`;
+}
+
 export function useWebSocket(sessionId: string | null) {
   const [isConnected, setIsConnected] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
@@ -10,8 +39,14 @@ export function useWebSocket(sessionId: string | null) {
   useEffect(() => {
     if (!sessionId) {
       if (socketRef.current) {
+        socketRef.current.onopen = null;
+        socketRef.current.onmessage = null;
+        socketRef.current.onclose = null;
+        socketRef.current.onerror = null;
         socketRef.current.close();
+        socketRef.current = null;
       }
+      setIsConnected(false);
       return;
     }
 
@@ -20,17 +55,20 @@ export function useWebSocket(sessionId: string | null) {
         return;
       }
 
-      console.log(`Connecting to WebSocket for session: ${sessionId}`);
-      const socket = new WebSocket(`ws://127.0.0.1:8000/ws/${sessionId}`);
+      const wsUrl = getWebSocketUrl(sessionId);
+      console.log(`Connecting to WebSocket for session: ${sessionId} at ${wsUrl}`);
+      const socket = new WebSocket(wsUrl);
       socketRef.current = socket;
 
       socket.onopen = () => {
+        if (socketRef.current !== socket) return;
         console.log(`WebSocket connected for session: ${sessionId}`);
         setIsConnected(true);
         delayRef.current = 1000; // Reset reconnection delay on successful connect
       };
 
       socket.onmessage = (event) => {
+        if (socketRef.current !== socket) return;
         try {
           const message = JSON.parse(event.data);
           const { event: eventName, data } = message;
@@ -75,11 +113,13 @@ export function useWebSocket(sessionId: string | null) {
       };
 
       socket.onclose = (event) => {
+        if (socketRef.current !== socket) return;
         setIsConnected(false);
         socketRef.current = null;
         if (sessionId) {
           console.log(`WebSocket closed: ${event.reason}. Retrying in ${delayRef.current}ms...`);
           reconnectTimeoutRef.current = setTimeout(() => {
+            if (socketRef.current !== null) return;
             delayRef.current = Math.min(delayRef.current * 2, 30000); // Cap at 30s
             connect();
           }, delayRef.current);
@@ -87,8 +127,8 @@ export function useWebSocket(sessionId: string | null) {
       };
 
       socket.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        socket.close();
+        if (socketRef.current !== socket) return;
+        console.error(`WebSocket connection error for ${socket.url}:`, error);
       };
     };
 
@@ -99,7 +139,12 @@ export function useWebSocket(sessionId: string | null) {
         clearTimeout(reconnectTimeoutRef.current);
       }
       if (socketRef.current) {
+        socketRef.current.onopen = null;
+        socketRef.current.onmessage = null;
+        socketRef.current.onclose = null;
+        socketRef.current.onerror = null;
         socketRef.current.close();
+        socketRef.current = null;
       }
       setIsConnected(false);
     };
