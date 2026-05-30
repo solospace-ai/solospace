@@ -567,6 +567,30 @@ async def fetch_models_from_provider(
         except Exception as e:
             print(f"[FETCH MODELS ERROR] Claude: {e}")
 
+    elif provider == "ollama_cloud":
+        url = "https://ollama.com/api/tags"
+        headers = {}
+        if resolved_key:
+            headers["Authorization"] = f"Bearer {resolved_key}"
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(url, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    models = []
+                    for item in data.get("models", []):
+                        model_id = item.get("name")
+                        if model_id:
+                            models.append({
+                                "id": model_id,
+                                "name": model_id,
+                                "tier": "cloud"
+                            })
+                    if models:
+                        return models
+        except Exception as e:
+            print(f"[FETCH MODELS ERROR] Ollama Cloud: {e}")
+
     elif adapter in ("openai", "openai-compatible"):
         if not base_url_str:
             return config.get("models", [])

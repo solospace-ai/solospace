@@ -511,7 +511,7 @@ function SolospaceContent() {
                 {Object.values(sessions).length === 0 ? <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span> : (
                   Object.values(sessions).reverse().map((s) => (
                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
-                      <button disabled={isLoadingSession} onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsLoadingSession(true); try { await loadSessionFromDb(s.id); setWorkspaceState("active"); setCurrentTab("chat"); } catch (err) { console.error(err); } finally { setIsLoadingSession(false); } } }} className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${activeSessionId === s.id ? "text-white font-bold" : "text-neutral-500 hover:text-white"}`} title={s.prompt}>{s.title}</button>
+                      <button disabled={isLoadingSession} onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsLoadingSession(true); try { await loadSessionFromDb(s.id); setWorkspaceState("active"); setCurrentTab("chat"); } catch (err) { console.error(err); } finally { setIsLoadingSession(false); } } }} className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${activeSessionId === s.id ? "text-white font-bold" : "text-neutral-500 hover:text-white"}`} title={s.prompt}>{s.mode === 'echohouse' ? `${s.title} [Echo]` : s.title}</button>
                       <button onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); if (confirm(`Delete "${s.title}"?`)) await deleteSessionFromDb(s.id); } }} className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
                     </div>
                   ))
@@ -544,13 +544,13 @@ function SolospaceContent() {
               <div />
               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
                 <div className="text-center mb-10 space-y-2 select-none">
-                  <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">What&apos;s on your mind?</h1>
-                  <p className="text-sm text-neutral-400 font-sans">Ask anything. Get a real, complete answer instantly.</p>
+                  <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">What do you want to know?</h1>
+                  <p className="text-sm text-neutral-400 font-sans">No filters. No hedging. Ask anything.</p>
                 </div>
                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
                   <div className="flex items-center gap-3">
                     <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
-                    <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder="Describe your idea, problem, or question..." className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
+                    <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder="Ask anything. Be specific." className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
                     <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim()} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
                   </div>
                 </div>
@@ -632,7 +632,11 @@ function SolospaceContent() {
                         onClick={async () => {
                           if (echoFocus.trim()) {
                             setEchoStep(3);
-                            await fetchEchoCast(echoSituation, echoFocus);
+                            if (executionMode === "auto") {
+                              await fetchEchoCast(echoSituation, echoFocus);
+                            } else {
+                              setEchoCast([]);
+                            }
                           }
                         }}
                         disabled={!echoFocus.trim()}
@@ -656,6 +660,8 @@ function SolospaceContent() {
                         <div className="w-5 h-5 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
                         <span className="text-xs text-neutral-500 ml-3 font-mono">Inferring cast...</span>
                       </div>
+                    ) : (executionMode === "custom" && echoCast.length === 0) ? (
+                      <p>You are in Custom mode. Add people directly on the canvas after starting the simulation.</p>
                     ) : (
                       <div className="space-y-2">
                         {echoCast.map((member, idx) => (
@@ -716,7 +722,7 @@ function SolospaceContent() {
                       <button onClick={() => setEchoStep(2)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
                       <button
                         onClick={beginEchoHouseSimulation}
-                        disabled={isLoadingCast || echoCast.filter(m => !m.is_self).length === 0}
+                        disabled={isLoadingCast || (executionMode !== "custom" && echoCast.filter(m => !m.is_self).length === 0)}
                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
                       >
                         Begin Simulation
@@ -739,10 +745,10 @@ function SolospaceContent() {
                       <div className="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto space-y-4 select-text">
                         {chatMessages.length === 0 ? (
                           <div className="flex flex-col items-center justify-center py-20 text-center space-y-2 select-none">
-                            <h1 className="text-2xl font-bold text-white">
+                            <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">
                               {isEchoHouseMode ? "What is your problem in life?" : "What's on your mind?"}
                             </h1>
-                            <p className="text-xs text-neutral-500">
+                            <p className="text-sm text-neutral-400 font-sans">
                               {isEchoHouseMode ? "Type your struggle below to initialize the simulation." : "Start a conversation to see AI response."}
                             </p>
                           </div>

@@ -1,10 +1,10 @@
 # Full Project Context
 
-> Generated: 2026-05-29T12:39:45.158Z
+> Generated: 2026-05-30T09:33:55.898Z
 > Mode: Full Project
-> Files: 66
-> Total Lines: 10,811
-> Total Size: 423.9 KB
+> Files: 67
+> Total Lines: 10,910
+> Total Size: 427.1 KB
 > Directories: 33
 
 ---
@@ -39,6 +39,7 @@ SoloSpace/
 │   │   └── websocket.py
 │   ├── tests/
 │   │   ├── test_database.py
+│   │   ├── test_ollama_cloud.py
 │   │   ├── test_planner.py
 │   │   └── test_tools.py
 │   ├── tools/
@@ -1429,7 +1430,7 @@ SoloSpace/
 
 ### File: `Backend/providers/base.py`
 
-> 525 lines | 22.8 KB
+> 542 lines | 23.5 KB
 
 ```python
   1 | """
@@ -1848,115 +1849,132 @@ SoloSpace/
 414 |         "key_hint": "",
 415 |         "adapter": "openai",
 416 |     },
-417 | }
-418 | 
-419 | 
-420 | def get_provider_config(provider_id: str) -> Dict[str, Any]:
-421 |     """Get config for a provider. Returns empty dict if not found."""
-422 |     return PROVIDERS.get(provider_id.lower(), {})
-423 | 
-424 | 
-425 | def get_available_providers() -> Dict[str, Any]:
-426 |     """Return provider registry for the frontend."""
-427 |     result = {}
-428 |     for pid, cfg in PROVIDERS.items():
-429 |         result[pid] = {
-430 |             "name": cfg["name"],
-431 |             "description": cfg["description"],
-432 |             "models": cfg["models"],
-433 |             "default_model": cfg["default_model"],
-434 |             "capabilities": cfg["capabilities"],
-435 |             "key_url": cfg["key_url"],
-436 |             "key_hint": cfg["key_hint"],
-437 |             "is_custom": cfg.get("is_custom", False),
-438 |             "is_local": cfg.get("is_local", False),
-439 |             "requires_base_url": cfg.get("requires_base_url", False),
-440 |         }
-441 |     return result
-442 | 
-443 | 
-444 | def resolve_api_key(
-445 |     provider: str,
-446 |     user_key: Optional[str] = None,
-447 |     api_keys: Optional[Dict[str, str]] = None,
-448 |     backup_keys: Optional[List[str]] = None,
-449 | ) -> str:
-450 |     """Resolve key from user input dictionary, single user_key, or fallback to env."""
-451 |     keys_to_check = []
-452 |     if user_key and user_key.strip():
-453 |         keys_to_check.append(user_key.strip())
-454 |     if api_keys and provider in api_keys and api_keys[provider].strip():
-455 |         keys_to_check.append(api_keys[provider].strip())
-456 |     if backup_keys:
-457 |         for bk in backup_keys:
-458 |             if bk and bk.strip():
-459 |                 keys_to_check.append(bk.strip())
-460 | 
-461 |     for k in keys_to_check:
-462 |         if k:
-463 |             return k
-464 | 
-465 |     env_keys = {
-466 |         "gemini": "GEMINI_API_KEY",
-467 |         "openai": "OPENAI_API_KEY",
-468 |         "claude": "ANTHROPIC_API_KEY",
-469 |         "openrouter": "OPENROUTER_API_KEY",
-470 |         "groq": "GROQ_API_KEY",
-471 |         "deepseek": "DEEPSEEK_API_KEY",
-472 |         "together": "TOGETHER_API_KEY",
-473 |         "mistral": "MISTRAL_API_KEY",
-474 |         "fireworks": "FIREWORKS_API_KEY",
-475 |         "perplexity": "PERPLEXITY_API_KEY",
-476 |         "cohere": "COHERE_API_KEY",
-477 |         "azure_openai": "AZURE_OPENAI_API_KEY",
-478 |         "xai": "XAI_API_KEY",
-479 |         "cerebras": "CEREBRAS_API_KEY",
-480 |         "bedrock": "AWS_ACCESS_KEY_ID",
-481 |         "alibaba": "ALIBABA_API_KEY",
-482 |         "nvidia": "NVIDIA_API_KEY",
-483 |         "glm": "GLM_API_KEY",
-484 |         "z.ai": "Z_AI_API_KEY",
-485 |     }
-486 |     env_var_name = env_keys.get(provider.lower())
-487 |     if env_var_name:
-488 |         val = os.environ.get(env_var_name)
-489 |         if val:
-490 |             return val
-491 |     return ""
-492 | 
-493 | 
-494 | def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
-495 |     """Extract and parse a JSON object from text that may contain markdown or extra content."""
-496 |     try:
-497 |         return json.loads(text.strip())
-498 |     except (json.JSONDecodeError, ValueError):
-499 |         pass
-500 | 
-501 |     match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
-502 |     if match:
-503 |         try:
-504 |             return json.loads(match.group(1).strip())
-505 |         except (json.JSONDecodeError, ValueError):
-506 |             pass
-507 | 
-508 |     depth = 0
-509 |     start = -1
-510 |     for i, ch in enumerate(text):
-511 |         if ch == "{":
-512 |             if depth == 0:
-513 |                 start = i
-514 |             depth += 1
-515 |         elif ch == "}":
-516 |             depth -= 1
-517 |             if depth == 0 and start >= 0:
-518 |                 try:
-519 |                     return json.loads(text[start:i + 1])
-520 |                 except (json.JSONDecodeError, ValueError):
-521 |                     break
-522 |     return None
-523 | 
+417 |     "ollama_cloud": {
+418 |         "name": "Ollama Cloud",
+419 |         "description": "Hosted Ollama Cloud models via https://ollama.com",
+420 |         "base_url": "https://ollama.com/v1",
+421 |         "chat_path": "/chat/completions",
+422 |         "default_model": "llama3",
+423 |         "models": [
+424 |             {"id": "llama3", "name": "Llama 3", "tier": "cloud"},
+425 |             {"id": "mistral", "name": "Mistral", "tier": "cloud"},
+426 |             {"id": "phi3", "name": "Phi 3", "tier": "cloud"},
+427 |         ],
+428 |         "capabilities": ["chat", "streaming", "json_mode"],
+429 |         "key_url": "https://ollama.com",
+430 |         "key_hint": "Ollama API Key",
+431 |         "adapter": "openai",
+432 |     },
+433 | }
+434 | 
+435 | 
+436 | def get_provider_config(provider_id: str) -> Dict[str, Any]:
+437 |     """Get config for a provider. Returns empty dict if not found."""
+438 |     return PROVIDERS.get(provider_id.lower(), {})
+439 | 
+440 | 
+441 | def get_available_providers() -> Dict[str, Any]:
+442 |     """Return provider registry for the frontend."""
+443 |     result = {}
+444 |     for pid, cfg in PROVIDERS.items():
+445 |         result[pid] = {
+446 |             "name": cfg["name"],
+447 |             "description": cfg["description"],
+448 |             "models": cfg["models"],
+449 |             "default_model": cfg["default_model"],
+450 |             "capabilities": cfg["capabilities"],
+451 |             "key_url": cfg["key_url"],
+452 |             "key_hint": cfg["key_hint"],
+453 |             "is_custom": cfg.get("is_custom", False),
+454 |             "is_local": cfg.get("is_local", False),
+455 |             "requires_base_url": cfg.get("requires_base_url", False),
+456 |         }
+457 |     return result
+458 | 
+459 | 
+460 | def resolve_api_key(
+461 |     provider: str,
+462 |     user_key: Optional[str] = None,
+463 |     api_keys: Optional[Dict[str, str]] = None,
+464 |     backup_keys: Optional[List[str]] = None,
+465 | ) -> str:
+466 |     """Resolve key from user input dictionary, single user_key, or fallback to env."""
+467 |     keys_to_check = []
+468 |     if user_key and user_key.strip():
+469 |         keys_to_check.append(user_key.strip())
+470 |     if api_keys and provider in api_keys and api_keys[provider].strip():
+471 |         keys_to_check.append(api_keys[provider].strip())
+472 |     if backup_keys:
+473 |         for bk in backup_keys:
+474 |             if bk and bk.strip():
+475 |                 keys_to_check.append(bk.strip())
+476 | 
+477 |     for k in keys_to_check:
+478 |         if k:
+479 |             return k
+480 | 
+481 |     env_keys = {
+482 |         "gemini": "GEMINI_API_KEY",
+483 |         "openai": "OPENAI_API_KEY",
+484 |         "claude": "ANTHROPIC_API_KEY",
+485 |         "openrouter": "OPENROUTER_API_KEY",
+486 |         "groq": "GROQ_API_KEY",
+487 |         "deepseek": "DEEPSEEK_API_KEY",
+488 |         "together": "TOGETHER_API_KEY",
+489 |         "mistral": "MISTRAL_API_KEY",
+490 |         "fireworks": "FIREWORKS_API_KEY",
+491 |         "perplexity": "PERPLEXITY_API_KEY",
+492 |         "cohere": "COHERE_API_KEY",
+493 |         "azure_openai": "AZURE_OPENAI_API_KEY",
+494 |         "xai": "XAI_API_KEY",
+495 |         "cerebras": "CEREBRAS_API_KEY",
+496 |         "bedrock": "AWS_ACCESS_KEY_ID",
+497 |         "alibaba": "ALIBABA_API_KEY",
+498 |         "nvidia": "NVIDIA_API_KEY",
+499 |         "glm": "GLM_API_KEY",
+500 |         "z.ai": "Z_AI_API_KEY",
+501 |         "ollama_cloud": "OLLAMA_API_KEY",
+502 |     }
+503 |     env_var_name = env_keys.get(provider.lower())
+504 |     if env_var_name:
+505 |         val = os.environ.get(env_var_name)
+506 |         if val:
+507 |             return val
+508 |     return ""
+509 | 
+510 | 
+511 | def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
+512 |     """Extract and parse a JSON object from text that may contain markdown or extra content."""
+513 |     try:
+514 |         return json.loads(text.strip())
+515 |     except (json.JSONDecodeError, ValueError):
+516 |         pass
+517 | 
+518 |     match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+519 |     if match:
+520 |         try:
+521 |             return json.loads(match.group(1).strip())
+522 |         except (json.JSONDecodeError, ValueError):
+523 |             pass
 524 | 
-525 |
+525 |     depth = 0
+526 |     start = -1
+527 |     for i, ch in enumerate(text):
+528 |         if ch == "{":
+529 |             if depth == 0:
+530 |                 start = i
+531 |             depth += 1
+532 |         elif ch == "}":
+533 |             depth -= 1
+534 |             if depth == 0 and start >= 0:
+535 |                 try:
+536 |                     return json.loads(text[start:i + 1])
+537 |                 except (json.JSONDecodeError, ValueError):
+538 |                     break
+539 |     return None
+540 | 
+541 | 
+542 |
 ```
 
 ### File: `Backend/providers/claude.py`
@@ -2374,7 +2392,7 @@ SoloSpace/
 
 ### File: `Backend/providers/registry.py`
 
-> 601 lines | 22.8 KB
+> 625 lines | 23.8 KB
 
 ```python
   1 | import json
@@ -2946,38 +2964,62 @@ SoloSpace/
 567 |         except Exception as e:
 568 |             print(f"[FETCH MODELS ERROR] Claude: {e}")
 569 | 
-570 |     elif adapter in ("openai", "openai-compatible"):
-571 |         if not base_url_str:
-572 |             return config.get("models", [])
-573 |         url = f"{base_url_str}/models"
-574 |         headers = {}
-575 |         if resolved_key:
-576 |             if config.get("requires_deployment"):
-577 |                 headers["api-key"] = resolved_key
-578 |             else:
-579 |                 headers["Authorization"] = f"Bearer {resolved_key}"
-580 | 
-581 |         try:
-582 |             async with httpx.AsyncClient(timeout=10.0) as client:
-583 |                 resp = await client.get(url, headers=headers)
-584 |                 if resp.status_code == 200:
-585 |                     data = resp.json()
-586 |                     models = []
-587 |                     for item in data.get("data", []):
-588 |                         model_id = item.get("id")
-589 |                         if model_id:
-590 |                             models.append({
-591 |                                 "id": model_id,
-592 |                                 "name": model_id,
-593 |                                 "tier": "custom"
-594 |                             })
-595 |                     if models:
-596 |                         return models
-597 |         except Exception as e:
-598 |             print(f"[FETCH MODELS ERROR] Failed to fetch models for {provider}: {e}")
-599 |             
-600 |     return config.get("models", [])
-601 |
+570 |     elif provider == "ollama_cloud":
+571 |         url = "https://ollama.com/api/tags"
+572 |         headers = {}
+573 |         if resolved_key:
+574 |             headers["Authorization"] = f"Bearer {resolved_key}"
+575 |         try:
+576 |             async with httpx.AsyncClient(timeout=10.0) as client:
+577 |                 resp = await client.get(url, headers=headers)
+578 |                 if resp.status_code == 200:
+579 |                     data = resp.json()
+580 |                     models = []
+581 |                     for item in data.get("models", []):
+582 |                         model_id = item.get("name")
+583 |                         if model_id:
+584 |                             models.append({
+585 |                                 "id": model_id,
+586 |                                 "name": model_id,
+587 |                                 "tier": "cloud"
+588 |                             })
+589 |                     if models:
+590 |                         return models
+591 |         except Exception as e:
+592 |             print(f"[FETCH MODELS ERROR] Ollama Cloud: {e}")
+593 | 
+594 |     elif adapter in ("openai", "openai-compatible"):
+595 |         if not base_url_str:
+596 |             return config.get("models", [])
+597 |         url = f"{base_url_str}/models"
+598 |         headers = {}
+599 |         if resolved_key:
+600 |             if config.get("requires_deployment"):
+601 |                 headers["api-key"] = resolved_key
+602 |             else:
+603 |                 headers["Authorization"] = f"Bearer {resolved_key}"
+604 | 
+605 |         try:
+606 |             async with httpx.AsyncClient(timeout=10.0) as client:
+607 |                 resp = await client.get(url, headers=headers)
+608 |                 if resp.status_code == 200:
+609 |                     data = resp.json()
+610 |                     models = []
+611 |                     for item in data.get("data", []):
+612 |                         model_id = item.get("id")
+613 |                         if model_id:
+614 |                             models.append({
+615 |                                 "id": model_id,
+616 |                                 "name": model_id,
+617 |                                 "tier": "custom"
+618 |                             })
+619 |                     if models:
+620 |                         return models
+621 |         except Exception as e:
+622 |             print(f"[FETCH MODELS ERROR] Failed to fetch models for {provider}: {e}")
+623 |             
+624 |     return config.get("models", [])
+625 |
 ```
 
 ### File: `Backend/security/__init__.py`
@@ -3685,6 +3727,74 @@ SoloSpace/
 90 |     assert loaded["objective"] == "research"
 91 |     assert loaded["status"] == "active"
 92 |
+```
+
+### File: `Backend/tests/test_ollama_cloud.py`
+
+> 61 lines | 2.2 KB
+
+```python
+ 1 | import pytest
+ 2 | from unittest.mock import AsyncMock, MagicMock, patch
+ 3 | from providers import get_provider_config, resolve_api_key, fetch_models_from_provider
+ 4 | 
+ 5 | def test_ollama_cloud_config():
+ 6 |     config = get_provider_config("ollama_cloud")
+ 7 |     assert config is not None
+ 8 |     assert config["name"] == "Ollama Cloud"
+ 9 |     assert config["base_url"] == "https://ollama.com/v1"
+10 |     assert config["adapter"] == "openai"
+11 |     assert "chat" in config["capabilities"]
+12 |     assert "streaming" in config["capabilities"]
+13 | 
+14 | def test_ollama_cloud_resolve_api_key():
+15 |     # User key
+16 |     key = resolve_api_key("ollama_cloud", user_key="user-test-key")
+17 |     assert key == "user-test-key"
+18 | 
+19 |     # API keys dict
+20 |     key = resolve_api_key("ollama_cloud", api_keys={"ollama_cloud": "dict-test-key"})
+21 |     assert key == "dict-test-key"
+22 | 
+23 |     # Environment variable fallback
+24 |     with patch.dict("os.environ", {"OLLAMA_API_KEY": "env-test-key"}):
+25 |         key = resolve_api_key("ollama_cloud")
+26 |         assert key == "env-test-key"
+27 | 
+28 | @pytest.mark.asyncio
+29 | async def test_ollama_cloud_fetch_models():
+30 |     mock_response = {
+31 |         "models": [
+32 |             {"name": "llama3:latest"},
+33 |             {"name": "mistral:latest"},
+34 |         ]
+35 |     }
+36 |     
+37 |     with patch("httpx.AsyncClient") as mock_client_cls:
+38 |         mock_client = AsyncMock()
+39 |         mock_client_cls.return_value = mock_client
+40 |         mock_client.__aenter__.return_value = mock_client
+41 |         mock_client.__aexit__ = AsyncMock()
+42 | 
+43 |         # Mock the get call response
+44 |         mock_resp = AsyncMock()
+45 |         mock_resp.status_code = 200
+46 |         mock_resp.json = MagicMock(return_value=mock_response)
+47 |         mock_client.get.return_value = mock_resp
+48 | 
+49 |         models = await fetch_models_from_provider("ollama_cloud", "mock-api-key")
+50 |         
+51 |         assert len(models) == 2
+52 |         assert models[0]["id"] == "llama3:latest"
+53 |         assert models[0]["name"] == "llama3:latest"
+54 |         assert models[0]["tier"] == "cloud"
+55 |         assert models[1]["id"] == "mistral:latest"
+56 |         assert models[1]["name"] == "mistral:latest"
+57 |         assert models[1]["tier"] == "cloud"
+58 | 
+59 |         # Verify client.get called with correct URL and headers
+60 |         mock_client.get.assert_called_once_with("https://ollama.com/api/tags", headers={"Authorization": "Bearer mock-api-key"})
+61 |
 ```
 
 ### File: `Backend/tests/test_planner.py`
@@ -5017,7 +5127,7 @@ SoloSpace/
 
 ### File: `Frontend/app/api/gemini/execute_custom/route.ts`
 
-> 80 lines | 2.9 KB
+> 80 lines | 2.8 KB
 
 ```typescript
  1 | import { NextRequest } from "next/server";
@@ -5037,7 +5147,7 @@ SoloSpace/
 15 |       
 16 |       const errStream = new ReadableStream({
 17 |         start(controller) {
-18 |           const errMsg = `**Backend Error (${pyResponse.status})**\n\n${errorData.detail || "The Python orchestrator returned an error."}\n\n*Make sure your Gemini API key is configured correctly in Settings.*`;
+18 |           const errMsg = `**Backend Error (${pyResponse.status})**\n\n${errorData.detail || "The Python orchestrator returned an error."}\n\n*Make sure your API key is configured correctly in Settings.*`;
 19 |           const metaMsg = JSON.stringify({
 20 |             complexity: "simple",
 21 |             capabilities: [],
@@ -5075,7 +5185,7 @@ SoloSpace/
 53 |     
 54 |     const errStream = new ReadableStream({
 55 |       start(controller) {
-56 |         const errMsg = "**Python backend is unavailable.**\n\nPlease ensure the backend server is running:\n\n```bash\ncd Backend\npython -m uvicorn main:app --reload\n```\n\nAlso verify your Gemini API key is set in Settings (key icon in the header).";
+56 |         const errMsg = "**Python backend is unavailable.**\n\nPlease ensure the backend server is running:\n\n```bash\ncd Backend\npython -m uvicorn main:app --reload\n```\n\nAlso verify your API key is set in Settings.";
 57 |         const metaMsg = JSON.stringify({
 58 |           complexity: "simple",
 59 |           capabilities: [],
@@ -5183,7 +5293,7 @@ SoloSpace/
 
 ### File: `Frontend/app/api/gemini/orchestrate/route.ts`
 
-> 80 lines | 2.9 KB
+> 80 lines | 2.8 KB
 
 ```typescript
  1 | import { NextRequest } from "next/server";
@@ -5203,7 +5313,7 @@ SoloSpace/
 15 |       
 16 |       const errStream = new ReadableStream({
 17 |         start(controller) {
-18 |           const errMsg = `**Backend Error (${pyResponse.status})**\n\n${errorData.detail || "The Python orchestrator returned an error."}\n\n*Make sure your Gemini API key is configured correctly in Settings.*`;
+18 |           const errMsg = `**Backend Error (${pyResponse.status})**\n\n${errorData.detail || "The Python orchestrator returned an error."}\n\n*Make sure your API key is configured correctly in Settings.*`;
 19 |           const metaMsg = JSON.stringify({
 20 |             complexity: "simple",
 21 |             capabilities: [],
@@ -5241,7 +5351,7 @@ SoloSpace/
 53 |     
 54 |     const errStream = new ReadableStream({
 55 |       start(controller) {
-56 |         const errMsg = "**Python backend is unavailable.**\n\nPlease ensure the backend server is running:\n\n```bash\ncd Backend\npython -m uvicorn main:app --reload\n```\n\nAlso verify your Gemini API key is set in Settings (key icon in the header).";
+56 |         const errMsg = "**Python backend is unavailable.**\n\nPlease ensure the backend server is running:\n\n```bash\ncd Backend\npython -m uvicorn main:app --reload\n```\n\nAlso verify your API key is set in Settings.";
 57 |         const metaMsg = JSON.stringify({
 58 |           complexity: "simple",
 59 |           capabilities: [],
@@ -5761,7 +5871,7 @@ SoloSpace/
 
 ### File: `Frontend/app/page.tsx`
 
-> 975 lines | 61.0 KB
+> 981 lines | 61.5 KB
 
 ```tsx
   1 | 'use client';
@@ -6277,7 +6387,7 @@ SoloSpace/
 511 |                 {Object.values(sessions).length === 0 ? <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span> : (
 512 |                   Object.values(sessions).reverse().map((s) => (
 513 |                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
-514 |                       <button disabled={isLoadingSession} onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsLoadingSession(true); try { await loadSessionFromDb(s.id); setWorkspaceState("active"); setCurrentTab("chat"); } catch (err) { console.error(err); } finally { setIsLoadingSession(false); } } }} className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${activeSessionId === s.id ? "text-white font-bold" : "text-neutral-500 hover:text-white"}`} title={s.prompt}>{s.title}</button>
+514 |                       <button disabled={isLoadingSession} onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsLoadingSession(true); try { await loadSessionFromDb(s.id); setWorkspaceState("active"); setCurrentTab("chat"); } catch (err) { console.error(err); } finally { setIsLoadingSession(false); } } }} className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${activeSessionId === s.id ? "text-white font-bold" : "text-neutral-500 hover:text-white"}`} title={s.prompt}>{s.mode === 'echohouse' ? `${s.title} [Echo]` : s.title}</button>
 515 |                       <button onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); if (confirm(`Delete "${s.title}"?`)) await deleteSessionFromDb(s.id); } }} className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
 516 |                     </div>
 517 |                   ))
@@ -6310,13 +6420,13 @@ SoloSpace/
 544 |               <div />
 545 |               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
 546 |                 <div className="text-center mb-10 space-y-2 select-none">
-547 |                   <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">What&apos;s on your mind?</h1>
-548 |                   <p className="text-sm text-neutral-400 font-sans">Ask anything. Get a real, complete answer instantly.</p>
+547 |                   <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">What do you want to know?</h1>
+548 |                   <p className="text-sm text-neutral-400 font-sans">No filters. No hedging. Ask anything.</p>
 549 |                 </div>
 550 |                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
 551 |                   <div className="flex items-center gap-3">
 552 |                     <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
-553 |                     <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder="Describe your idea, problem, or question..." className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
+553 |                     <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder="Ask anything. Be specific." className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
 554 |                     <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim()} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
 555 |                   </div>
 556 |                 </div>
@@ -6398,347 +6508,353 @@ SoloSpace/
 632 |                         onClick={async () => {
 633 |                           if (echoFocus.trim()) {
 634 |                             setEchoStep(3);
-635 |                             await fetchEchoCast(echoSituation, echoFocus);
-636 |                           }
-637 |                         }}
-638 |                         disabled={!echoFocus.trim()}
-639 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
-640 |                       >
-641 |                         {isLoadingCast ? "Inferring cast..." : "Next"}
-642 |                       </button>
-643 |                     </div>
-644 |                   </div>
-645 |                 )}
-646 | 
-647 |                 {/* Step 3 — Cast Review */}
-648 |                 {echoStep === 3 && (
-649 |                   <div className="space-y-4">
-650 |                     <div className="space-y-1">
-651 |                       <h1 className="text-2xl font-bold text-white tracking-tight">Review the cast.</h1>
-652 |                       <p className="text-xs text-neutral-500 font-sans">These are the people who will participate in the simulation. Edit, remove, or add as needed.</p>
-653 |                     </div>
-654 |                     {isLoadingCast ? (
-655 |                       <div className="flex items-center justify-center py-12">
-656 |                         <div className="w-5 h-5 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
-657 |                         <span className="text-xs text-neutral-500 ml-3 font-mono">Inferring cast...</span>
-658 |                       </div>
-659 |                     ) : (
-660 |                       <div className="space-y-2">
-661 |                         {echoCast.map((member, idx) => (
-662 |                           <div key={idx} className="bg-neutral-950 border border-[#1f1f1f] rounded-xl p-3 space-y-2">
-663 |                             {editingCastIdx === idx ? (
-664 |                               <div className="space-y-2">
-665 |                                 <input
-666 |                                   type="text"
-667 |                                   value={member.inferred_name}
-668 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_name: e.target.value } : m))}
-669 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
-670 |                                   placeholder="Name"
-671 |                                 />
-672 |                                 <input
-673 |                                   type="text"
-674 |                                   value={member.role}
-675 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, role: e.target.value } : m))}
-676 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
-677 |                                   placeholder="Role"
-678 |                                 />
-679 |                                 <textarea
-680 |                                   value={member.inferred_problem}
-681 |                                   rows={2}
-682 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_problem: e.target.value } : m))}
-683 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2.5 text-xs text-white outline-none focus:border-neutral-500 resize-none"
-684 |                                   placeholder="Their perspective..."
-685 |                                 />
-686 |                                 <button onClick={() => setEditingCastIdx(null)} className="text-[10px] font-mono text-neutral-400 hover:text-white cursor-pointer">Done</button>
-687 |                               </div>
-688 |                             ) : (
-689 |                               <div className="flex items-start justify-between gap-2">
-690 |                                 <div className="min-w-0 flex-1">
-691 |                                   <div className="flex items-center gap-2">
-692 |                                     <span className="text-xs font-semibold text-white">{member.inferred_name}</span>
-693 |                                     <span className="text-[9px] font-mono text-neutral-500 uppercase tracking-wider">{member.role}</span>
-694 |                                   </div>
-695 |                                   <p className="text-[11px] text-neutral-500 leading-relaxed mt-0.5 line-clamp-2">{member.inferred_problem}</p>
-696 |                                 </div>
-697 |                                 {!member.is_self && (
-698 |                                   <div className="flex gap-1 shrink-0">
-699 |                                     <button onClick={() => setEditingCastIdx(idx)} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><Pencil className="w-3 h-3" /></button>
-700 |                                     <button onClick={() => setEchoCast(prev => prev.filter((_, i) => i !== idx))} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><X className="w-3 h-3" /></button>
-701 |                                   </div>
-702 |                                 )}
-703 |                               </div>
-704 |                             )}
-705 |                           </div>
-706 |                         ))}
-707 |                         <button
-708 |                           onClick={() => setEchoCast(prev => [...prev, { inferred_name: "New Person", role: "acquaintance", inferred_problem: "Enter their perspective...", emotional_core: "", is_self: false }])}
-709 |                           className="w-full py-2.5 border border-dashed border-[#1f1f1f] rounded-xl text-xs text-neutral-500 hover:text-white hover:border-neutral-600 transition-all cursor-pointer"
-710 |                         >
-711 |                           Add Person
-712 |                         </button>
-713 |                       </div>
-714 |                     )}
-715 |                     <div className="flex gap-2">
-716 |                       <button onClick={() => setEchoStep(2)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
-717 |                       <button
-718 |                         onClick={beginEchoHouseSimulation}
-719 |                         disabled={isLoadingCast || echoCast.filter(m => !m.is_self).length === 0}
-720 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
-721 |                       >
-722 |                         Begin Simulation
-723 |                       </button>
-724 |                     </div>
-725 |                   </div>
-726 |                 )}
-727 |               </div>
-728 |             </div>
-729 |           )}
-730 | 
-731 |           {workspaceState === "active" && (
-732 |             <div className="absolute inset-0 flex">
-733 |               {currentTab === "chat" && (
-734 |                 <div className="flex-1 flex flex-col justify-between overflow-hidden bg-black">
-735 |                   <div ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
-736 |                     {isLoadingSession ? (
-737 |                       <div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" /></div>
-738 |                     ) : (
-739 |                       <div className="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto space-y-4 select-text">
-740 |                         {chatMessages.length === 0 ? (
-741 |                           <div className="flex flex-col items-center justify-center py-20 text-center space-y-2 select-none">
-742 |                             <h1 className="text-2xl font-bold text-white">
-743 |                               {isEchoHouseMode ? "What is your problem in life?" : "What's on your mind?"}
-744 |                             </h1>
-745 |                             <p className="text-xs text-neutral-500">
-746 |                               {isEchoHouseMode ? "Type your struggle below to initialize the simulation." : "Start a conversation to see AI response."}
-747 |                             </p>
-748 |                           </div>
-749 |                         ) : (
-750 |                           chatMessages.map((msg, msgIdx) => (
-751 |                             <motion.div key={msg.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={`flex w-full ${msg.sender === "divider" ? "justify-center" : msg.sender === "user" ? "justify-end" : "justify-start"}`}>
-752 |                               {msg.sender === "divider" ? (
-753 |                                 <div className="w-full flex items-center gap-4 my-4 select-none">
-754 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
-755 |                                   <span className="text-[10px] font-mono text-neutral-500 tracking-wider uppercase">{msg.text}</span>
-756 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
-757 |                                 </div>
-758 |                               ) : msg.sender === "user" ? (
-759 |                                 <div className="flex flex-col items-end space-y-1 max-w-[72%] group">
-760 |                                   {msg.speakerName && (
-761 |                                     <span className="text-[10px] font-mono text-neutral-500 mr-2">{msg.speakerName}</span>
-762 |                                   )}
-763 |                                   <div className={`rounded-3xl px-5 py-3 text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'bg-neutral-800' : 'bg-[#2f2f2f]'}`}><p className="whitespace-pre-wrap">{msg.text}</p></div>
-764 |                                   <div className="flex items-center gap-3 mt-1.5 text-neutral-500 select-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 mr-2">
-765 |                                     <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
-766 |                                       {copiedMsgId === msg.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-767 |                                       <span>{copiedMsgId === msg.id ? "Copied" : "Copy"}</span>
-768 |                                     </button>
-769 |                                     <button onClick={() => { setUserQuery(msg.text); textareaRef.current?.focus(); textareaRef.current?.scrollIntoView({ behavior: "smooth" }); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
-770 |                                       <Pencil className="w-3 h-3" />
-771 |                                       <span>Edit</span>
-772 |                                     </button>
-773 |                                   </div>
-774 |                                 </div>
-775 |                               ) : (
-776 |                                 <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
-777 |                                   {msg.speakerName && msg.speakerName !== "insight" && msg.speakerName !== "takeaways" && (
-778 |                                     <span className="text-[10px] font-mono text-neutral-500 ml-1">{msg.speakerName}</span>
-779 |                                   )}
-780 |                                   {msg.speakerName === "takeaways" && msg.takeaways ? (
-781 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 space-y-3 mt-2">
-782 |                                       <span className="text-[10px] font-mono text-neutral-400 uppercase tracking-wider font-bold block">What you can try</span>
-783 |                                       <ol className="space-y-2">
-784 |                                         {msg.takeaways.map((item, ti) => (
-785 |                                           <li key={ti} className="flex gap-2.5 text-xs text-neutral-300 leading-relaxed">
-786 |                                             <span className="font-mono text-neutral-600 shrink-0">{ti + 1}.</span>
-787 |                                             <span>{item}</span>
-788 |                                           </li>
-789 |                                         ))}
-790 |                                       </ol>
-791 |                                     </div>
-792 |                                   ) : msg.speakerName === "insight" ? (
-793 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4">
-794 |                                       {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
-795 |                                     </div>
-796 |                                   ) : (
-797 |                                     <div className={`w-full text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'rounded-2xl px-4 py-3 bg-neutral-900' : 'px-1 py-2'}`}>
-798 |                                       {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
-799 |                                       {msg.text && (!isOrchestrating || msgIdx !== chatMessages.length - 1) && (
-800 |                                         <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
-801 |                                           <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
-802 |                                             {copiedMsgId === msg.id ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400 font-medium">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
-803 |                                           </button>
-804 |                                           {!isEchoHouseMode && msgIdx === chatMessages.length - 1 && !isOrchestrating && (
-805 |                                             <button onClick={handleRegenerate} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
-806 |                                               <RefreshCw className="w-3.5 h-3.5" />
-807 |                                               <span>Regenerate</span>
-808 |                                             </button>
-809 |                                           )}
-810 |                                         </div>
-811 |                                       )}
-812 |                                     </div>
-813 |                                   )}
-814 |                                   {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && nodes.length > 0 && (
-815 |                                     <div className="flex gap-3 mt-4 select-none">
-816 |                                       <button onClick={() => setCurrentTab("arena")} className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max">
-817 |                                         <GitFork className="w-3.5 h-3.5 text-cyan-400" /><span>See Agent Flow</span>
-818 |                                       </button>
-819 |                                       {!isEchoHouseMode && useWorkflowStore.getState().executionState === "paused" && (
-820 |                                         <button
-821 |                                           onClick={async () => {
-822 |                                             setExecutionState("running");
-823 |                                             await useWorkflowStore.getState().triggerCustomExecution();
-824 |                                           }}
-825 |                                           className="px-4 py-2 bg-white hover:bg-neutral-200 rounded-xl text-xs font-bold text-black transition-all flex items-center gap-1.5 cursor-pointer max-w-max"
-826 |                                         >
-827 |                                           Proceed
-828 |                                         </button>
-829 |                                       )}
-830 |                                     </div>
-831 |                                   )}
-832 |                                 </div>
-833 |                               )}
-834 |                             </motion.div>
-835 |                           ))
-836 |                         )}
-837 |                         <div ref={chatEndRef} />
-838 |                       </div>
-839 |                     )}
-840 |                   </div>
-841 |                   <div className="px-4 sm:px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
-842 |                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
-843 |                       <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
-844 |                       <textarea ref={textareaRef} rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery); } }} placeholder={isOrchestrating ? "Streaming..." : isEchoHouseMode ? "What is your problem in life?" : "Ask a follow-up..."} disabled={isOrchestrating} className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar" />
-845 |                       <div className="flex items-center gap-2 shrink-0">
-846 |                         <ModeSelector />
-847 |                         {isOrchestrating ? (
-848 |                           <button onClick={cancelOrchestration} className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all cursor-pointer"><Square className="w-3.5 h-3.5 text-white fill-white" /></button>
-849 |                         ) : (
-850 |                           <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim() || isThinking} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
-851 |                         )}
-852 |                       </div>
-853 |                     </div>
-854 |                   </div>
-855 |                 </div>
-856 |               )}
-857 |               {currentTab === "arena" && (
-858 |                 <div className="flex-1 relative overflow-hidden bg-[#000000] flex">
-859 |                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#0d0d0d]/90 border border-[#1f1f1f] rounded-full px-4 py-2 backdrop-blur-md shadow-xl pointer-events-auto">
-860 |                     <button onClick={() => setCurrentTab("chat")} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-mono"><ChevronLeft className="w-3.5 h-3.5" /> Back to Chat</button>
-861 |                   </div>
-862 |                   <FlowArena onProceed={() => setCurrentTab("chat")} />
-863 |                 </div>
-864 |               )}
-865 |             </div>
-866 |           )}
-867 |         </div>
-868 |       </main>
-869 | 
-870 |       {currentTab === "arena" && isConfigPanelOpen && activeNodeDetail && (
-871 |         <div className="fixed top-0 right-0 h-full w-80 bg-[#0c0c0c]/95 border-l border-[#1f1f1f] z-40 flex flex-col justify-between shadow-2xl transition-transform duration-300 right-panel select-none">
-872 |           <div className="p-5 border-b border-[#1f1f1f] flex justify-between items-center bg-[#0d0d0d]">
-873 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider">{activeNodeDetail.data.name}</h3>
-874 |             <button onClick={() => { setIsConfigPanelOpen(false); setSelectedNodeId(null); }} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
-875 |           </div>
-876 |           <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
-877 |             {activeNodeDetail.data.isEchoHouseAgent ? (
-878 |               <>
-879 |                 <div className="space-y-1.5">
-880 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label>
-881 |                   <input
-882 |                     type="text"
-883 |                     value={activeNodeDetail.data.name}
-884 |                     onChange={(e) => {
-885 |                       const nameVal = e.target.value;
-886 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
-887 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
-888 |                       updateNodeField(activeNodeDetail.id, {
-889 |                         name: nameVal,
-890 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
-891 |                         objective: nameVal === "You (Self)" || roleVal === "self"
-892 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
-893 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
-894 |                       });
-895 |                     }}
-896 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
-897 |                   />
-898 |                 </div>
-899 |                 <div className="space-y-1.5">
-900 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Role</label>
-901 |                   <input
-902 |                     type="text"
-903 |                     value={activeNodeDetail.data.echohouseRole}
-904 |                     disabled={activeNodeDetail.data.echohouseRole === "self"}
-905 |                     onChange={(e) => {
-906 |                       const nameVal = activeNodeDetail.data.name || "";
-907 |                       const roleVal = e.target.value;
-908 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
-909 |                       updateNodeField(activeNodeDetail.id, {
-910 |                         echohouseRole: roleVal,
-911 |                         tag: roleVal.toUpperCase().replace(/\s+/g, '_'),
-912 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
-913 |                         objective: `Provide perspective as ${nameVal} (${roleVal}).`
-914 |                       });
-915 |                     }}
-916 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none disabled:opacity-40"
-917 |                   />
-918 |                 </div>
-919 |                 <div className="space-y-1.5">
-920 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">
-921 |                     {activeNodeDetail.data.echohouseRole === "self" ? "Your problem in life" : "What do they think about your situation?"}
-922 |                   </label>
-923 |                   <textarea
-924 |                     value={activeNodeDetail.data.echohouseProblem}
-925 |                     onChange={(e) => {
-926 |                       const nameVal = activeNodeDetail.data.name || "";
-927 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
-928 |                       const probVal = e.target.value;
-929 |                       updateNodeField(activeNodeDetail.id, {
-930 |                         echohouseProblem: probVal,
-931 |                         systemPrompt: roleVal === "self"
-932 |                           ? "You are the user themselves, experiencing this problem from the inside."
-933 |                           : `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
-934 |                         objective: roleVal === "self"
-935 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
-936 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
-937 |                       });
-938 |                     }}
-939 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[100px] resize-none leading-relaxed"
-940 |                   />
-941 |                 </div>
-942 |               </>
-943 |             ) : (
-944 |               <>
-945 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label><input type="text" value={activeNodeDetail.data.name} onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none" /></div>
-946 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label><textarea value={activeNodeDetail.data.systemPrompt} onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed" /></div>
-947 |               </>
-948 |             )}
-949 |           </div>
-950 |         </div>
-951 |       )}
-952 | 
-953 |       <AnimatePresence>
-954 |         {isSecretOpen && <APIKeysModal isOpen={isSecretOpen} onClose={() => setIsSecretOpen(false)} />}
-955 |         
-956 |         {pendingApproval && (
-957 |           <div className="fixed bottom-6 right-6 w-96 bg-[#0d0d0d] border border-amber-500/50 shadow-[0_0_50px_rgba(245,158,11,0.15)] rounded-2xl p-5 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300 select-none">
-958 |             <div className="flex gap-4 items-start">
-959 |               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 shrink-0"><Sliders className="w-5 h-5 animate-pulse" /></div>
-960 |               <div className="flex-1 space-y-2">
-961 |                 <h4 className="text-xs font-bold text-white">&apos;{(nodes.find(n => n.id === pendingApproval.nodeId)?.data as any)?.name}&apos; wants to use <span className="text-amber-400 font-mono">[{pendingApproval.toolName}]</span></h4>
-962 |                 <p className="text-[10px] text-neutral-400 leading-normal">Action: <span className="text-white font-semibold">{pendingApproval.action}</span> — {pendingApproval.detail}</p>
-963 |                 <div className="pt-3 flex gap-2">
-964 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "approve", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Approve</button>
-965 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "deny", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="px-4 py-2 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Deny</button>
-966 |                 </div>
-967 |               </div>
-968 |             </div>
-969 |           </div>
-970 |         )}
-971 |       </AnimatePresence>
-972 |     </div>
-973 |   );
-974 | }
-975 |
+635 |                             if (executionMode === "auto") {
+636 |                               await fetchEchoCast(echoSituation, echoFocus);
+637 |                             } else {
+638 |                               setEchoCast([]);
+639 |                             }
+640 |                           }
+641 |                         }}
+642 |                         disabled={!echoFocus.trim()}
+643 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
+644 |                       >
+645 |                         {isLoadingCast ? "Inferring cast..." : "Next"}
+646 |                       </button>
+647 |                     </div>
+648 |                   </div>
+649 |                 )}
+650 | 
+651 |                 {/* Step 3 — Cast Review */}
+652 |                 {echoStep === 3 && (
+653 |                   <div className="space-y-4">
+654 |                     <div className="space-y-1">
+655 |                       <h1 className="text-2xl font-bold text-white tracking-tight">Review the cast.</h1>
+656 |                       <p className="text-xs text-neutral-500 font-sans">These are the people who will participate in the simulation. Edit, remove, or add as needed.</p>
+657 |                     </div>
+658 |                     {isLoadingCast ? (
+659 |                       <div className="flex items-center justify-center py-12">
+660 |                         <div className="w-5 h-5 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
+661 |                         <span className="text-xs text-neutral-500 ml-3 font-mono">Inferring cast...</span>
+662 |                       </div>
+663 |                     ) : (executionMode === "custom" && echoCast.length === 0) ? (
+664 |                       <p>You are in Custom mode. Add people directly on the canvas after starting the simulation.</p>
+665 |                     ) : (
+666 |                       <div className="space-y-2">
+667 |                         {echoCast.map((member, idx) => (
+668 |                           <div key={idx} className="bg-neutral-950 border border-[#1f1f1f] rounded-xl p-3 space-y-2">
+669 |                             {editingCastIdx === idx ? (
+670 |                               <div className="space-y-2">
+671 |                                 <input
+672 |                                   type="text"
+673 |                                   value={member.inferred_name}
+674 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_name: e.target.value } : m))}
+675 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
+676 |                                   placeholder="Name"
+677 |                                 />
+678 |                                 <input
+679 |                                   type="text"
+680 |                                   value={member.role}
+681 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, role: e.target.value } : m))}
+682 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
+683 |                                   placeholder="Role"
+684 |                                 />
+685 |                                 <textarea
+686 |                                   value={member.inferred_problem}
+687 |                                   rows={2}
+688 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_problem: e.target.value } : m))}
+689 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2.5 text-xs text-white outline-none focus:border-neutral-500 resize-none"
+690 |                                   placeholder="Their perspective..."
+691 |                                 />
+692 |                                 <button onClick={() => setEditingCastIdx(null)} className="text-[10px] font-mono text-neutral-400 hover:text-white cursor-pointer">Done</button>
+693 |                               </div>
+694 |                             ) : (
+695 |                               <div className="flex items-start justify-between gap-2">
+696 |                                 <div className="min-w-0 flex-1">
+697 |                                   <div className="flex items-center gap-2">
+698 |                                     <span className="text-xs font-semibold text-white">{member.inferred_name}</span>
+699 |                                     <span className="text-[9px] font-mono text-neutral-500 uppercase tracking-wider">{member.role}</span>
+700 |                                   </div>
+701 |                                   <p className="text-[11px] text-neutral-500 leading-relaxed mt-0.5 line-clamp-2">{member.inferred_problem}</p>
+702 |                                 </div>
+703 |                                 {!member.is_self && (
+704 |                                   <div className="flex gap-1 shrink-0">
+705 |                                     <button onClick={() => setEditingCastIdx(idx)} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><Pencil className="w-3 h-3" /></button>
+706 |                                     <button onClick={() => setEchoCast(prev => prev.filter((_, i) => i !== idx))} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><X className="w-3 h-3" /></button>
+707 |                                   </div>
+708 |                                 )}
+709 |                               </div>
+710 |                             )}
+711 |                           </div>
+712 |                         ))}
+713 |                         <button
+714 |                           onClick={() => setEchoCast(prev => [...prev, { inferred_name: "New Person", role: "acquaintance", inferred_problem: "Enter their perspective...", emotional_core: "", is_self: false }])}
+715 |                           className="w-full py-2.5 border border-dashed border-[#1f1f1f] rounded-xl text-xs text-neutral-500 hover:text-white hover:border-neutral-600 transition-all cursor-pointer"
+716 |                         >
+717 |                           Add Person
+718 |                         </button>
+719 |                       </div>
+720 |                     )}
+721 |                     <div className="flex gap-2">
+722 |                       <button onClick={() => setEchoStep(2)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
+723 |                       <button
+724 |                         onClick={beginEchoHouseSimulation}
+725 |                         disabled={isLoadingCast || (executionMode !== "custom" && echoCast.filter(m => !m.is_self).length === 0)}
+726 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
+727 |                       >
+728 |                         Begin Simulation
+729 |                       </button>
+730 |                     </div>
+731 |                   </div>
+732 |                 )}
+733 |               </div>
+734 |             </div>
+735 |           )}
+736 | 
+737 |           {workspaceState === "active" && (
+738 |             <div className="absolute inset-0 flex">
+739 |               {currentTab === "chat" && (
+740 |                 <div className="flex-1 flex flex-col justify-between overflow-hidden bg-black">
+741 |                   <div ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
+742 |                     {isLoadingSession ? (
+743 |                       <div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" /></div>
+744 |                     ) : (
+745 |                       <div className="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto space-y-4 select-text">
+746 |                         {chatMessages.length === 0 ? (
+747 |                           <div className="flex flex-col items-center justify-center py-20 text-center space-y-2 select-none">
+748 |                             <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">
+749 |                               {isEchoHouseMode ? "What is your problem in life?" : "What's on your mind?"}
+750 |                             </h1>
+751 |                             <p className="text-sm text-neutral-400 font-sans">
+752 |                               {isEchoHouseMode ? "Type your struggle below to initialize the simulation." : "Start a conversation to see AI response."}
+753 |                             </p>
+754 |                           </div>
+755 |                         ) : (
+756 |                           chatMessages.map((msg, msgIdx) => (
+757 |                             <motion.div key={msg.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={`flex w-full ${msg.sender === "divider" ? "justify-center" : msg.sender === "user" ? "justify-end" : "justify-start"}`}>
+758 |                               {msg.sender === "divider" ? (
+759 |                                 <div className="w-full flex items-center gap-4 my-4 select-none">
+760 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
+761 |                                   <span className="text-[10px] font-mono text-neutral-500 tracking-wider uppercase">{msg.text}</span>
+762 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
+763 |                                 </div>
+764 |                               ) : msg.sender === "user" ? (
+765 |                                 <div className="flex flex-col items-end space-y-1 max-w-[72%] group">
+766 |                                   {msg.speakerName && (
+767 |                                     <span className="text-[10px] font-mono text-neutral-500 mr-2">{msg.speakerName}</span>
+768 |                                   )}
+769 |                                   <div className={`rounded-3xl px-5 py-3 text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'bg-neutral-800' : 'bg-[#2f2f2f]'}`}><p className="whitespace-pre-wrap">{msg.text}</p></div>
+770 |                                   <div className="flex items-center gap-3 mt-1.5 text-neutral-500 select-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 mr-2">
+771 |                                     <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
+772 |                                       {copiedMsgId === msg.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+773 |                                       <span>{copiedMsgId === msg.id ? "Copied" : "Copy"}</span>
+774 |                                     </button>
+775 |                                     <button onClick={() => { setUserQuery(msg.text); textareaRef.current?.focus(); textareaRef.current?.scrollIntoView({ behavior: "smooth" }); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
+776 |                                       <Pencil className="w-3 h-3" />
+777 |                                       <span>Edit</span>
+778 |                                     </button>
+779 |                                   </div>
+780 |                                 </div>
+781 |                               ) : (
+782 |                                 <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
+783 |                                   {msg.speakerName && msg.speakerName !== "insight" && msg.speakerName !== "takeaways" && (
+784 |                                     <span className="text-[10px] font-mono text-neutral-500 ml-1">{msg.speakerName}</span>
+785 |                                   )}
+786 |                                   {msg.speakerName === "takeaways" && msg.takeaways ? (
+787 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 space-y-3 mt-2">
+788 |                                       <span className="text-[10px] font-mono text-neutral-400 uppercase tracking-wider font-bold block">What you can try</span>
+789 |                                       <ol className="space-y-2">
+790 |                                         {msg.takeaways.map((item, ti) => (
+791 |                                           <li key={ti} className="flex gap-2.5 text-xs text-neutral-300 leading-relaxed">
+792 |                                             <span className="font-mono text-neutral-600 shrink-0">{ti + 1}.</span>
+793 |                                             <span>{item}</span>
+794 |                                           </li>
+795 |                                         ))}
+796 |                                       </ol>
+797 |                                     </div>
+798 |                                   ) : msg.speakerName === "insight" ? (
+799 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+800 |                                       {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
+801 |                                     </div>
+802 |                                   ) : (
+803 |                                     <div className={`w-full text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'rounded-2xl px-4 py-3 bg-neutral-900' : 'px-1 py-2'}`}>
+804 |                                       {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
+805 |                                       {msg.text && (!isOrchestrating || msgIdx !== chatMessages.length - 1) && (
+806 |                                         <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
+807 |                                           <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
+808 |                                             {copiedMsgId === msg.id ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400 font-medium">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
+809 |                                           </button>
+810 |                                           {!isEchoHouseMode && msgIdx === chatMessages.length - 1 && !isOrchestrating && (
+811 |                                             <button onClick={handleRegenerate} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
+812 |                                               <RefreshCw className="w-3.5 h-3.5" />
+813 |                                               <span>Regenerate</span>
+814 |                                             </button>
+815 |                                           )}
+816 |                                         </div>
+817 |                                       )}
+818 |                                     </div>
+819 |                                   )}
+820 |                                   {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && nodes.length > 0 && (
+821 |                                     <div className="flex gap-3 mt-4 select-none">
+822 |                                       <button onClick={() => setCurrentTab("arena")} className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max">
+823 |                                         <GitFork className="w-3.5 h-3.5 text-cyan-400" /><span>See Agent Flow</span>
+824 |                                       </button>
+825 |                                       {!isEchoHouseMode && useWorkflowStore.getState().executionState === "paused" && (
+826 |                                         <button
+827 |                                           onClick={async () => {
+828 |                                             setExecutionState("running");
+829 |                                             await useWorkflowStore.getState().triggerCustomExecution();
+830 |                                           }}
+831 |                                           className="px-4 py-2 bg-white hover:bg-neutral-200 rounded-xl text-xs font-bold text-black transition-all flex items-center gap-1.5 cursor-pointer max-w-max"
+832 |                                         >
+833 |                                           Proceed
+834 |                                         </button>
+835 |                                       )}
+836 |                                     </div>
+837 |                                   )}
+838 |                                 </div>
+839 |                               )}
+840 |                             </motion.div>
+841 |                           ))
+842 |                         )}
+843 |                         <div ref={chatEndRef} />
+844 |                       </div>
+845 |                     )}
+846 |                   </div>
+847 |                   <div className="px-4 sm:px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
+848 |                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
+849 |                       <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
+850 |                       <textarea ref={textareaRef} rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery); } }} placeholder={isOrchestrating ? "Streaming..." : isEchoHouseMode ? "What is your problem in life?" : "Ask a follow-up..."} disabled={isOrchestrating} className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar" />
+851 |                       <div className="flex items-center gap-2 shrink-0">
+852 |                         <ModeSelector />
+853 |                         {isOrchestrating ? (
+854 |                           <button onClick={cancelOrchestration} className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all cursor-pointer"><Square className="w-3.5 h-3.5 text-white fill-white" /></button>
+855 |                         ) : (
+856 |                           <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim() || isThinking} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
+857 |                         )}
+858 |                       </div>
+859 |                     </div>
+860 |                   </div>
+861 |                 </div>
+862 |               )}
+863 |               {currentTab === "arena" && (
+864 |                 <div className="flex-1 relative overflow-hidden bg-[#000000] flex">
+865 |                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#0d0d0d]/90 border border-[#1f1f1f] rounded-full px-4 py-2 backdrop-blur-md shadow-xl pointer-events-auto">
+866 |                     <button onClick={() => setCurrentTab("chat")} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-mono"><ChevronLeft className="w-3.5 h-3.5" /> Back to Chat</button>
+867 |                   </div>
+868 |                   <FlowArena onProceed={() => setCurrentTab("chat")} />
+869 |                 </div>
+870 |               )}
+871 |             </div>
+872 |           )}
+873 |         </div>
+874 |       </main>
+875 | 
+876 |       {currentTab === "arena" && isConfigPanelOpen && activeNodeDetail && (
+877 |         <div className="fixed top-0 right-0 h-full w-80 bg-[#0c0c0c]/95 border-l border-[#1f1f1f] z-40 flex flex-col justify-between shadow-2xl transition-transform duration-300 right-panel select-none">
+878 |           <div className="p-5 border-b border-[#1f1f1f] flex justify-between items-center bg-[#0d0d0d]">
+879 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider">{activeNodeDetail.data.name}</h3>
+880 |             <button onClick={() => { setIsConfigPanelOpen(false); setSelectedNodeId(null); }} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
+881 |           </div>
+882 |           <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
+883 |             {activeNodeDetail.data.isEchoHouseAgent ? (
+884 |               <>
+885 |                 <div className="space-y-1.5">
+886 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label>
+887 |                   <input
+888 |                     type="text"
+889 |                     value={activeNodeDetail.data.name}
+890 |                     onChange={(e) => {
+891 |                       const nameVal = e.target.value;
+892 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
+893 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
+894 |                       updateNodeField(activeNodeDetail.id, {
+895 |                         name: nameVal,
+896 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+897 |                         objective: nameVal === "You (Self)" || roleVal === "self"
+898 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
+899 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
+900 |                       });
+901 |                     }}
+902 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
+903 |                   />
+904 |                 </div>
+905 |                 <div className="space-y-1.5">
+906 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Role</label>
+907 |                   <input
+908 |                     type="text"
+909 |                     value={activeNodeDetail.data.echohouseRole}
+910 |                     disabled={activeNodeDetail.data.echohouseRole === "self"}
+911 |                     onChange={(e) => {
+912 |                       const nameVal = activeNodeDetail.data.name || "";
+913 |                       const roleVal = e.target.value;
+914 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
+915 |                       updateNodeField(activeNodeDetail.id, {
+916 |                         echohouseRole: roleVal,
+917 |                         tag: roleVal.toUpperCase().replace(/\s+/g, '_'),
+918 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+919 |                         objective: `Provide perspective as ${nameVal} (${roleVal}).`
+920 |                       });
+921 |                     }}
+922 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none disabled:opacity-40"
+923 |                   />
+924 |                 </div>
+925 |                 <div className="space-y-1.5">
+926 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">
+927 |                     {activeNodeDetail.data.echohouseRole === "self" ? "Your problem in life" : "What do they think about your situation?"}
+928 |                   </label>
+929 |                   <textarea
+930 |                     value={activeNodeDetail.data.echohouseProblem}
+931 |                     onChange={(e) => {
+932 |                       const nameVal = activeNodeDetail.data.name || "";
+933 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
+934 |                       const probVal = e.target.value;
+935 |                       updateNodeField(activeNodeDetail.id, {
+936 |                         echohouseProblem: probVal,
+937 |                         systemPrompt: roleVal === "self"
+938 |                           ? "You are the user themselves, experiencing this problem from the inside."
+939 |                           : `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+940 |                         objective: roleVal === "self"
+941 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
+942 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
+943 |                       });
+944 |                     }}
+945 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[100px] resize-none leading-relaxed"
+946 |                   />
+947 |                 </div>
+948 |               </>
+949 |             ) : (
+950 |               <>
+951 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label><input type="text" value={activeNodeDetail.data.name} onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none" /></div>
+952 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label><textarea value={activeNodeDetail.data.systemPrompt} onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed" /></div>
+953 |               </>
+954 |             )}
+955 |           </div>
+956 |         </div>
+957 |       )}
+958 | 
+959 |       <AnimatePresence>
+960 |         {isSecretOpen && <APIKeysModal isOpen={isSecretOpen} onClose={() => setIsSecretOpen(false)} />}
+961 |         
+962 |         {pendingApproval && (
+963 |           <div className="fixed bottom-6 right-6 w-96 bg-[#0d0d0d] border border-amber-500/50 shadow-[0_0_50px_rgba(245,158,11,0.15)] rounded-2xl p-5 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300 select-none">
+964 |             <div className="flex gap-4 items-start">
+965 |               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 shrink-0"><Sliders className="w-5 h-5 animate-pulse" /></div>
+966 |               <div className="flex-1 space-y-2">
+967 |                 <h4 className="text-xs font-bold text-white">&apos;{(nodes.find(n => n.id === pendingApproval.nodeId)?.data as any)?.name}&apos; wants to use <span className="text-amber-400 font-mono">[{pendingApproval.toolName}]</span></h4>
+968 |                 <p className="text-[10px] text-neutral-400 leading-normal">Action: <span className="text-white font-semibold">{pendingApproval.action}</span> — {pendingApproval.detail}</p>
+969 |                 <div className="pt-3 flex gap-2">
+970 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "approve", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Approve</button>
+971 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "deny", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="px-4 py-2 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Deny</button>
+972 |                 </div>
+973 |               </div>
+974 |             </div>
+975 |           </div>
+976 |         )}
+977 |       </AnimatePresence>
+978 |     </div>
+979 |   );
+980 | }
+981 |
 ```
 
 ### File: `Frontend/components/edges/CustomEdge.tsx`
@@ -7264,7 +7380,7 @@ SoloSpace/
 
 ### File: `Frontend/components/APIKeysModal.tsx`
 
-> 763 lines | 33.7 KB
+> 775 lines | 34.1 KB
 
 ```tsx
   1 | 'use client';
@@ -7370,666 +7486,678 @@ SoloSpace/
 101 |       { id: "phi3", name: "Phi 3", tier: "open" }
 102 |     ]
 103 |   },
-104 |   alibaba: {
-105 |     name: "Alibaba Cloud (Qwen)",
-106 |     description: "Qwen model family via DashScope OpenAI-compatible endpoint",
-107 |     key_url: "https://www.alibabacloud.com/help/en/model-studio/developer-reference/api-key",
-108 |     key_hint: "sk-...",
-109 |     default_model: "qwen-turbo",
+104 |   ollama_cloud: {
+105 |     name: "Ollama Cloud",
+106 |     description: "Hosted Ollama Cloud models via https://ollama.com",
+107 |     key_url: "https://ollama.com",
+108 |     key_hint: "Ollama API Key",
+109 |     default_model: "llama3",
 110 |     models: [
-111 |       { id: "qwen-turbo", name: "Qwen Turbo", tier: "fast" },
-112 |       { id: "qwen-plus", name: "Qwen Plus", tier: "advanced" },
-113 |       { id: "qwen-max", name: "Qwen Max", tier: "advanced" },
-114 |       { id: "qwen-long", name: "Qwen Long", tier: "advanced" },
-115 |       { id: "qwen2.5-72b-instruct", name: "Qwen 2.5 72B Instruct", tier: "advanced" },
-116 |       { id: "qwen2.5-14b-instruct", name: "Qwen 2.5 14B Instruct", tier: "fast" }
-117 |     ]
-118 |   },
-119 |   nvidia: {
-120 |     name: "NVIDIA NIM",
-121 |     description: "NVIDIA NIM inference microservices — optimized open models",
-122 |     key_url: "https://build.nvidia.com",
-123 |     key_hint: "nvapi-...",
-124 |     default_model: "meta/llama-3.1-70b-instruct",
-125 |     models: [
-126 |       { id: "meta/llama-3.1-70b-instruct", name: "Llama 3.1 70B Instruct", tier: "advanced" },
-127 |       { id: "meta/llama-3.1-8b-instruct", name: "Llama 3.1 8B Instruct", tier: "fast" },
-128 |       { id: "mistralai/mixtral-8x7b-instruct-v0.1", name: "Mixtral 8x7B Instruct", tier: "fast" },
-129 |       { id: "microsoft/phi-3-mini-128k-instruct", name: "Phi-3 Mini 128K", tier: "fast" },
-130 |       { id: "google/gemma-2-9b-it", name: "Gemma 2 9B IT", tier: "fast" },
-131 |       { id: "nvidia/llama3-chatqa-1.5-70b", name: "ChatQA 1.5 70B", tier: "advanced" }
-132 |     ]
-133 |   },
-134 |   glm: {
-135 |     name: "Zhipu GLM",
-136 |     description: "GLM models from Zhipu AI (via z.ai)",
-137 |     key_url: "https://api.z.ai/",
-138 |     key_hint: "",
-139 |     default_model: "glm-4-flash",
-140 |     models: [
-141 |       { id: "glm-4-flash", name: "GLM 4 Flash", tier: "fast" },
-142 |       { id: "glm-4-plus", name: "GLM 4 Plus", tier: "advanced" },
-143 |       { id: "glm-4-air", name: "GLM 4 Air", tier: "fast" },
-144 |       { id: "glm-4", name: "GLM 4", tier: "advanced" }
-145 |     ]
-146 |   },
-147 |   "z.ai": {
-148 |     name: "z.ai",
-149 |     description: "GLM models from z.ai",
-150 |     key_url: "https://api.z.ai/",
-151 |     key_hint: "",
-152 |     default_model: "glm-4-flash",
-153 |     models: [
-154 |       { id: "glm-4-flash", name: "GLM 4 Flash", tier: "fast" },
-155 |       { id: "glm-4-plus", name: "GLM 4 Plus", tier: "advanced" },
-156 |       { id: "glm-4-air", name: "GLM 4 Air", tier: "fast" },
-157 |       { id: "glm-4", name: "GLM 4", tier: "advanced" }
-158 |     ]
-159 |   }
-160 | };
-161 | 
-162 | export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
-163 |   const apiKeys = useWorkflowStore((s) => s.apiKeys);
-164 |   const setProviderApiKey = useWorkflowStore((s) => s.setProviderApiKey);
-165 |   const backupApiKeys = useWorkflowStore((s) => s.backupApiKeys);
-166 |   const setBackupApiKey = useWorkflowStore((s) => s.setBackupApiKey);
-167 |   const activeProvider = useWorkflowStore((s) => s.provider);
-168 |   const setProvider = useWorkflowStore((s) => s.setProvider);
-169 |   const activeModel = useWorkflowStore((s) => s.model);
-170 |   const setModel = useWorkflowStore((s) => s.setModel);
-171 |   const availableProvidersFromStore = useWorkflowStore((s) => s.availableProviders);
-172 |   const providerBaseUrls = useWorkflowStore((s) => s.providerBaseUrls);
-173 |   const setProviderBaseUrl = useWorkflowStore((s) => s.setProviderBaseUrl);
-174 |   const providerModels = useWorkflowStore((s) => s.providerModels);
-175 |   const fetchProviderModels = useWorkflowStore((s) => s.fetchProviderModels);
-176 |   const fallbackProvider = useWorkflowStore((s) => s.fallbackProvider);
-177 |   const setFallbackProvider = useWorkflowStore((s) => s.setFallbackProvider);
-178 | 
-179 |   // Local Form State
-180 |   const [selectedProvider, setSelectedProvider] = useState<string>("gemini");
-181 |   const [selectedModel, setSelectedModel] = useState<string>("");
-182 |   const [isCustomModelInput, setIsCustomModelInput] = useState<boolean>(false);
-183 |   const [customModelText, setCustomModelText] = useState<string>("");
-184 |   const [apiKeyInput, setApiKeyInput] = useState<string>("");
-185 |   const [backupKey1Input, setBackupKey1Input] = useState<string>("");
-186 |   const [backupKey2Input, setBackupKey2Input] = useState<string>("");
-187 |   const [showBackupKey1, setShowBackupKey1] = useState<boolean>(false);
-188 |   const [showBackupKey2, setShowBackupKey2] = useState<boolean>(false);
-189 |   const [showBackupExpander, setShowBackupExpander] = useState<boolean>(false);
-190 |   const [showSecondBackup, setShowSecondBackup] = useState<boolean>(false);
-191 |   const [baseUrlInput, setUrlInput] = useState<string>("");
-192 |   const [fallbackProv, setFallbackProv] = useState<string>("");
-193 |   const [showKey, setShowKey] = useState<boolean>(false);
-194 |   
-195 |   // Ollama status check state
-196 |   const [ollamaStatus, setOllamaStatus] = useState<'checking' | 'available' | 'unavailable'>('checking');
-197 |   
-198 |   // Connection Testing State
-199 |   const [isTesting, setIsTesting] = useState<boolean>(false);
-200 |   const [testResult, setTestResult] = useState<{ status: 'idle' | 'success' | 'error'; message: string }>({ status: 'idle', message: '' });
-201 | 
-202 |   // Load backend providers config or fallback
-203 |   const providersConfig: Record<string, any> = Object.keys(availableProvidersFromStore || {}).length > 0 
-204 |     ? availableProvidersFromStore 
-205 |     : FALLBACK_PROVIDERS;
-206 | 
-207 |   const checkOllama = async () => {
-208 |     setOllamaStatus('checking');
-209 |     try {
-210 |       const resp = await fetch("/api/gemini/ollama");
-211 |       if (resp.ok) {
-212 |         const data = await resp.json();
-213 |         if (data.ollama_available || (Array.isArray(data.models) && data.models.length > 0)) {
-214 |           setOllamaStatus('available');
-215 |         } else {
-216 |           setOllamaStatus('unavailable');
-217 |         }
-218 |       } else {
-219 |         setOllamaStatus('unavailable');
-220 |       }
-221 |     } catch (e) {
-222 |       setOllamaStatus('unavailable');
-223 |     }
-224 |   };
-225 | 
-226 |   // Initialize fields when modal opens
-227 |   useEffect(() => {
-228 |     if (isOpen) {
-229 |       const currentProv = activeProvider || "gemini";
-230 |       setSelectedProvider(currentProv);
-231 |       setSelectedModel(activeModel || "");
-232 |       setFallbackProv(fallbackProvider || "");
-233 |       setApiKeyInput(apiKeys[currentProv] || "");
-234 |       
-235 |       const backupKeys = backupApiKeys[currentProv] || [];
-236 |       setBackupKey1Input(backupKeys[0] || "");
-237 |       setBackupKey2Input(backupKeys[1] || "");
-238 |       setShowBackupExpander(!!(backupKeys[0] || backupKeys[1]));
-239 |       setShowSecondBackup(!!backupKeys[1]);
-240 | 
-241 |       const defaultUrl = currentProv === 'ollama' ? "http://localhost:11434/v1" : "";
-242 |       setUrlInput(providerBaseUrls[currentProv] || defaultUrl);
-243 |       setShowKey(false);
-244 |       setTestResult({ status: 'idle', message: '' });
-245 | 
-246 |       const provConfig = providersConfig[currentProv] || {};
-247 |       const modelsList = providerModels[currentProv] || provConfig.models || [];
-248 |       const isPredefined = modelsList.some((m: any) => m.id === activeModel);
-249 |       if (!isPredefined && activeModel) {
-250 |         setIsCustomModelInput(true);
-251 |         setCustomModelText(activeModel);
-252 |       } else {
-253 |         setIsCustomModelInput(false);
-254 |         setCustomModelText("");
-255 |       }
-256 | 
-257 |       fetchProviderModels(currentProv).catch(() => {});
-258 |       if (currentProv === 'ollama') {
-259 |         checkOllama();
-260 |       }
-261 |     }
-262 |   }, [isOpen]);
-263 | 
-264 |   // Sync inputs when selected provider changes
-265 |   const handleProviderChange = (newProvider: string) => {
-266 |     setSelectedProvider(newProvider);
-267 |     setApiKeyInput(apiKeys[newProvider] || "");
-268 |     
-269 |     const backupKeys = backupApiKeys[newProvider] || [];
-270 |     setBackupKey1Input(backupKeys[0] || "");
-271 |     setBackupKey2Input(backupKeys[1] || "");
-272 |     setShowBackupExpander(!!(backupKeys[0] || backupKeys[1]));
-273 |     setShowSecondBackup(!!backupKeys[1]);
-274 |     
-275 |     const defaultUrl = newProvider === 'ollama' ? "http://localhost:11434/v1" : "";
-276 |     setUrlInput(providerBaseUrls[newProvider] || defaultUrl);
-277 |     setTestResult({ status: 'idle', message: '' });
-278 | 
-279 |     // Pick default model or first model for this new provider
-280 |     const provConfig = providersConfig[newProvider] || {};
-281 |     const modelsList = providerModels[newProvider] || provConfig.models || [];
-282 |     const defaultMod = modelsList.length > 0 ? modelsList[0].id : (provConfig.default_model || "");
-283 |     setSelectedModel(defaultMod);
-284 |     setIsCustomModelInput(modelsList.length === 0 && newProvider !== 'ollama');
-285 |     setCustomModelText("");
-286 | 
-287 |     // Fetch latest models list in the background
-288 |     fetchProviderModels(newProvider).catch(() => {});
-289 |     if (newProvider === 'ollama') {
-290 |       checkOllama();
-291 |     }
-292 |   };
-293 | 
-294 |   const handleTestConnection = async () => {
-295 |     setIsTesting(true);
-296 |     setTestResult({ status: 'idle', message: '' });
-297 | 
-298 |     try {
-299 |       const response = await fetch("/api/gemini/test_agent", {
-300 |         method: "POST",
-301 |         headers: { "Content-Type": "application/json" },
-302 |         body: JSON.stringify({
-303 |           node: {
-304 |             id: "test",
-305 |             data: {
-306 |               name: "Test Connection Agent",
-307 |               systemPrompt: "You are a friendly connection validation utility. Keep answers brief.",
-308 |               model: selectedModel
-309 |             }
-310 |           },
-311 |           provider: selectedProvider,
-312 |           api_key: apiKeyInput.trim(),
-313 |           api_keys: { ...apiKeys, [selectedProvider]: apiKeyInput.trim() },
-314 |           base_url: baseUrlInput.trim() || undefined
-315 |         })
-316 |       });
-317 | 
-318 |       const data = await response.json();
-319 |       if (response.ok && data.status === "success") {
-320 |         setTestResult({
-321 |           status: 'success',
-322 |           message: `Connection successful! Output: "${data.response?.substring(0, 50) || 'Success'}"`
-323 |         });
-324 |       } else {
-325 |         setTestResult({
-326 |           status: 'error',
-327 |           message: data.detail || data.error || "Connection failed. Please check credentials and endpoint."
-328 |         });
-329 |       }
-330 |     } catch (e: any) {
-331 |       setTestResult({
-332 |         status: 'error',
-333 |         message: e.message || "Failed to reach the API server. Ensure your backend is running."
-334 |       });
-335 |     } finally {
-336 |       setIsTesting(false);
-337 |     }
-338 |   };
-339 | 
-340 |   const handleSaveSettings = async () => {
-341 |     // Save to Zustand store & IndexedDB
-342 |     await setProviderApiKey(selectedProvider, apiKeyInput.trim());
-343 |     await setBackupApiKey(selectedProvider, 0, backupKey1Input.trim());
-344 |     await setBackupApiKey(selectedProvider, 1, backupKey2Input.trim());
-345 |     setProviderBaseUrl(selectedProvider, baseUrlInput.trim());
-346 |     await setProvider(selectedProvider);
-347 |     await setModel(selectedModel);
-348 |     setFallbackProvider(fallbackProv);
-349 | 
-350 |     // Save custom model custom string if user selected custom
-351 |     if (isCustomModelInput && customModelText.trim()) {
-352 |       await idbSet(`solospace_custom_model_${selectedProvider}`, customModelText.trim());
-353 |     } else {
-354 |       await idbDel(`solospace_custom_model_${selectedProvider}`);
-355 |     }
-356 | 
-357 |     onClose();
-358 |   };
-359 | 
-360 |   if (!isOpen) return null;
+111 |       { id: "llama3", name: "Llama 3", tier: "cloud" },
+112 |       { id: "mistral", name: "Mistral", tier: "cloud" },
+113 |       { id: "phi3", name: "Phi 3", tier: "cloud" }
+114 |     ]
+115 |   },
+116 |   alibaba: {
+117 |     name: "Alibaba Cloud (Qwen)",
+118 |     description: "Qwen model family via DashScope OpenAI-compatible endpoint",
+119 |     key_url: "https://www.alibabacloud.com/help/en/model-studio/developer-reference/api-key",
+120 |     key_hint: "sk-...",
+121 |     default_model: "qwen-turbo",
+122 |     models: [
+123 |       { id: "qwen-turbo", name: "Qwen Turbo", tier: "fast" },
+124 |       { id: "qwen-plus", name: "Qwen Plus", tier: "advanced" },
+125 |       { id: "qwen-max", name: "Qwen Max", tier: "advanced" },
+126 |       { id: "qwen-long", name: "Qwen Long", tier: "advanced" },
+127 |       { id: "qwen2.5-72b-instruct", name: "Qwen 2.5 72B Instruct", tier: "advanced" },
+128 |       { id: "qwen2.5-14b-instruct", name: "Qwen 2.5 14B Instruct", tier: "fast" }
+129 |     ]
+130 |   },
+131 |   nvidia: {
+132 |     name: "NVIDIA NIM",
+133 |     description: "NVIDIA NIM inference microservices — optimized open models",
+134 |     key_url: "https://build.nvidia.com",
+135 |     key_hint: "nvapi-...",
+136 |     default_model: "meta/llama-3.1-70b-instruct",
+137 |     models: [
+138 |       { id: "meta/llama-3.1-70b-instruct", name: "Llama 3.1 70B Instruct", tier: "advanced" },
+139 |       { id: "meta/llama-3.1-8b-instruct", name: "Llama 3.1 8B Instruct", tier: "fast" },
+140 |       { id: "mistralai/mixtral-8x7b-instruct-v0.1", name: "Mixtral 8x7B Instruct", tier: "fast" },
+141 |       { id: "microsoft/phi-3-mini-128k-instruct", name: "Phi-3 Mini 128K", tier: "fast" },
+142 |       { id: "google/gemma-2-9b-it", name: "Gemma 2 9B IT", tier: "fast" },
+143 |       { id: "nvidia/llama3-chatqa-1.5-70b", name: "ChatQA 1.5 70B", tier: "advanced" }
+144 |     ]
+145 |   },
+146 |   glm: {
+147 |     name: "Zhipu GLM",
+148 |     description: "GLM models from Zhipu AI (via z.ai)",
+149 |     key_url: "https://api.z.ai/",
+150 |     key_hint: "",
+151 |     default_model: "glm-4-flash",
+152 |     models: [
+153 |       { id: "glm-4-flash", name: "GLM 4 Flash", tier: "fast" },
+154 |       { id: "glm-4-plus", name: "GLM 4 Plus", tier: "advanced" },
+155 |       { id: "glm-4-air", name: "GLM 4 Air", tier: "fast" },
+156 |       { id: "glm-4", name: "GLM 4", tier: "advanced" }
+157 |     ]
+158 |   },
+159 |   "z.ai": {
+160 |     name: "z.ai",
+161 |     description: "GLM models from z.ai",
+162 |     key_url: "https://api.z.ai/",
+163 |     key_hint: "",
+164 |     default_model: "glm-4-flash",
+165 |     models: [
+166 |       { id: "glm-4-flash", name: "GLM 4 Flash", tier: "fast" },
+167 |       { id: "glm-4-plus", name: "GLM 4 Plus", tier: "advanced" },
+168 |       { id: "glm-4-air", name: "GLM 4 Air", tier: "fast" },
+169 |       { id: "glm-4", name: "GLM 4", tier: "advanced" }
+170 |     ]
+171 |   }
+172 | };
+173 | 
+174 | export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
+175 |   const apiKeys = useWorkflowStore((s) => s.apiKeys);
+176 |   const setProviderApiKey = useWorkflowStore((s) => s.setProviderApiKey);
+177 |   const backupApiKeys = useWorkflowStore((s) => s.backupApiKeys);
+178 |   const setBackupApiKey = useWorkflowStore((s) => s.setBackupApiKey);
+179 |   const activeProvider = useWorkflowStore((s) => s.provider);
+180 |   const setProvider = useWorkflowStore((s) => s.setProvider);
+181 |   const activeModel = useWorkflowStore((s) => s.model);
+182 |   const setModel = useWorkflowStore((s) => s.setModel);
+183 |   const availableProvidersFromStore = useWorkflowStore((s) => s.availableProviders);
+184 |   const providerBaseUrls = useWorkflowStore((s) => s.providerBaseUrls);
+185 |   const setProviderBaseUrl = useWorkflowStore((s) => s.setProviderBaseUrl);
+186 |   const providerModels = useWorkflowStore((s) => s.providerModels);
+187 |   const fetchProviderModels = useWorkflowStore((s) => s.fetchProviderModels);
+188 |   const fallbackProvider = useWorkflowStore((s) => s.fallbackProvider);
+189 |   const setFallbackProvider = useWorkflowStore((s) => s.setFallbackProvider);
+190 | 
+191 |   // Local Form State
+192 |   const [selectedProvider, setSelectedProvider] = useState<string>("gemini");
+193 |   const [selectedModel, setSelectedModel] = useState<string>("");
+194 |   const [isCustomModelInput, setIsCustomModelInput] = useState<boolean>(false);
+195 |   const [customModelText, setCustomModelText] = useState<string>("");
+196 |   const [apiKeyInput, setApiKeyInput] = useState<string>("");
+197 |   const [backupKey1Input, setBackupKey1Input] = useState<string>("");
+198 |   const [backupKey2Input, setBackupKey2Input] = useState<string>("");
+199 |   const [showBackupKey1, setShowBackupKey1] = useState<boolean>(false);
+200 |   const [showBackupKey2, setShowBackupKey2] = useState<boolean>(false);
+201 |   const [showBackupExpander, setShowBackupExpander] = useState<boolean>(false);
+202 |   const [showSecondBackup, setShowSecondBackup] = useState<boolean>(false);
+203 |   const [baseUrlInput, setUrlInput] = useState<string>("");
+204 |   const [fallbackProv, setFallbackProv] = useState<string>("");
+205 |   const [showKey, setShowKey] = useState<boolean>(false);
+206 |   
+207 |   // Ollama status check state
+208 |   const [ollamaStatus, setOllamaStatus] = useState<'checking' | 'available' | 'unavailable'>('checking');
+209 |   
+210 |   // Connection Testing State
+211 |   const [isTesting, setIsTesting] = useState<boolean>(false);
+212 |   const [testResult, setTestResult] = useState<{ status: 'idle' | 'success' | 'error'; message: string }>({ status: 'idle', message: '' });
+213 | 
+214 |   // Load backend providers config or fallback
+215 |   const providersConfig: Record<string, any> = Object.keys(availableProvidersFromStore || {}).length > 0 
+216 |     ? availableProvidersFromStore 
+217 |     : FALLBACK_PROVIDERS;
+218 | 
+219 |   const checkOllama = async () => {
+220 |     setOllamaStatus('checking');
+221 |     try {
+222 |       const resp = await fetch("/api/gemini/ollama");
+223 |       if (resp.ok) {
+224 |         const data = await resp.json();
+225 |         if (data.ollama_available || (Array.isArray(data.models) && data.models.length > 0)) {
+226 |           setOllamaStatus('available');
+227 |         } else {
+228 |           setOllamaStatus('unavailable');
+229 |         }
+230 |       } else {
+231 |         setOllamaStatus('unavailable');
+232 |       }
+233 |     } catch (e) {
+234 |       setOllamaStatus('unavailable');
+235 |     }
+236 |   };
+237 | 
+238 |   // Initialize fields when modal opens
+239 |   useEffect(() => {
+240 |     if (isOpen) {
+241 |       const currentProv = activeProvider || "gemini";
+242 |       setSelectedProvider(currentProv);
+243 |       setSelectedModel(activeModel || "");
+244 |       setFallbackProv(fallbackProvider || "");
+245 |       setApiKeyInput(apiKeys[currentProv] || "");
+246 |       
+247 |       const backupKeys = backupApiKeys[currentProv] || [];
+248 |       setBackupKey1Input(backupKeys[0] || "");
+249 |       setBackupKey2Input(backupKeys[1] || "");
+250 |       setShowBackupExpander(!!(backupKeys[0] || backupKeys[1]));
+251 |       setShowSecondBackup(!!backupKeys[1]);
+252 | 
+253 |       const defaultUrl = currentProv === 'ollama' ? "http://localhost:11434/v1" : "";
+254 |       setUrlInput(providerBaseUrls[currentProv] || defaultUrl);
+255 |       setShowKey(false);
+256 |       setTestResult({ status: 'idle', message: '' });
+257 | 
+258 |       const provConfig = providersConfig[currentProv] || {};
+259 |       const modelsList = providerModels[currentProv] || provConfig.models || [];
+260 |       const isPredefined = modelsList.some((m: any) => m.id === activeModel);
+261 |       if (!isPredefined && activeModel) {
+262 |         setIsCustomModelInput(true);
+263 |         setCustomModelText(activeModel);
+264 |       } else {
+265 |         setIsCustomModelInput(false);
+266 |         setCustomModelText("");
+267 |       }
+268 | 
+269 |       fetchProviderModels(currentProv).catch(() => {});
+270 |       if (currentProv === 'ollama') {
+271 |         checkOllama();
+272 |       }
+273 |     }
+274 |   }, [isOpen]);
+275 | 
+276 |   // Sync inputs when selected provider changes
+277 |   const handleProviderChange = (newProvider: string) => {
+278 |     setSelectedProvider(newProvider);
+279 |     setApiKeyInput(apiKeys[newProvider] || "");
+280 |     
+281 |     const backupKeys = backupApiKeys[newProvider] || [];
+282 |     setBackupKey1Input(backupKeys[0] || "");
+283 |     setBackupKey2Input(backupKeys[1] || "");
+284 |     setShowBackupExpander(!!(backupKeys[0] || backupKeys[1]));
+285 |     setShowSecondBackup(!!backupKeys[1]);
+286 |     
+287 |     const defaultUrl = newProvider === 'ollama' ? "http://localhost:11434/v1" : "";
+288 |     setUrlInput(providerBaseUrls[newProvider] || defaultUrl);
+289 |     setTestResult({ status: 'idle', message: '' });
+290 | 
+291 |     // Pick default model or first model for this new provider
+292 |     const provConfig = providersConfig[newProvider] || {};
+293 |     const modelsList = providerModels[newProvider] || provConfig.models || [];
+294 |     const defaultMod = modelsList.length > 0 ? modelsList[0].id : (provConfig.default_model || "");
+295 |     setSelectedModel(defaultMod);
+296 |     setIsCustomModelInput(modelsList.length === 0 && newProvider !== 'ollama');
+297 |     setCustomModelText("");
+298 | 
+299 |     // Fetch latest models list in the background
+300 |     fetchProviderModels(newProvider).catch(() => {});
+301 |     if (newProvider === 'ollama') {
+302 |       checkOllama();
+303 |     }
+304 |   };
+305 | 
+306 |   const handleTestConnection = async () => {
+307 |     setIsTesting(true);
+308 |     setTestResult({ status: 'idle', message: '' });
+309 | 
+310 |     try {
+311 |       const response = await fetch("/api/gemini/test_agent", {
+312 |         method: "POST",
+313 |         headers: { "Content-Type": "application/json" },
+314 |         body: JSON.stringify({
+315 |           node: {
+316 |             id: "test",
+317 |             data: {
+318 |               name: "Test Connection Agent",
+319 |               systemPrompt: "You are a friendly connection validation utility. Keep answers brief.",
+320 |               model: selectedModel
+321 |             }
+322 |           },
+323 |           provider: selectedProvider,
+324 |           api_key: apiKeyInput.trim(),
+325 |           api_keys: { ...apiKeys, [selectedProvider]: apiKeyInput.trim() },
+326 |           base_url: baseUrlInput.trim() || undefined
+327 |         })
+328 |       });
+329 | 
+330 |       const data = await response.json();
+331 |       if (response.ok && data.status === "success") {
+332 |         setTestResult({
+333 |           status: 'success',
+334 |           message: `Connection successful! Output: "${data.response?.substring(0, 50) || 'Success'}"`
+335 |         });
+336 |       } else {
+337 |         setTestResult({
+338 |           status: 'error',
+339 |           message: data.detail || data.error || "Connection failed. Please check credentials and endpoint."
+340 |         });
+341 |       }
+342 |     } catch (e: any) {
+343 |       setTestResult({
+344 |         status: 'error',
+345 |         message: e.message || "Failed to reach the API server. Ensure your backend is running."
+346 |       });
+347 |     } finally {
+348 |       setIsTesting(false);
+349 |     }
+350 |   };
+351 | 
+352 |   const handleSaveSettings = async () => {
+353 |     // Save to Zustand store & IndexedDB
+354 |     await setProviderApiKey(selectedProvider, apiKeyInput.trim());
+355 |     await setBackupApiKey(selectedProvider, 0, backupKey1Input.trim());
+356 |     await setBackupApiKey(selectedProvider, 1, backupKey2Input.trim());
+357 |     setProviderBaseUrl(selectedProvider, baseUrlInput.trim());
+358 |     await setProvider(selectedProvider);
+359 |     await setModel(selectedModel);
+360 |     setFallbackProvider(fallbackProv);
 361 | 
-362 |   const currentProviderInfo = providersConfig[selectedProvider] || {};
-363 |   const modelsList = providerModels[selectedProvider] || currentProviderInfo.models || [];
-364 |   
-365 |   // Custom or local providers require base URL
-366 |   const isCustomOrLocal = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || selectedProvider === 'custom' || currentProviderInfo.is_custom || currentProviderInfo.is_local;
-367 |   const isLocalProvider = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || !!currentProviderInfo.is_local;
+362 |     // Save custom model custom string if user selected custom
+363 |     if (isCustomModelInput && customModelText.trim()) {
+364 |       await idbSet(`solospace_custom_model_${selectedProvider}`, customModelText.trim());
+365 |     } else {
+366 |       await idbDel(`solospace_custom_model_${selectedProvider}`);
+367 |     }
 368 | 
-369 |   return (
-370 |     <motion.div
-371 |       initial={{ opacity: 0 }}
-372 |       animate={{ opacity: 1 }}
-373 |       exit={{ opacity: 0 }}
-374 |       className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
-375 |     >
-376 |       <motion.div
-377 |         initial={{ scale: 0.95 }}
-378 |         animate={{ scale: 1 }}
-379 |         exit={{ scale: 0.95 }}
-380 |         className="w-full max-w-md bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl text-white overflow-y-auto max-h-[90vh] custom-scrollbar"
-381 |       >
-382 |         {/* Close Button */}
-383 |         <button onClick={onClose} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer transition-colors">
-384 |           <X className="w-5 h-5" />
-385 |         </button>
-386 | 
-387 |         {/* Header */}
-388 |         <div className="flex gap-4 items-center mb-6">
-389 |           <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
-390 |             <Key className="w-6 h-6 text-white" />
-391 |           </div>
-392 |           <div>
-393 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">AI Engine Settings</h3>
-394 |             <p className="text-xs text-neutral-400 font-sans mt-0.5">Configure your active AI provider, model routing, and keys.</p>
-395 |           </div>
-396 |         </div>
-397 | 
-398 |         <div className="space-y-4">
-399 |           {/* 1. Provider Selector */}
-400 |           <div className="space-y-1.5">
-401 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Provider</label>
-402 |             <select
-403 |               value={selectedProvider}
-404 |               onChange={(e) => handleProviderChange(e.target.value)}
-405 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
-406 |             >
-407 |               {Object.keys(providersConfig).map((pKey) => (
-408 |                 <option key={pKey} value={pKey}>
-409 |                   {providersConfig[pKey]?.name || pKey}
-410 |                 </option>
-411 |               ))}
-412 |             </select>
-413 |           </div>
-414 | 
-415 |           {/* 2. Model Selector */}
-416 |           <div className="space-y-1.5">
-417 |             <div className="flex justify-between items-center">
-418 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Model</label>
-419 |               {(modelsList.length > 0 || selectedProvider === 'ollama') && (
-420 |                 <button
-421 |                   type="button"
-422 |                   onClick={() => {
-423 |                     const willBeCustom = !isCustomModelInput;
-424 |                     setIsCustomModelInput(willBeCustom);
-425 |                     if (willBeCustom) {
-426 |                       setCustomModelText(selectedModel);
-427 |                     } else {
-428 |                       const defaultMod = modelsList[0]?.id || currentProviderInfo.default_model || "";
-429 |                       setSelectedModel(defaultMod);
-430 |                     }
-431 |                   }}
-432 |                   className="text-[9px] text-cyan-400 hover:underline font-mono cursor-pointer"
-433 |                 >
-434 |                   {isCustomModelInput ? "Select from list" : "Enter custom model ID"}
-435 |                 </button>
-436 |               )}
-437 |             </div>
-438 |             {isCustomModelInput || (modelsList.length === 0 && selectedProvider !== 'ollama') ? (
-439 |               <input
-440 |                 type="text"
-441 |                 placeholder="e.g. custom-fine-tune-v1, llama3"
-442 |                 value={isCustomModelInput ? customModelText : selectedModel}
-443 |                 onChange={(e) => {
-444 |                   const val = e.target.value;
-445 |                   if (isCustomModelInput) {
-446 |                     setCustomModelText(val);
-447 |                   }
-448 |                   setSelectedModel(val);
-449 |                 }}
-450 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-451 |               />
-452 |             ) : (
-453 |               <select
-454 |                 value={selectedModel}
+369 |     onClose();
+370 |   };
+371 | 
+372 |   if (!isOpen) return null;
+373 | 
+374 |   const currentProviderInfo = providersConfig[selectedProvider] || {};
+375 |   const modelsList = providerModels[selectedProvider] || currentProviderInfo.models || [];
+376 |   
+377 |   // Custom or local providers require base URL
+378 |   const isCustomOrLocal = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || selectedProvider === 'custom' || currentProviderInfo.is_custom || currentProviderInfo.is_local;
+379 |   const isLocalProvider = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || !!currentProviderInfo.is_local;
+380 | 
+381 |   return (
+382 |     <motion.div
+383 |       initial={{ opacity: 0 }}
+384 |       animate={{ opacity: 1 }}
+385 |       exit={{ opacity: 0 }}
+386 |       className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
+387 |     >
+388 |       <motion.div
+389 |         initial={{ scale: 0.95 }}
+390 |         animate={{ scale: 1 }}
+391 |         exit={{ scale: 0.95 }}
+392 |         className="w-full max-w-md bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl text-white overflow-y-auto max-h-[90vh] custom-scrollbar"
+393 |       >
+394 |         {/* Close Button */}
+395 |         <button onClick={onClose} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer transition-colors">
+396 |           <X className="w-5 h-5" />
+397 |         </button>
+398 | 
+399 |         {/* Header */}
+400 |         <div className="flex gap-4 items-center mb-6">
+401 |           <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
+402 |             <Key className="w-6 h-6 text-white" />
+403 |           </div>
+404 |           <div>
+405 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">AI Engine Settings</h3>
+406 |             <p className="text-xs text-neutral-400 font-sans mt-0.5">Configure your active AI provider, model routing, and keys.</p>
+407 |           </div>
+408 |         </div>
+409 | 
+410 |         <div className="space-y-4">
+411 |           {/* 1. Provider Selector */}
+412 |           <div className="space-y-1.5">
+413 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Provider</label>
+414 |             <select
+415 |               value={selectedProvider}
+416 |               onChange={(e) => handleProviderChange(e.target.value)}
+417 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
+418 |             >
+419 |               {Object.keys(providersConfig).map((pKey) => (
+420 |                 <option key={pKey} value={pKey}>
+421 |                   {providersConfig[pKey]?.name || pKey}
+422 |                 </option>
+423 |               ))}
+424 |             </select>
+425 |           </div>
+426 | 
+427 |           {/* 2. Model Selector */}
+428 |           <div className="space-y-1.5">
+429 |             <div className="flex justify-between items-center">
+430 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Model</label>
+431 |               {(modelsList.length > 0 || selectedProvider === 'ollama') && (
+432 |                 <button
+433 |                   type="button"
+434 |                   onClick={() => {
+435 |                     const willBeCustom = !isCustomModelInput;
+436 |                     setIsCustomModelInput(willBeCustom);
+437 |                     if (willBeCustom) {
+438 |                       setCustomModelText(selectedModel);
+439 |                     } else {
+440 |                       const defaultMod = modelsList[0]?.id || currentProviderInfo.default_model || "";
+441 |                       setSelectedModel(defaultMod);
+442 |                     }
+443 |                   }}
+444 |                   className="text-[9px] text-cyan-400 hover:underline font-mono cursor-pointer"
+445 |                 >
+446 |                   {isCustomModelInput ? "Select from list" : "Enter custom model ID"}
+447 |                 </button>
+448 |               )}
+449 |             </div>
+450 |             {isCustomModelInput || (modelsList.length === 0 && selectedProvider !== 'ollama') ? (
+451 |               <input
+452 |                 type="text"
+453 |                 placeholder="e.g. custom-fine-tune-v1, llama3"
+454 |                 value={isCustomModelInput ? customModelText : selectedModel}
 455 |                 onChange={(e) => {
 456 |                   const val = e.target.value;
-457 |                   if (val === "__custom__") {
-458 |                     setIsCustomModelInput(true);
-459 |                     setCustomModelText(selectedModel);
-460 |                   } else {
-461 |                     setSelectedModel(val);
-462 |                   }
-463 |                 }}
-464 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
-465 |               >
-466 |                 {selectedProvider === "ollama" && modelsList.length === 0 ? (
-467 |                   <option value="" disabled>
-468 |                     No local models detected
-469 |                   </option>
-470 |                 ) : (
-471 |                   modelsList.map((m: any) => (
-472 |                     <option key={m.id} value={m.id}>
-473 |                       {m.name || m.id} ({m.tier || "standard"})
-474 |                     </option>
-475 |                   ))
-476 |                 )}
-477 |                 <option value="__custom__">Custom Model ID...</option>
-478 |               </select>
-479 |             )}
-480 |           </div>
-481 | 
-482 |           {/* 3. Custom Base URL Gateway */}
-483 |           <div className="space-y-1.5">
-484 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold flex items-center gap-1">
-485 |               <Globe className="w-3.5 h-3.5" /> Base URL {isCustomOrLocal ? "(Required)" : "(Optional)"}
-486 |             </label>
-487 |             <input
-488 |               type="text"
-489 |               placeholder={currentProviderInfo.base_url || "https://api.provider.com/v1"}
-490 |               value={baseUrlInput}
-491 |               onChange={(e) => setUrlInput(e.target.value)}
-492 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-493 |             />
-494 |           </div>
-495 | 
-496 |           {/* 4. API Key Input or Status Box (Ollama) */}
-497 |           {selectedProvider === "ollama" ? (
-498 |             <div className="space-y-1.5">
-499 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
-500 |                 Ollama Status
-501 |               </label>
-502 |               <div className="bg-black border border-[#1f1f1f] rounded-xl p-4 flex flex-col gap-2">
-503 |                 <div className="flex items-center gap-2 text-xs">
-504 |                   {ollamaStatus === "checking" && (
-505 |                     <>
-506 |                       <div className="w-3.5 h-3.5 border-2 border-neutral-400 border-t-transparent rounded-full animate-spin shrink-0" />
-507 |                       <span className="text-neutral-400 font-mono">Checking local Ollama availability...</span>
-508 |                     </>
-509 |                   )}
-510 |                   {ollamaStatus === "available" && (
-511 |                     <>
-512 |                       <Check className="w-4 h-4 text-emerald-500 shrink-0" />
-513 |                       <span className="text-emerald-400 font-mono font-bold">Ollama running locally</span>
-514 |                     </>
-515 |                   )}
-516 |                   {ollamaStatus === "unavailable" && (
+457 |                   if (isCustomModelInput) {
+458 |                     setCustomModelText(val);
+459 |                   }
+460 |                   setSelectedModel(val);
+461 |                 }}
+462 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+463 |               />
+464 |             ) : (
+465 |               <select
+466 |                 value={selectedModel}
+467 |                 onChange={(e) => {
+468 |                   const val = e.target.value;
+469 |                   if (val === "__custom__") {
+470 |                     setIsCustomModelInput(true);
+471 |                     setCustomModelText(selectedModel);
+472 |                   } else {
+473 |                     setSelectedModel(val);
+474 |                   }
+475 |                 }}
+476 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
+477 |               >
+478 |                 {selectedProvider === "ollama" && modelsList.length === 0 ? (
+479 |                   <option value="" disabled>
+480 |                     No local models detected
+481 |                   </option>
+482 |                 ) : (
+483 |                   modelsList.map((m: any) => (
+484 |                     <option key={m.id} value={m.id}>
+485 |                       {m.name || m.id} ({m.tier || "standard"})
+486 |                     </option>
+487 |                   ))
+488 |                 )}
+489 |                 <option value="__custom__">Custom Model ID...</option>
+490 |               </select>
+491 |             )}
+492 |           </div>
+493 | 
+494 |           {/* 3. Custom Base URL Gateway */}
+495 |           <div className="space-y-1.5">
+496 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold flex items-center gap-1">
+497 |               <Globe className="w-3.5 h-3.5" /> Base URL {isCustomOrLocal ? "(Required)" : "(Optional)"}
+498 |             </label>
+499 |             <input
+500 |               type="text"
+501 |               placeholder={currentProviderInfo.base_url || "https://api.provider.com/v1"}
+502 |               value={baseUrlInput}
+503 |               onChange={(e) => setUrlInput(e.target.value)}
+504 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+505 |             />
+506 |           </div>
+507 | 
+508 |           {/* 4. API Key Input or Status Box (Ollama) */}
+509 |           {selectedProvider === "ollama" ? (
+510 |             <div className="space-y-1.5">
+511 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
+512 |                 Ollama Status
+513 |               </label>
+514 |               <div className="bg-black border border-[#1f1f1f] rounded-xl p-4 flex flex-col gap-2">
+515 |                 <div className="flex items-center gap-2 text-xs">
+516 |                   {ollamaStatus === "checking" && (
 517 |                     <>
-518 |                       <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
-519 |                       <span className="text-rose-400 font-mono font-bold">Ollama not detected</span>
+518 |                       <div className="w-3.5 h-3.5 border-2 border-neutral-400 border-t-transparent rounded-full animate-spin shrink-0" />
+519 |                       <span className="text-neutral-400 font-mono">Checking local Ollama availability...</span>
 520 |                     </>
 521 |                   )}
-522 |                 </div>
-523 |                 {ollamaStatus === "unavailable" && (
-524 |                   <p className="text-[10px] text-neutral-400 leading-normal font-sans">
-525 |                     Make sure Ollama is running on your machine. You can download it from{" "}
-526 |                     <a
-527 |                       href="https://ollama.com"
-528 |                       target="_blank"
-529 |                       rel="noreferrer"
-530 |                       className="text-cyan-400 hover:underline inline-flex items-center gap-0.5"
-531 |                     >
-532 |                       ollama.com <ExternalLink className="w-2.5 h-2.5" />
-533 |                     </a>
-534 |                   </p>
-535 |                 )}
-536 |               </div>
-537 |             </div>
-538 |           ) : (
-539 |             <div className="space-y-1.5">
-540 |               <div className="flex justify-between items-center">
-541 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
-542 |                   {selectedProvider.toUpperCase()}_API_KEY
-543 |                 </label>
-544 |                 {currentProviderInfo.key_url && (
-545 |                   <a
-546 |                     href={currentProviderInfo.key_url}
-547 |                     target="_blank"
-548 |                     rel="noreferrer"
-549 |                     className="text-[9px] text-cyan-400 hover:underline flex items-center gap-1 cursor-pointer"
-550 |                   >
-551 |                     Get key <ExternalLink className="w-3 h-3" />
-552 |                   </a>
-553 |                 )}
-554 |               </div>
-555 |               <div className="relative">
-556 |                 <input
-557 |                   type={showKey ? "text" : "password"}
-558 |                   placeholder={
-559 |                     currentProviderInfo.key_hint
-560 |                       ? `Enter key (starts with ${currentProviderInfo.key_hint})`
-561 |                       : "Enter API key"
-562 |                   }
-563 |                   value={apiKeyInput}
-564 |                   onChange={(e) => setApiKeyInput(e.target.value)}
-565 |                   className="w-full bg-black border border-[#1f1f1f] rounded-xl pl-4 pr-12 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-566 |                 />
-567 |                 <button
-568 |                   type="button"
-569 |                   onClick={() => setShowKey(!showKey)}
-570 |                   className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
-571 |                 >
-572 |                   {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-573 |                 </button>
-574 |               </div>
-575 |             </div>
-576 |           )}
-577 | 
-578 |           {/* Backup API Keys Expandable Section */}
-579 |           {selectedProvider !== "ollama" && (
-580 |             <div className="space-y-2 mt-2">
-581 |               {!showBackupExpander ? (
-582 |                 <button
-583 |                   type="button"
-584 |                   onClick={() => setShowBackupExpander(true)}
-585 |                   className="text-[10px] text-cyan-400 hover:underline font-mono cursor-pointer flex items-center gap-1"
-586 |                 >
-587 |                   + Add backup key
-588 |                 </button>
-589 |               ) : (
-590 |                 <div className="border border-[#1f1f1f] bg-black/40 rounded-xl p-3 space-y-3">
-591 |                   <div className="flex justify-between items-center">
-592 |                     <span className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Backup Keys</span>
-593 |                     <button
-594 |                       type="button"
-595 |                       onClick={() => {
-596 |                         setShowBackupExpander(false);
-597 |                         setBackupKey1Input("");
-598 |                         setBackupKey2Input("");
-599 |                         setShowSecondBackup(false);
-600 |                       }}
-601 |                       className="text-[9px] text-rose-400 hover:underline font-mono cursor-pointer"
-602 |                     >
-603 |                       Remove all
-604 |                     </button>
-605 |                   </div>
-606 |                   
-607 |                   {/* Backup Key 1 */}
-608 |                   <div className="space-y-1">
-609 |                     <label className="text-[9px] font-mono uppercase text-neutral-500">Backup Key 1</label>
-610 |                     <div className="relative">
-611 |                       <input
-612 |                         type={showBackupKey1 ? "text" : "password"}
-613 |                         placeholder="Enter backup key 1"
-614 |                         value={backupKey1Input}
-615 |                         onChange={(e) => setBackupKey1Input(e.target.value)}
-616 |                         className="w-full bg-black border border-[#1f1f1f] rounded-lg pl-3 pr-10 py-2 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-617 |                       />
-618 |                       <button
-619 |                         type="button"
-620 |                         onClick={() => setShowBackupKey1(!showBackupKey1)}
-621 |                         className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
-622 |                       >
-623 |                         {showBackupKey1 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-624 |                       </button>
-625 |                     </div>
-626 |                   </div>
-627 | 
-628 |                   {/* Backup Key 2 */}
-629 |                   {!showSecondBackup ? (
-630 |                     <button
-631 |                       type="button"
-632 |                       onClick={() => setShowSecondBackup(true)}
-633 |                       className="text-[10px] text-cyan-400 hover:underline font-mono cursor-pointer flex items-center gap-1"
-634 |                     >
-635 |                       + Add another backup key
-636 |                     </button>
-637 |                   ) : (
-638 |                     <div className="space-y-1">
-639 |                       <div className="flex justify-between items-center">
-640 |                         <label className="text-[9px] font-mono uppercase text-neutral-500">Backup Key 2</label>
-641 |                         <button
-642 |                           type="button"
-643 |                           onClick={() => {
-644 |                             setShowSecondBackup(false);
-645 |                             setBackupKey2Input("");
-646 |                           }}
-647 |                           className="text-[9px] text-neutral-500 hover:text-neutral-300 font-mono cursor-pointer"
-648 |                         >
-649 |                           Remove
-650 |                         </button>
-651 |                       </div>
-652 |                       <div className="relative">
-653 |                         <input
-654 |                           type={showBackupKey2 ? "text" : "password"}
-655 |                           placeholder="Enter backup key 2"
-656 |                           value={backupKey2Input}
-657 |                           onChange={(e) => setBackupKey2Input(e.target.value)}
-658 |                           className="w-full bg-black border border-[#1f1f1f] rounded-lg pl-3 pr-10 py-2 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-659 |                         />
-660 |                         <button
-661 |                           type="button"
-662 |                           onClick={() => setShowBackupKey2(!showBackupKey2)}
-663 |                           className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
-664 |                         >
-665 |                           {showBackupKey2 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-666 |                         </button>
-667 |                       </div>
-668 |                     </div>
-669 |                   )}
-670 |                 </div>
-671 |               )}
-672 |             </div>
-673 |           )}
-674 | 
-675 |           {/* 5. Fallback Provider Selector */}
-676 |           <div className="space-y-1.5">
-677 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Automatic Fallback</label>
-678 |             <select
-679 |               value={fallbackProv}
-680 |               onChange={(e) => setFallbackProv(e.target.value)}
-681 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
-682 |             >
-683 |               <option value="">No Fallback (Error immediately)</option>
-684 |               {Object.keys(providersConfig)
-685 |                 .filter((pKey) => pKey !== selectedProvider)
-686 |                 .map((pKey) => (
-687 |                   <option key={pKey} value={pKey}>
-688 |                     Fallback: {providersConfig[pKey]?.name || pKey}
-689 |                   </option>
-690 |                 ))}
-691 |             </select>
-692 |           </div>
-693 | 
-694 |           {/* Connection Test pipeline */}
-695 |           {isLocalProvider ? (
-696 |             <div className="p-3 bg-neutral-950/40 border border-[#1f1f1f] rounded-xl text-[10px] text-neutral-400 font-mono leading-normal">
-697 |               ℹ️ Local models run directly on your machine and do not require API connection testing.
-698 |             </div>
-699 |           ) : (
-700 |             <div className="pt-2">
-701 |               <button
-702 |                 type="button"
-703 |                 onClick={handleTestConnection}
-704 |                 disabled={isTesting || (!apiKeyInput && selectedProvider !== "ollama" && selectedProvider !== "lmstudio")}
-705 |                 className="w-full py-2 bg-neutral-900 hover:bg-neutral-800 border border-[#1f1f1f] text-neutral-300 hover:text-white font-bold rounded-xl text-xs font-mono transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-20 disabled:scale-100"
-706 |               >
-707 |                 {isTesting ? (
-708 |                   <>
-709 |                     <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-710 |                     Testing Pipeline...
-711 |                   </>
-712 |                 ) : (
-713 |                   "Test Connection"
-714 |                 )}
-715 |               </button>
-716 | 
-717 |               {/* Test Connection Results */}
-718 |               <AnimatePresence>
-719 |                 {testResult.status !== 'idle' && (
-720 |                   <motion.div
-721 |                     initial={{ opacity: 0, y: 5 }}
-722 |                     animate={{ opacity: 1, y: 0 }}
-723 |                     exit={{ opacity: 0, y: 5 }}
-724 |                     className={`mt-3 flex items-start gap-2.5 p-3 rounded-xl text-[10px] leading-normal font-mono border ${
-725 |                       testResult.status === 'success'
-726 |                         ? 'bg-emerald-950/20 border-emerald-950/30 text-emerald-400'
-727 |                         : 'bg-rose-950/20 border-rose-950/30 text-rose-400'
-728 |                     }`}
-729 |                   >
-730 |                     {testResult.status === 'success' ? (
-731 |                       <Check className="w-4 h-4 shrink-0 text-emerald-500 mt-0.5" />
-732 |                     ) : (
-733 |                       <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
-734 |                     )}
-735 |                     <span className="whitespace-pre-wrap">{testResult.message}</span>
-736 |                   </motion.div>
-737 |                 )}
-738 |               </AnimatePresence>
-739 |             </div>
-740 |           )}
-741 | 
-742 |           {/* 6. Save and Cancel Buttons */}
-743 |           <div className="pt-4 flex gap-3 border-t border-[#141414]">
-744 |             <button
-745 |               id="save-api-key-btn"
-746 |               onClick={handleSaveSettings}
-747 |               className="flex-1 py-2.5 bg-white hover:bg-neutral-100 text-black font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
-748 |             >
-749 |               Save Settings
-750 |             </button>
-751 |             <button
-752 |               onClick={onClose}
-753 |               className="px-5 py-2.5 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-xl text-xs font-mono transition-colors cursor-pointer"
-754 |             >
-755 |               Cancel
-756 |             </button>
-757 |           </div>
-758 |         </div>
-759 |       </motion.div>
-760 |     </motion.div>
-761 |   );
-762 | }
-763 |
+522 |                   {ollamaStatus === "available" && (
+523 |                     <>
+524 |                       <Check className="w-4 h-4 text-emerald-500 shrink-0" />
+525 |                       <span className="text-emerald-400 font-mono font-bold">Ollama running locally</span>
+526 |                     </>
+527 |                   )}
+528 |                   {ollamaStatus === "unavailable" && (
+529 |                     <>
+530 |                       <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+531 |                       <span className="text-rose-400 font-mono font-bold">Ollama not detected</span>
+532 |                     </>
+533 |                   )}
+534 |                 </div>
+535 |                 {ollamaStatus === "unavailable" && (
+536 |                   <p className="text-[10px] text-neutral-400 leading-normal font-sans">
+537 |                     Make sure Ollama is running on your machine. You can download it from{" "}
+538 |                     <a
+539 |                       href="https://ollama.com"
+540 |                       target="_blank"
+541 |                       rel="noreferrer"
+542 |                       className="text-cyan-400 hover:underline inline-flex items-center gap-0.5"
+543 |                     >
+544 |                       ollama.com <ExternalLink className="w-2.5 h-2.5" />
+545 |                     </a>
+546 |                   </p>
+547 |                 )}
+548 |               </div>
+549 |             </div>
+550 |           ) : (
+551 |             <div className="space-y-1.5">
+552 |               <div className="flex justify-between items-center">
+553 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
+554 |                   {selectedProvider.toUpperCase()}_API_KEY
+555 |                 </label>
+556 |                 {currentProviderInfo.key_url && (
+557 |                   <a
+558 |                     href={currentProviderInfo.key_url}
+559 |                     target="_blank"
+560 |                     rel="noreferrer"
+561 |                     className="text-[9px] text-cyan-400 hover:underline flex items-center gap-1 cursor-pointer"
+562 |                   >
+563 |                     Get key <ExternalLink className="w-3 h-3" />
+564 |                   </a>
+565 |                 )}
+566 |               </div>
+567 |               <div className="relative">
+568 |                 <input
+569 |                   type={showKey ? "text" : "password"}
+570 |                   placeholder={
+571 |                     currentProviderInfo.key_hint
+572 |                       ? `Enter key (starts with ${currentProviderInfo.key_hint})`
+573 |                       : "Enter API key"
+574 |                   }
+575 |                   value={apiKeyInput}
+576 |                   onChange={(e) => setApiKeyInput(e.target.value)}
+577 |                   className="w-full bg-black border border-[#1f1f1f] rounded-xl pl-4 pr-12 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+578 |                 />
+579 |                 <button
+580 |                   type="button"
+581 |                   onClick={() => setShowKey(!showKey)}
+582 |                   className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
+583 |                 >
+584 |                   {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+585 |                 </button>
+586 |               </div>
+587 |             </div>
+588 |           )}
+589 | 
+590 |           {/* Backup API Keys Expandable Section */}
+591 |           {selectedProvider !== "ollama" && (
+592 |             <div className="space-y-2 mt-2">
+593 |               {!showBackupExpander ? (
+594 |                 <button
+595 |                   type="button"
+596 |                   onClick={() => setShowBackupExpander(true)}
+597 |                   className="text-[10px] text-cyan-400 hover:underline font-mono cursor-pointer flex items-center gap-1"
+598 |                 >
+599 |                   + Add backup key
+600 |                 </button>
+601 |               ) : (
+602 |                 <div className="border border-[#1f1f1f] bg-black/40 rounded-xl p-3 space-y-3">
+603 |                   <div className="flex justify-between items-center">
+604 |                     <span className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Backup Keys</span>
+605 |                     <button
+606 |                       type="button"
+607 |                       onClick={() => {
+608 |                         setShowBackupExpander(false);
+609 |                         setBackupKey1Input("");
+610 |                         setBackupKey2Input("");
+611 |                         setShowSecondBackup(false);
+612 |                       }}
+613 |                       className="text-[9px] text-rose-400 hover:underline font-mono cursor-pointer"
+614 |                     >
+615 |                       Remove all
+616 |                     </button>
+617 |                   </div>
+618 |                   
+619 |                   {/* Backup Key 1 */}
+620 |                   <div className="space-y-1">
+621 |                     <label className="text-[9px] font-mono uppercase text-neutral-500">Backup Key 1</label>
+622 |                     <div className="relative">
+623 |                       <input
+624 |                         type={showBackupKey1 ? "text" : "password"}
+625 |                         placeholder="Enter backup key 1"
+626 |                         value={backupKey1Input}
+627 |                         onChange={(e) => setBackupKey1Input(e.target.value)}
+628 |                         className="w-full bg-black border border-[#1f1f1f] rounded-lg pl-3 pr-10 py-2 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+629 |                       />
+630 |                       <button
+631 |                         type="button"
+632 |                         onClick={() => setShowBackupKey1(!showBackupKey1)}
+633 |                         className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
+634 |                       >
+635 |                         {showBackupKey1 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+636 |                       </button>
+637 |                     </div>
+638 |                   </div>
+639 | 
+640 |                   {/* Backup Key 2 */}
+641 |                   {!showSecondBackup ? (
+642 |                     <button
+643 |                       type="button"
+644 |                       onClick={() => setShowSecondBackup(true)}
+645 |                       className="text-[10px] text-cyan-400 hover:underline font-mono cursor-pointer flex items-center gap-1"
+646 |                     >
+647 |                       + Add another backup key
+648 |                     </button>
+649 |                   ) : (
+650 |                     <div className="space-y-1">
+651 |                       <div className="flex justify-between items-center">
+652 |                         <label className="text-[9px] font-mono uppercase text-neutral-500">Backup Key 2</label>
+653 |                         <button
+654 |                           type="button"
+655 |                           onClick={() => {
+656 |                             setShowSecondBackup(false);
+657 |                             setBackupKey2Input("");
+658 |                           }}
+659 |                           className="text-[9px] text-neutral-500 hover:text-neutral-300 font-mono cursor-pointer"
+660 |                         >
+661 |                           Remove
+662 |                         </button>
+663 |                       </div>
+664 |                       <div className="relative">
+665 |                         <input
+666 |                           type={showBackupKey2 ? "text" : "password"}
+667 |                           placeholder="Enter backup key 2"
+668 |                           value={backupKey2Input}
+669 |                           onChange={(e) => setBackupKey2Input(e.target.value)}
+670 |                           className="w-full bg-black border border-[#1f1f1f] rounded-lg pl-3 pr-10 py-2 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+671 |                         />
+672 |                         <button
+673 |                           type="button"
+674 |                           onClick={() => setShowBackupKey2(!showBackupKey2)}
+675 |                           className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
+676 |                         >
+677 |                           {showBackupKey2 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+678 |                         </button>
+679 |                       </div>
+680 |                     </div>
+681 |                   )}
+682 |                 </div>
+683 |               )}
+684 |             </div>
+685 |           )}
+686 | 
+687 |           {/* 5. Fallback Provider Selector */}
+688 |           <div className="space-y-1.5">
+689 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Automatic Fallback</label>
+690 |             <select
+691 |               value={fallbackProv}
+692 |               onChange={(e) => setFallbackProv(e.target.value)}
+693 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer"
+694 |             >
+695 |               <option value="">No Fallback (Error immediately)</option>
+696 |               {Object.keys(providersConfig)
+697 |                 .filter((pKey) => pKey !== selectedProvider)
+698 |                 .map((pKey) => (
+699 |                   <option key={pKey} value={pKey}>
+700 |                     Fallback: {providersConfig[pKey]?.name || pKey}
+701 |                   </option>
+702 |                 ))}
+703 |             </select>
+704 |           </div>
+705 | 
+706 |           {/* Connection Test pipeline */}
+707 |           {isLocalProvider ? (
+708 |             <div className="p-3 bg-neutral-950/40 border border-[#1f1f1f] rounded-xl text-[10px] text-neutral-400 font-mono leading-normal">
+709 |               ℹ️ Local models run directly on your machine and do not require API connection testing.
+710 |             </div>
+711 |           ) : (
+712 |             <div className="pt-2">
+713 |               <button
+714 |                 type="button"
+715 |                 onClick={handleTestConnection}
+716 |                 disabled={isTesting || (!apiKeyInput && selectedProvider !== "ollama" && selectedProvider !== "lmstudio")}
+717 |                 className="w-full py-2 bg-neutral-900 hover:bg-neutral-800 border border-[#1f1f1f] text-neutral-300 hover:text-white font-bold rounded-xl text-xs font-mono transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-20 disabled:scale-100"
+718 |               >
+719 |                 {isTesting ? (
+720 |                   <>
+721 |                     <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+722 |                     Testing Pipeline...
+723 |                   </>
+724 |                 ) : (
+725 |                   "Test Connection"
+726 |                 )}
+727 |               </button>
+728 | 
+729 |               {/* Test Connection Results */}
+730 |               <AnimatePresence>
+731 |                 {testResult.status !== 'idle' && (
+732 |                   <motion.div
+733 |                     initial={{ opacity: 0, y: 5 }}
+734 |                     animate={{ opacity: 1, y: 0 }}
+735 |                     exit={{ opacity: 0, y: 5 }}
+736 |                     className={`mt-3 flex items-start gap-2.5 p-3 rounded-xl text-[10px] leading-normal font-mono border ${
+737 |                       testResult.status === 'success'
+738 |                         ? 'bg-emerald-950/20 border-emerald-950/30 text-emerald-400'
+739 |                         : 'bg-rose-950/20 border-rose-950/30 text-rose-400'
+740 |                     }`}
+741 |                   >
+742 |                     {testResult.status === 'success' ? (
+743 |                       <Check className="w-4 h-4 shrink-0 text-emerald-500 mt-0.5" />
+744 |                     ) : (
+745 |                       <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
+746 |                     )}
+747 |                     <span className="whitespace-pre-wrap">{testResult.message}</span>
+748 |                   </motion.div>
+749 |                 )}
+750 |               </AnimatePresence>
+751 |             </div>
+752 |           )}
+753 | 
+754 |           {/* 6. Save and Cancel Buttons */}
+755 |           <div className="pt-4 flex gap-3 border-t border-[#141414]">
+756 |             <button
+757 |               id="save-api-key-btn"
+758 |               onClick={handleSaveSettings}
+759 |               className="flex-1 py-2.5 bg-white hover:bg-neutral-100 text-black font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
+760 |             >
+761 |               Save Settings
+762 |             </button>
+763 |             <button
+764 |               onClick={onClose}
+765 |               className="px-5 py-2.5 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-xl text-xs font-mono transition-colors cursor-pointer"
+766 |             >
+767 |               Cancel
+768 |             </button>
+769 |           </div>
+770 |         </div>
+771 |       </motion.div>
+772 |     </motion.div>
+773 |   );
+774 | }
+775 |
 ```
 
 ### File: `Frontend/components/ContextMenu.tsx`
@@ -8326,7 +8454,7 @@ SoloSpace/
 
 ### File: `Frontend/components/FlowArena.tsx`
 
-> 591 lines | 23.9 KB
+> 570 lines | 22.3 KB
 
 ```tsx
   1 | import React, { useState, useCallback, useEffect } from 'react';
@@ -8363,10 +8491,10 @@ SoloSpace/
  32 | const getLayoutedElements = (nodes: Node[], edges: Edge[]) => {
  33 |   const dagreGraph = new dagre.graphlib.Graph();
  34 |   dagreGraph.setDefaultEdgeLabel(() => ({}));
- 35 |   dagreGraph.setGraph({ rankdir: 'LR', nodesep: 150, ranksep: 200 });
+ 35 |   dagreGraph.setGraph({ rankdir: 'LR', nodesep: 200, ranksep: 250 });
  36 | 
  37 |   nodes.forEach((node) => {
- 38 |     dagreGraph.setNode(node.id, { width: 240, height: 220 });
+ 38 |     dagreGraph.setNode(node.id, { width: 256, height: 220 });
  39 |   });
  40 | 
  41 |   edges.forEach((edge) => {
@@ -8375,551 +8503,530 @@ SoloSpace/
  44 | 
  45 |   dagre.layout(dagreGraph);
  46 | 
- 47 |   const layoutedNodes = nodes.map((node) => {
- 48 |     const nodeWithPosition = dagreGraph.node(node.id);
- 49 |     return {
- 50 |       ...node,
- 51 |       position: {
- 52 |         x: nodeWithPosition.x - 120,
- 53 |         y: nodeWithPosition.y - 110,
- 54 |       },
- 55 |     };
- 56 |   });
- 57 |   return { nodes: layoutedNodes, edges };
- 58 | };
- 59 | 
- 60 | export default function FlowArena({ onProceed }: { onProceed?: () => void }) {
- 61 |   const { zoomIn, zoomOut, setViewport, getViewport, fitView } = useReactFlow();
- 62 |   
- 63 |   const nodes = useWorkflowStore((s) => s.nodes);
- 64 |   const edges = useWorkflowStore((s) => s.edges);
- 65 |   const onNodesChange = useWorkflowStore((s) => s.onNodesChange);
- 66 |   const onEdgesChange = useWorkflowStore((s) => s.onEdgesChange);
- 67 |   const onConnect = useWorkflowStore((s) => s.onConnect);
- 68 |   const setEdges = useWorkflowStore((s) => s.setEdges);
- 69 |   const setNodes = useWorkflowStore((s) => s.setNodes);
- 70 |   const addNode = useWorkflowStore((s) => s.addNode);
- 71 |   const setSelectedNodeId = useWorkflowStore((s) => s.setSelectedNodeId);
- 72 |   const isOrchestrating = useWorkflowStore((s) => s.isOrchestrating);
- 73 |   const executionState = useWorkflowStore((s) => s.executionState);
- 74 |   
- 75 |   const isEchoHouseMode = useWorkflowStore((s) => s.activeSessionId ? s.sessions[s.activeSessionId]?.mode === 'echohouse' : false);
- 76 | 
- 77 |   // EchoHouse creation form state
- 78 |   const [isEchoHouseCreateFormOpen, setIsEchoHouseCreateFormOpen] = useState(false);
- 79 |   const [formName, setFormName] = useState("");
- 80 |   const [formRole, setFormRole] = useState("");
- 81 |   const [formProblem, setFormProblem] = useState("");
- 82 | 
- 83 |   // EchoHouse simulation controls
- 84 |   const [echoRounds, setEchoRounds] = useState(3);
- 85 |   const [echoTone, setEchoTone] = useState<"Realistic" | "Compassionate" | "Confrontational">("Realistic");
- 86 |   const [isControlsOpen, setIsControlsOpen] = useState(false);
+ 47 |   const scaleX = 1.5;
+ 48 |   const scaleY = 1.5;
+ 49 | 
+ 50 |   const layoutedNodes = nodes.map((node) => {
+ 51 |     const nodeWithPosition = dagreGraph.node(node.id);
+ 52 |     const scaledX = nodeWithPosition.x * scaleX;
+ 53 |     const scaledY = nodeWithPosition.y * scaleY;
+ 54 |     return {
+ 55 |       ...node,
+ 56 |       position: {
+ 57 |         x: scaledX - 128,
+ 58 |         y: scaledY - 110,
+ 59 |       },
+ 60 |     };
+ 61 |   });
+ 62 |   return { nodes: layoutedNodes, edges };
+ 63 | };
+ 64 | 
+ 65 | export default function FlowArena({ onProceed }: { onProceed?: () => void }) {
+ 66 |   const { zoomIn, zoomOut, setViewport, getViewport, fitView } = useReactFlow();
+ 67 |   
+ 68 |   const nodes = useWorkflowStore((s) => s.nodes);
+ 69 |   const edges = useWorkflowStore((s) => s.edges);
+ 70 |   const onNodesChange = useWorkflowStore((s) => s.onNodesChange);
+ 71 |   const onEdgesChange = useWorkflowStore((s) => s.onEdgesChange);
+ 72 |   const onConnect = useWorkflowStore((s) => s.onConnect);
+ 73 |   const setEdges = useWorkflowStore((s) => s.setEdges);
+ 74 |   const setNodes = useWorkflowStore((s) => s.setNodes);
+ 75 |   const addNode = useWorkflowStore((s) => s.addNode);
+ 76 |   const setSelectedNodeId = useWorkflowStore((s) => s.setSelectedNodeId);
+ 77 |   const isOrchestrating = useWorkflowStore((s) => s.isOrchestrating);
+ 78 |   const executionState = useWorkflowStore((s) => s.executionState);
+ 79 |   
+ 80 |   const isEchoHouseMode = useWorkflowStore((s) => s.activeSessionId ? s.sessions[s.activeSessionId]?.mode === 'echohouse' : false);
+ 81 | 
+ 82 |   // EchoHouse creation form state
+ 83 |   const [isEchoHouseCreateFormOpen, setIsEchoHouseCreateFormOpen] = useState(false);
+ 84 |   const [formName, setFormName] = useState("");
+ 85 |   const [formRole, setFormRole] = useState("");
+ 86 |   const [formProblem, setFormProblem] = useState("");
  87 | 
- 88 |   const handleEchoHouseProceed = async () => {
- 89 |     if (onProceed) onProceed();
- 90 |     await useWorkflowStore.getState().triggerEchoHouseSimulation(echoRounds, echoTone.toLowerCase());
- 91 |   };
+ 88 |   // EchoHouse simulation controls
+ 89 |   const [echoRounds, setEchoRounds] = useState(3);
+ 90 |   const [echoTone, setEchoTone] = useState<"Realistic" | "Compassionate" | "Confrontational">("Realistic");
+ 91 |   const [isControlsOpen, setIsControlsOpen] = useState(false);
  92 | 
- 93 |   const handleNormalProceed = async () => {
+ 93 |   const handleEchoHouseProceed = async () => {
  94 |     if (onProceed) onProceed();
- 95 |     
- 96 |     const activeSession = useWorkflowStore.getState().sessions[useWorkflowStore.getState().activeSessionId || ""];
- 97 |     const mode = activeSession?.mode || "auto";
- 98 |     
- 99 |     if (mode === "auto") {
-100 |       const chatMessages = useWorkflowStore.getState().chatMessages;
-101 |       const lastUserMsg = chatMessages.findLast(m => m.sender === "user")?.text || "";
-102 |       useWorkflowStore.getState().triggerSteerOrchestration(lastUserMsg, true, "auto");
-103 |     } else if (mode === "custom") {
-104 |       await useWorkflowStore.getState().triggerCustomExecution();
-105 |     }
-106 |   };
-107 | 
-108 |   const handleCreateEchoHousePerson = () => {
-109 |     if (!formName.trim() || !formRole.trim() || !formProblem.trim()) return;
-110 | 
-111 |     const randomId = `echo_agent_${Date.now()}`;
-112 |     const view = getViewport();
-113 |     // Center new node inside view coordinates
-114 |     let x = (-view.x + window.innerWidth / 2 - 120) / view.zoom;
-115 |     let y = (-view.y + window.innerHeight / 2 - 100) / view.zoom;
-116 | 
-117 |     // Avoid collision
-118 |     const NODE_W = 240;
-119 |     const NODE_H = 220;
-120 |     const existingPositions = nodes.map(n => n.position);
-121 |     for (const pos of existingPositions) {
-122 |       if (Math.abs(x - pos.x) < NODE_W && Math.abs(y - pos.y) < NODE_H) {
-123 |         y = pos.y + NODE_H + 40;
-124 |       }
-125 |     }
-126 | 
-127 |     const newNode = {
-128 |       id: randomId,
-129 |       type: 'custom',
-130 |       position: { x: Math.max(50, x), y: Math.max(50, y) },
-131 |       data: {
-132 |         name: formName.trim(),
-133 |         tag: formRole.trim().toUpperCase().replace(/\s+/g, '_'),
-134 |         icon: "science",
-135 |         objective: `Provide perspective as ${formName.trim()} (${formRole.trim()}).`,
-136 |         systemPrompt: `You are ${formName.trim()}, whose role in the user's life is ${formRole.trim()}. From your perspective about their situation: ${formProblem.trim()}`,
-137 |         isEchoHouseAgent: true,
-138 |         echohouseRole: formRole.trim(),
-139 |         echohouseProblem: formProblem.trim(),
-140 |         status: "IDLE" as const,
-141 |         enabled: true,
-142 |         rules: [],
-143 |         dependencies: [],
-144 |         tools: [],
-145 |         toolPermissions: {},
-146 |         temp: 0.8,
-147 |         logic: 70,
-148 |         empathy: 50,
-149 |         priority: 5,
-150 |         toolLogs: [],
-151 |         personality: ""
-152 |       }
-153 |     };
-154 | 
-155 |     addNode(newNode);
-156 |     setFormName("");
-157 |     setFormRole("");
-158 |     setFormProblem("");
-159 |     setIsEchoHouseCreateFormOpen(false);
-160 |     setSelectedNodeId(newNode.id);
-161 |   };
-162 | 
-163 |   const [initialLayoutDone, setInitialLayoutDone] = useState(false);
-164 | 
-165 |   // Context Menu State
-166 |   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: Node | null } | null>(null);
+ 95 |     await useWorkflowStore.getState().triggerEchoHouseSimulation(echoRounds, echoTone.toLowerCase());
+ 96 |   };
+ 97 | 
+ 98 |   const handleNormalProceed = async () => {
+ 99 |     if (onProceed) onProceed();
+100 |     
+101 |     const activeSession = useWorkflowStore.getState().sessions[useWorkflowStore.getState().activeSessionId || ""];
+102 |     const mode = activeSession?.mode || "auto";
+103 |     
+104 |     if (mode === "auto") {
+105 |       const chatMessages = useWorkflowStore.getState().chatMessages;
+106 |       const lastUserMsg = chatMessages.findLast(m => m.sender === "user")?.text || "";
+107 |       useWorkflowStore.getState().triggerSteerOrchestration(lastUserMsg, true, "auto");
+108 |     } else if (mode === "custom") {
+109 |       await useWorkflowStore.getState().triggerCustomExecution();
+110 |     }
+111 |   };
+112 | 
+113 |   const handleCreateEchoHousePerson = () => {
+114 |     if (!formName.trim() || !formRole.trim() || !formProblem.trim()) return;
+115 | 
+116 |     const randomId = `echo_agent_${Date.now()}`;
+117 |     const view = getViewport();
+118 |     // Center new node inside view coordinates
+119 |     let x = (-view.x + window.innerWidth / 2 - 120) / view.zoom;
+120 |     let y = (-view.y + window.innerHeight / 2 - 100) / view.zoom;
+121 | 
+122 |     // Avoid collision
+123 |     const NODE_W = 240;
+124 |     const NODE_H = 220;
+125 |     const existingPositions = nodes.map(n => n.position);
+126 |     for (const pos of existingPositions) {
+127 |       if (Math.abs(x - pos.x) < NODE_W && Math.abs(y - pos.y) < NODE_H) {
+128 |         y = pos.y + NODE_H + 40;
+129 |       }
+130 |     }
+131 | 
+132 |     const newNode = {
+133 |       id: randomId,
+134 |       type: 'custom',
+135 |       position: { x: Math.max(50, x), y: Math.max(50, y) },
+136 |       data: {
+137 |         name: formName.trim(),
+138 |         tag: formRole.trim().toUpperCase().replace(/\s+/g, '_'),
+139 |         icon: "science",
+140 |         objective: `Provide perspective as ${formName.trim()} (${formRole.trim()}).`,
+141 |         systemPrompt: `You are ${formName.trim()}, whose role in the user's life is ${formRole.trim()}. From your perspective about their situation: ${formProblem.trim()}`,
+142 |         isEchoHouseAgent: true,
+143 |         echohouseRole: formRole.trim(),
+144 |         echohouseProblem: formProblem.trim(),
+145 |         status: "IDLE" as const,
+146 |         enabled: true,
+147 |         rules: [],
+148 |         dependencies: [],
+149 |         tools: [],
+150 |         toolPermissions: {},
+151 |         temp: 0.8,
+152 |         logic: 70,
+153 |         empathy: 50,
+154 |         priority: 5,
+155 |         toolLogs: [],
+156 |         personality: ""
+157 |       }
+158 |     };
+159 | 
+160 |     addNode(newNode);
+161 |     setFormName("");
+162 |     setFormRole("");
+163 |     setFormProblem("");
+164 |     setIsEchoHouseCreateFormOpen(false);
+165 |     setSelectedNodeId(newNode.id);
+166 |   };
 167 | 
-168 |   // Reconnection state
-169 |   const onReconnect = useCallback((oldEdge: Edge, newConnection: Connection) => {
-170 |     setEdges((eds) => reconnectEdge(oldEdge, newConnection, eds));
-171 |   }, [setEdges]);
+168 |   const [initialLayoutDone, setInitialLayoutDone] = useState(false);
+169 | 
+170 |   // Context Menu State
+171 |   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: Node | null } | null>(null);
 172 | 
-173 |   // Context Menu triggers
-174 |   const onNodeContextMenu = useCallback((event: any, node: Node) => {
-175 |     event.preventDefault();
-176 |     setContextMenu({
-177 |       x: event.clientX,
-178 |       y: event.clientY,
-179 |       node,
-180 |     });
-181 |   }, []);
-182 | 
-183 |   const onPaneContextMenu = useCallback((event: any) => {
-184 |     event.preventDefault();
-185 |     setContextMenu({
-186 |       x: event.clientX,
-187 |       y: event.clientY,
-188 |       node: null,
-189 |     });
-190 |   }, []);
-191 | 
-192 |   const onPaneClick = useCallback(() => {
-193 |     setContextMenu(null);
-194 |   }, []);
-195 | 
-196 |   // Zoom/Viewport Controls
-197 |   const handleZoomIn = () => {
-198 |     zoomIn({ duration: 300 });
-199 |   };
+173 |   // Reconnection state
+174 |   const onReconnect = useCallback((oldEdge: Edge, newConnection: Connection) => {
+175 |     setEdges((eds) => reconnectEdge(oldEdge, newConnection, eds));
+176 |   }, [setEdges]);
+177 | 
+178 |   // Context Menu triggers
+179 |   const onNodeContextMenu = useCallback((event: any, node: Node) => {
+180 |     event.preventDefault();
+181 |     setContextMenu({
+182 |       x: event.clientX,
+183 |       y: event.clientY,
+184 |       node,
+185 |     });
+186 |   }, []);
+187 | 
+188 |   const onPaneContextMenu = useCallback((event: any) => {
+189 |     event.preventDefault();
+190 |     setContextMenu({
+191 |       x: event.clientX,
+192 |       y: event.clientY,
+193 |       node: null,
+194 |     });
+195 |   }, []);
+196 | 
+197 |   const onPaneClick = useCallback(() => {
+198 |     setContextMenu(null);
+199 |   }, []);
 200 | 
-201 |   const handleZoomOut = () => {
-202 |     zoomOut({ duration: 300 });
-203 |   };
-204 | 
-205 |   const handleResetView = () => {
-206 |     setViewport({ x: 100, y: 50, zoom: 0.9 }, { duration: 400 });
-207 |   };
-208 | 
-209 |   const applyLayout = useCallback(() => {
-210 |     if (nodes.length === 0) return;
-211 |     const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
-212 |     setNodes(layoutedNodes);
-213 |   }, [nodes, edges, setNodes]);
-214 | 
-215 |   // Layout nodes once initially when loaded
-216 |   useEffect(() => {
-217 |     if (!initialLayoutDone && nodes.length > 0) {
-218 |       const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
-219 |       setNodes(layoutedNodes);
-220 |       setInitialLayoutDone(true);
-221 |     }
-222 |   }, [nodes, edges, initialLayoutDone, setNodes]);
-223 | 
-224 |   // Reset layout state if node length changes back to 0 (new chat)
-225 |   useEffect(() => {
-226 |     if (nodes.length === 0) {
-227 |       setInitialLayoutDone(false);
-228 |     }
-229 |   }, [nodes.length]);
-230 | 
-231 |   // Auto-fit viewport on node count changes
-232 |   useEffect(() => {
-233 |     if (nodes.length > 0) {
-234 |       const timer = setTimeout(() => {
-235 |         fitView({ padding: 0.2, duration: 400 });
-236 |       }, 300);
-237 |       return () => clearTimeout(timer);
-238 |     }
-239 |   }, [nodes.length, fitView]);
-240 | 
-241 |   const handleAddAgentNode = () => {
-242 |     const randomId = `custom_agent_${Date.now().toString().slice(-4)}`;
-243 |     const view = getViewport();
-244 |     // Center new node inside view coordinates
-245 |     let x = (-view.x + window.innerWidth / 2 - 120) / view.zoom;
-246 |     let y = (-view.y + window.innerHeight / 2 - 100) / view.zoom;
-247 | 
-248 |     // Avoid collision
-249 |     const NODE_W = 240;
-250 |     const NODE_H = 220;
-251 |     const existingPositions = nodes.map(n => n.position);
-252 |     for (const pos of existingPositions) {
-253 |       if (Math.abs(x - pos.x) < NODE_W && Math.abs(y - pos.y) < NODE_H) {
-254 |         y = pos.y + NODE_H + 40;
-255 |       }
-256 |     }
-257 | 
-258 |     const newNode = {
-259 |       id: randomId,
-260 |       type: 'custom',
-261 |       position: { x: Math.max(50, x), y: Math.max(50, y) },
-262 |       data: {
-263 |         name: "Custom Agent Node",
-264 |         tag: "USER_CUSTOM_NODE",
-265 |         status: "IDLE" as const,
-266 |         metricLabel: "Tasks Completed",
-267 |         metricVal: "0",
-268 |         icon: "science",
-269 |         objective: "Enter agent goals...",
-270 |         personality: "Pragmatic, logical, responsive",
-271 |         systemPrompt: "You are a custom assistant. Fulfill user demands precisely.",
-272 |         rules: ["Verify actions before launching"],
-273 |         tools: ["Web Search"],
-274 |         temp: 0.5,
-275 |         logic: 80,
-276 |         empathy: 50,
-277 |         context: "128k",
-278 |         enabled: true,
-279 |         priority: 5,
-280 |         toolPermissions: {
-281 |           "Web Search": "ALLOWED" as const
-282 |         },
-283 |         toolLogs: []
-284 |       }
-285 |     };
-286 |     addNode(newNode);
-287 |     setSelectedNodeId(newNode.id);
-288 |   };
-289 | 
-290 |   // Node styles for MiniMap representation
-291 |   const getMiniMapNodeColor = (node: Node) => {
-292 |     if (node.type === 'groupNode') return 'rgba(255, 255, 255, 0.03)';
-293 |     const data = node.data as CanvasNodeData;
-294 |     if (data && data.enabled === false) return '#262626';
-295 |     if (data && (data.status === 'ACTIVE' || data.status === 'PROCESSING')) return '#06b6d4';
-296 |     return '#404040';
-297 |   };
-298 | 
-299 |   return (
-300 |     <div className="w-full h-full flex-1 relative bg-black">
-301 |       <ReactFlow
-302 |         nodes={nodes}
-303 |         edges={edges}
-304 |         onNodesChange={onNodesChange}
-305 |         onEdgesChange={onEdgesChange}
-306 |         onConnect={onConnect}
-307 |         onReconnect={onReconnect}
-308 |         nodeTypes={nodeTypes}
-309 |         edgeTypes={edgeTypes}
-310 |         onNodeContextMenu={onNodeContextMenu}
-311 |         onPaneContextMenu={onPaneContextMenu}
-312 |         onPaneClick={onPaneClick}
-313 |         snapToGrid={true}
-314 |         snapGrid={[15, 15]}
-315 |         fitViewOptions={{ padding: 0.2 }}
-316 |         className="flow-arena-editor"
-317 |         minZoom={0.2}
-318 |         maxZoom={2.5}
-319 |         defaultViewport={{ x: 100, y: 50, zoom: 0.9 }}
-320 |       >
-321 |         {/* Subtle grid background dots */}
-322 |         <Background 
-323 |           variant={BackgroundVariant.Dots} 
-324 |           color="rgba(255, 255, 255, 0.06)" 
-325 |           gap={24} 
-326 |           size={1}
-327 |         />
-328 | 
-329 |         {/* Custom Minimap Overlay */}
-330 |         <MiniMap 
-331 |           zoomable 
-332 |           pannable 
-333 |           nodeColor={getMiniMapNodeColor}
-334 |           nodeStrokeWidth={3}
-335 |           nodeBorderRadius={8}
-336 |           maskColor="rgba(0, 0, 0, 0.65)"
-337 |           className="!right-4 !top-4"
-338 |         />
-339 | 
-340 |         {/* Custom Floating Zoom & Node controls */}
-341 |         <Panel position="bottom-left" className="!left-4 !bottom-14 flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-1 rounded-xl z-20 shadow-2xl">
-342 |           <button 
-343 |             onClick={handleZoomIn}
-344 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors cursor-pointer"
-345 |             title="Zoom In"
-346 |           >
-347 |             <Plus className="w-3.5 h-3.5" />
-348 |           </button>
-349 | 
-350 |           <button 
-351 |             onClick={handleZoomOut}
-352 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors cursor-pointer"
-353 |             title="Zoom Out"
-354 |           >
-355 |             <Minus className="w-3.5 h-3.5" />
-356 |           </button>
-357 | 
-358 |           <button 
-359 |             onClick={handleResetView}
-360 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 cursor-pointer"
-361 |             title="Reset Viewport"
-362 |           >
-363 |             <Maximize className="w-3.5 h-3.5" />
-364 |           </button>
-365 | 
-366 |           <button 
-367 |             onClick={applyLayout}
-368 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 cursor-pointer"
-369 |             title="Auto Layout Graph"
-370 |           >
-371 |             <LayoutGrid className="w-3.5 h-3.5" />
-372 |           </button>
-373 | 
-374 |           <button 
-375 |             onClick={isEchoHouseMode ? () => setIsEchoHouseCreateFormOpen(true) : handleAddAgentNode}
-376 |             className="p-2 text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 flex items-center gap-1 text-[10px] cursor-pointer"
-377 |             title={isEchoHouseMode ? "Add Person" : "Add Custom Agent Node"}
-378 |           >
-379 |             <PlusCircle className="w-3.5 h-3.5 text-white" />
-380 |             <span className="font-semibold pr-1">Node</span>
-381 |           </button>
-382 |         </Panel>
-383 | 
-384 |         {/* Right-click Context Menu */}
-385 |         {contextMenu && (
-386 |           <ContextMenu
-387 |             x={contextMenu.x}
-388 |             y={contextMenu.y}
-389 |             node={contextMenu.node}
-390 |             onClose={() => setContextMenu(null)}
-391 |           />
-392 |         )}
-393 | 
-394 |         {/* Connection hint — shown when nodes exist but no edges drawn yet */}
-395 |         {!isEchoHouseMode && nodes.length > 1 && edges.length === 0 && !isOrchestrating && (
-396 |           <Panel position="top-right" className="!right-4 !top-16 select-none">
-397 |             <div className="bg-[#0d0d0d]/92 border border-[#1f1f1f] rounded-xl p-3 backdrop-blur-md shadow-xl w-52">
-398 |               <div className="flex items-center gap-2 mb-2.5">
-399 |                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-400 |                 <span className="text-[9px] font-mono text-neutral-400 uppercase tracking-wider font-bold">How to Connect</span>
-401 |               </div>
-402 |               <div className="space-y-2 text-[10px] text-neutral-500 leading-relaxed">
-403 |                 <div className="flex items-center gap-2">
-404 |                   <span className="w-3 h-3 rounded-full bg-black border-2 border-emerald-500 shrink-0" />
-405 |                   <span>Drag from <span className="text-emerald-400 font-semibold">green (OUT)</span></span>
-406 |                 </div>
-407 |                 <div className="flex items-center gap-2">
-408 |                   <span className="w-3 h-3 rounded-full bg-black border-2 border-rose-500 shrink-0" />
-409 |                   <span>Drop on <span className="text-rose-400 font-semibold">red (IN)</span></span>
-410 |                 </div>
-411 |                 <div className="flex items-center gap-2 pt-0.5 border-t border-[#141414] mt-1">
-412 |                   <span className="w-5 h-0.5 bg-cyan-500 rounded shrink-0" />
-413 |                   <span>Wire = agent dependency</span>
-414 |                 </div>
-415 |               </div>
-416 |             </div>
-417 |           </Panel>
-418 |         )}
-419 | 
-420 |         {/* EchoHouse instructional panel */}
-421 |         {isEchoHouseMode && (
-422 |           <Panel position="top-right" className="!right-4 !top-16 select-none z-20">
-423 |             <div className="bg-[#0d0d0d]/92 border border-[#1f1f1f] rounded-xl p-4 backdrop-blur-md shadow-xl w-72 space-y-3">
-424 |               <p className="text-xs text-neutral-300 leading-relaxed font-sans">
-425 |                 Add the people in your life — give each one a name, their role, and what they think about your situation. Then click Proceed to begin the simulation.
-426 |               </p>
-427 |               <div className="border-t border-[#1f1f1f] pt-3">
-428 |                 <button
-429 |                   onClick={() => setIsControlsOpen(!isControlsOpen)}
-430 |                   className="w-full flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-neutral-500 hover:text-neutral-300 transition-colors cursor-pointer"
-431 |                 >
-432 |                   <span>Simulation Settings</span>
-433 |                   <span className={`transition-transform duration-200 ${isControlsOpen ? 'rotate-180' : ''}`}>&#8964;</span>
-434 |                 </button>
-435 |                 {isControlsOpen && (
-436 |                   <div className="mt-3 space-y-3">
-437 |                     <div className="space-y-1.5">
-438 |                       <span className="text-[9px] font-mono uppercase tracking-wider text-neutral-600 font-bold block">Rounds</span>
-439 |                       <div className="flex gap-1">
-440 |                         {[1, 2, 3, 4, 5].map((n) => (
-441 |                           <button
-442 |                             key={n}
-443 |                             onClick={() => setEchoRounds(n)}
-444 |                             className={`w-8 h-8 rounded-lg text-xs font-semibold font-mono transition-all cursor-pointer ${
-445 |                               echoRounds === n ? 'bg-white text-black' : 'bg-neutral-900 text-neutral-400 hover:text-white border border-[#1f1f1f]'
-446 |                             }`}
-447 |                           >
-448 |                             {n}
-449 |                           </button>
-450 |                         ))}
-451 |                       </div>
-452 |                     </div>
-453 |                     <div className="space-y-1.5">
-454 |                       <span className="text-[9px] font-mono uppercase tracking-wider text-neutral-600 font-bold block">Tone</span>
-455 |                       <div className="flex gap-1 flex-wrap">
-456 |                         {(['Realistic', 'Compassionate', 'Confrontational'] as const).map((t) => (
-457 |                           <button
-458 |                             key={t}
-459 |                             onClick={() => setEchoTone(t)}
-460 |                             className={`px-2.5 py-1 rounded-lg text-[10px] font-mono transition-all cursor-pointer ${
-461 |                               echoTone === t ? 'bg-white text-black font-semibold' : 'bg-neutral-900 text-neutral-400 hover:text-white border border-[#1f1f1f]'
-462 |                             }`}
-463 |                           >
-464 |                             {t}
-465 |                           </button>
-466 |                         ))}
-467 |                       </div>
-468 |                     </div>
-469 |                   </div>
-470 |                 )}
-471 |               </div>
-472 |             </div>
-473 |           </Panel>
-474 |         )}
-475 | 
-476 |         {/* Bottom-center Proceed Buttons */}
-477 |         {isEchoHouseMode ? (
-478 |           nodes.filter(n => (n.data as any).isEchoHouseAgent && (n.data as any).echohouseRole !== "self").length > 0 && (
-479 |             <Panel position="bottom-center" className="!bottom-14 z-20">
-480 |               <button
-481 |                 onClick={handleEchoHouseProceed}
-482 |                 disabled={isOrchestrating}
-483 |                 className="px-6 py-2.5 bg-white text-black font-bold text-xs rounded-full shadow-2xl hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2 select-none"
-484 |               >
-485 |                 {isOrchestrating ? (
-486 |                   <>
-487 |                     <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
-488 |                     <span>Running...</span>
-489 |                   </>
-490 |                 ) : (
-491 |                   <span>Proceed</span>
-492 |                 )}
-493 |               </button>
-494 |             </Panel>
-495 |           )
-496 |         ) : (
-497 |           nodes.length > 0 && executionState !== "running" && !isOrchestrating && (
-498 |             <Panel position="bottom-center" className="!bottom-14 z-20">
-499 |               <button
-500 |                 onClick={handleNormalProceed}
-501 |                 disabled={isOrchestrating}
-502 |                 className="px-6 py-2.5 bg-white text-black font-bold text-xs rounded-full shadow-2xl hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2 select-none"
-503 |               >
-504 |                 {isOrchestrating ? (
-505 |                   <>
-506 |                     <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
-507 |                     <span>Running...</span>
-508 |                   </>
-509 |                 ) : (
-510 |                   <span>Proceed</span>
-511 |                 )}
-512 |               </button>
-513 |             </Panel>
-514 |           )
-515 |         )}
-516 | 
-517 |         {/* Persistent legend — bottom right */}
-518 |         <Panel position="bottom-right" className="!right-4 !bottom-14 select-none">
-519 |           <div className="bg-[#0d0d0d]/80 border border-[#1f1f1f] rounded-lg p-2.5 backdrop-blur-md shadow-xl text-[9px] font-mono text-neutral-600 space-y-1.5">
-520 |             <div className="flex items-center gap-2">
-521 |               <span className="w-2.5 h-2.5 rounded-full bg-black border-2 border-rose-500 shrink-0" />
-522 |               <span>Input (data in)</span>
-523 |             </div>
-524 |             <div className="flex items-center gap-2">
-525 |               <span className="w-2.5 h-2.5 rounded-full bg-black border-2 border-emerald-500 shrink-0" />
-526 |               <span>Output (data out)</span>
-527 |             </div>
-528 |             <div className="flex items-center gap-2">
-529 |               <span className="w-3.5 h-0.5 bg-cyan-500 rounded shrink-0" />
-530 |               <span>Dependency wire</span>
-531 |             </div>
-532 |             <div className="flex items-center gap-2">
-533 |               <span className="text-[8px] leading-none">✥</span>
-534 |               <span>Drag card to reposition</span>
-535 |             </div>
-536 |           </div>
-537 |         </Panel>
-538 |       </ReactFlow>
-539 | 
-540 |       {/* EchoHouse Inline Creation Form */}
-541 |       {isEchoHouseCreateFormOpen && isEchoHouseMode && (
-542 |         <div className="absolute bottom-28 left-4 w-72 bg-[#0c0c0c]/95 border border-[#1f1f1f] rounded-xl p-4 shadow-2xl z-30 space-y-3 select-none">
-543 |           <div className="flex justify-between items-center pb-2 border-b border-[#1f1f1f]">
-544 |             <span className="text-xs font-bold text-white uppercase tracking-wider">Add Person</span>
-545 |             <button onClick={() => setIsEchoHouseCreateFormOpen(false)} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-3.5 h-3.5" /></button>
-546 |           </div>
-547 |           <div className="space-y-2 text-xs">
-548 |             <div className="space-y-1">
-549 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">Name</label>
-550 |               <input
-551 |                 type="text"
-552 |                 value={formName}
-553 |                 onChange={(e) => setFormName(e.target.value)}
-554 |                 placeholder="Sarah, Dad, Crush..."
-555 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-white outline-none focus:border-neutral-500"
-556 |               />
-557 |             </div>
-558 |             <div className="space-y-1">
-559 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">Role in your life</label>
-560 |               <input
-561 |                 type="text"
-562 |                 value={formRole}
-563 |                 onChange={(e) => setFormRole(e.target.value)}
-564 |                 placeholder="Girlfriend, Father, Best Friend..."
-565 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-white outline-none focus:border-neutral-500"
-566 |               />
-567 |             </div>
-568 |             <div className="space-y-1">
-569 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">What do they think about your situation?</label>
-570 |               <textarea
-571 |                 value={formProblem}
-572 |                 onChange={(e) => setFormProblem(e.target.value)}
-573 |                 placeholder="Their perspective/context..."
-574 |                 rows={3}
-575 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2 text-white outline-none focus:border-neutral-500 resize-none"
-576 |               />
-577 |             </div>
-578 |             <button
-579 |               onClick={handleCreateEchoHousePerson}
-580 |               disabled={!formName.trim() || !formRole.trim() || !formProblem.trim()}
-581 |               className="w-full py-2 bg-white text-black font-bold rounded-lg text-xs hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-30 disabled:scale-100 cursor-pointer text-center"
-582 |             >
-583 |               Add Person
-584 |             </button>
-585 |           </div>
-586 |         </div>
-587 |       )}
-588 |     </div>
-589 |   );
-590 | }
-591 |
+201 |   // Zoom/Viewport Controls
+202 |   const handleZoomIn = () => {
+203 |     zoomIn({ duration: 300 });
+204 |   };
+205 | 
+206 |   const handleZoomOut = () => {
+207 |     zoomOut({ duration: 300 });
+208 |   };
+209 | 
+210 |   const handleResetView = () => {
+211 |     setViewport({ x: 100, y: 50, zoom: 0.9 }, { duration: 400 });
+212 |   };
+213 | 
+214 |   const applyLayout = useCallback(() => {
+215 |     if (nodes.length === 0) return;
+216 |     const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
+217 |     setNodes(layoutedNodes);
+218 |   }, [nodes, edges, setNodes]);
+219 | 
+220 |   // Layout nodes once initially when loaded
+221 |   useEffect(() => {
+222 |     if (!initialLayoutDone && nodes.length > 0) {
+223 |       const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges);
+224 |       setNodes(layoutedNodes);
+225 |       setInitialLayoutDone(true);
+226 |     }
+227 |   }, [nodes, edges, initialLayoutDone, setNodes]);
+228 | 
+229 |   // Reset layout state if node length changes back to 0 (new chat)
+230 |   useEffect(() => {
+231 |     if (nodes.length === 0) {
+232 |       setInitialLayoutDone(false);
+233 |     }
+234 |   }, [nodes.length]);
+235 | 
+236 |   // Auto-fit viewport on node count changes
+237 |   useEffect(() => {
+238 |     if (nodes.length > 0) {
+239 |       const timer = setTimeout(() => {
+240 |         fitView({ padding: 0.3, duration: 400 });
+241 |       }, 300);
+242 |       return () => clearTimeout(timer);
+243 |     }
+244 |   }, [nodes.length, fitView]);
+245 | 
+246 |   const handleAddAgentNode = () => {
+247 |     const randomId = `custom_agent_${Date.now().toString().slice(-4)}`;
+248 |     const view = getViewport();
+249 |     // Center new node inside view coordinates
+250 |     let x = (-view.x + window.innerWidth / 2 - 120) / view.zoom;
+251 |     let y = (-view.y + window.innerHeight / 2 - 100) / view.zoom;
+252 | 
+253 |     // Avoid collision
+254 |     const NODE_W = 240;
+255 |     const NODE_H = 220;
+256 |     const existingPositions = nodes.map(n => n.position);
+257 |     for (const pos of existingPositions) {
+258 |       if (Math.abs(x - pos.x) < NODE_W && Math.abs(y - pos.y) < NODE_H) {
+259 |         y = pos.y + NODE_H + 40;
+260 |       }
+261 |     }
+262 | 
+263 |     const newNode = {
+264 |       id: randomId,
+265 |       type: 'custom',
+266 |       position: { x: Math.max(50, x), y: Math.max(50, y) },
+267 |       data: {
+268 |         name: "Custom Agent Node",
+269 |         tag: "USER_CUSTOM_NODE",
+270 |         status: "IDLE" as const,
+271 |         metricLabel: "Tasks Completed",
+272 |         metricVal: "0",
+273 |         icon: "science",
+274 |         objective: "Enter agent goals...",
+275 |         personality: "Pragmatic, logical, responsive",
+276 |         systemPrompt: "You are a custom assistant. Fulfill user demands precisely.",
+277 |         rules: ["Verify actions before launching"],
+278 |         tools: ["Web Search"],
+279 |         temp: 0.5,
+280 |         logic: 80,
+281 |         empathy: 50,
+282 |         context: "128k",
+283 |         enabled: true,
+284 |         priority: 5,
+285 |         toolPermissions: {
+286 |           "Web Search": "ALLOWED" as const
+287 |         },
+288 |         toolLogs: []
+289 |       }
+290 |     };
+291 |     addNode(newNode);
+292 |     setSelectedNodeId(newNode.id);
+293 |   };
+294 | 
+295 |   // Node styles for MiniMap representation
+296 |   const getMiniMapNodeColor = (node: Node) => {
+297 |     if (node.type === 'groupNode') return 'rgba(255, 255, 255, 0.03)';
+298 |     const data = node.data as CanvasNodeData;
+299 |     if (data && data.enabled === false) return '#262626';
+300 |     if (data && (data.status === 'ACTIVE' || data.status === 'PROCESSING')) return '#06b6d4';
+301 |     return '#404040';
+302 |   };
+303 | 
+304 |   return (
+305 |     <div className="w-full h-full flex-1 relative bg-black">
+306 |       <ReactFlow
+307 |         nodes={nodes}
+308 |         edges={edges}
+309 |         onNodesChange={onNodesChange}
+310 |         onEdgesChange={onEdgesChange}
+311 |         onConnect={onConnect}
+312 |         onReconnect={onReconnect}
+313 |         nodeTypes={nodeTypes}
+314 |         edgeTypes={edgeTypes}
+315 |         onNodeContextMenu={onNodeContextMenu}
+316 |         onPaneContextMenu={onPaneContextMenu}
+317 |         onPaneClick={onPaneClick}
+318 |         snapToGrid={true}
+319 |         snapGrid={[15, 15]}
+320 |         fitViewOptions={{ padding: 0.3 }}
+321 |         className="flow-arena-editor"
+322 |         minZoom={0.2}
+323 |         maxZoom={2.5}
+324 |         defaultViewport={{ x: 100, y: 50, zoom: 0.9 }}
+325 |       >
+326 |         {/* Subtle grid background dots */}
+327 |         <Background 
+328 |           variant={BackgroundVariant.Dots} 
+329 |           color="rgba(255, 255, 255, 0.06)" 
+330 |           gap={24} 
+331 |           size={1}
+332 |         />
+333 | 
+334 |         {/* Custom Minimap Overlay */}
+335 |         <MiniMap 
+336 |           zoomable 
+337 |           pannable 
+338 |           nodeColor={getMiniMapNodeColor}
+339 |           nodeStrokeWidth={3}
+340 |           nodeBorderRadius={8}
+341 |           maskColor="rgba(0, 0, 0, 0.65)"
+342 |           className="!right-4 !top-4"
+343 |         />
+344 | 
+345 |         {/* Custom Floating Zoom & Node controls */}
+346 |         <Panel position="bottom-left" className="!left-4 !bottom-14 flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-1 rounded-xl z-20 shadow-2xl">
+347 |           <button 
+348 |             onClick={handleZoomIn}
+349 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors cursor-pointer"
+350 |             title="Zoom In"
+351 |           >
+352 |             <Plus className="w-3.5 h-3.5" />
+353 |           </button>
+354 | 
+355 |           <button 
+356 |             onClick={handleZoomOut}
+357 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors cursor-pointer"
+358 |             title="Zoom Out"
+359 |           >
+360 |             <Minus className="w-3.5 h-3.5" />
+361 |           </button>
+362 | 
+363 |           <button 
+364 |             onClick={handleResetView}
+365 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 cursor-pointer"
+366 |             title="Reset Viewport"
+367 |           >
+368 |             <Maximize className="w-3.5 h-3.5" />
+369 |           </button>
+370 | 
+371 |           <button 
+372 |             onClick={applyLayout}
+373 |             className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 cursor-pointer"
+374 |             title="Auto Layout Graph"
+375 |           >
+376 |             <LayoutGrid className="w-3.5 h-3.5" />
+377 |           </button>
+378 | 
+379 |           <button 
+380 |             onClick={isEchoHouseMode ? () => setIsEchoHouseCreateFormOpen(true) : handleAddAgentNode}
+381 |             className="p-2 text-white hover:bg-neutral-900 rounded-lg transition-colors border-l border-[#1f1f1f] ml-1 flex items-center gap-1 text-[10px] cursor-pointer"
+382 |             title={isEchoHouseMode ? "Add Person" : "Add Custom Agent Node"}
+383 |           >
+384 |             <PlusCircle className="w-3.5 h-3.5 text-white" />
+385 |             <span className="font-semibold pr-1">Node</span>
+386 |           </button>
+387 |         </Panel>
+388 | 
+389 |         {/* Right-click Context Menu */}
+390 |         {contextMenu && (
+391 |           <ContextMenu
+392 |             x={contextMenu.x}
+393 |             y={contextMenu.y}
+394 |             node={contextMenu.node}
+395 |             onClose={() => setContextMenu(null)}
+396 |           />
+397 |         )}
+398 | 
+399 | 
+400 |         {/* EchoHouse instructional panel moved to the top-left panel */}
+401 | 
+402 |         {/* Bottom-center Proceed Buttons */}
+403 |         {isEchoHouseMode ? (
+404 |           nodes.filter(n => (n.data as any).isEchoHouseAgent && (n.data as any).echohouseRole !== "self").length > 0 && (
+405 |             <Panel position="bottom-center" className="!bottom-14 z-20">
+406 |               <button
+407 |                 onClick={handleEchoHouseProceed}
+408 |                 disabled={isOrchestrating}
+409 |                 className="px-6 py-2.5 bg-white text-black font-bold text-xs rounded-full shadow-2xl hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2 select-none"
+410 |               >
+411 |                 {isOrchestrating ? (
+412 |                   <>
+413 |                     <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+414 |                     <span>Running...</span>
+415 |                   </>
+416 |                 ) : (
+417 |                   <span>Proceed</span>
+418 |                 )}
+419 |               </button>
+420 |             </Panel>
+421 |           )
+422 |         ) : (
+423 |           nodes.length > 0 && executionState !== "running" && !isOrchestrating && (
+424 |             <Panel position="bottom-center" className="!bottom-14 z-20">
+425 |               <button
+426 |                 onClick={handleNormalProceed}
+427 |                 disabled={isOrchestrating}
+428 |                 className="px-6 py-2.5 bg-white text-black font-bold text-xs rounded-full shadow-2xl hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2 select-none"
+429 |               >
+430 |                 {isOrchestrating ? (
+431 |                   <>
+432 |                     <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+433 |                     <span>Running...</span>
+434 |                   </>
+435 |                 ) : (
+436 |                   <span>Proceed</span>
+437 |                 )}
+438 |               </button>
+439 |             </Panel>
+440 |           )
+441 |         )}
+442 | 
+443 |         {/* Persistent legend and EchoHouse instructions — top left */}
+444 |         <Panel position="top-left" className="!left-4 !top-16 select-none z-20 flex flex-col gap-2.5">
+445 |           <div className="bg-[#0d0d0d]/80 border border-[#1f1f1f] rounded-lg p-2.5 backdrop-blur-md shadow-xl text-[9px] font-mono text-neutral-600 space-y-1.5 w-64">
+446 |             <div className="flex items-center gap-2">
+447 |               <span className="w-2.5 h-2.5 rounded-full bg-black border-2 border-rose-500 shrink-0" />
+448 |               <span>Input (data in)</span>
+449 |             </div>
+450 |             <div className="flex items-center gap-2">
+451 |               <span className="w-2.5 h-2.5 rounded-full bg-black border-2 border-emerald-500 shrink-0" />
+452 |               <span>Output (data out)</span>
+453 |             </div>
+454 |             <div className="flex items-center gap-2">
+455 |               <span className="w-3.5 h-0.5 bg-cyan-500 rounded shrink-0" />
+456 |               <span>Dependency wire</span>
+457 |             </div>
+458 |             <div className="flex items-center gap-2">
+459 |               <span className="text-[8px] leading-none">✥</span>
+460 |               <span>Drag card to reposition</span>
+461 |             </div>
+462 |           </div>
+463 | 
+464 |           {isEchoHouseMode && (
+465 |             <div className="bg-[#0d0d0d]/80 border border-[#1f1f1f] rounded-lg p-2.5 backdrop-blur-md shadow-xl space-y-3 w-64">
+466 |               <p className="text-xs text-neutral-300 leading-relaxed font-sans">
+467 |                 Add the people in your life — give each one a name, their role, and what they think about your situation. Then click Proceed to begin the simulation.
+468 |               </p>
+469 |               <div className="border-t border-[#1f1f1f] pt-3">
+470 |                 <button
+471 |                   onClick={() => setIsControlsOpen(!isControlsOpen)}
+472 |                   className="w-full flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-neutral-500 hover:text-neutral-300 transition-colors cursor-pointer"
+473 |                 >
+474 |                   <span>Simulation Settings</span>
+475 |                   <span className={`transition-transform duration-200 ${isControlsOpen ? 'rotate-180' : ''}`}>&#8964;</span>
+476 |                 </button>
+477 |                 {isControlsOpen && (
+478 |                   <div className="mt-3 space-y-3">
+479 |                     <div className="space-y-1.5">
+480 |                       <span className="text-[9px] font-mono uppercase tracking-wider text-neutral-600 font-bold block">Rounds</span>
+481 |                       <div className="flex gap-1">
+482 |                         {[1, 2, 3, 4, 5].map((n) => (
+483 |                           <button
+484 |                             key={n}
+485 |                             onClick={() => setEchoRounds(n)}
+486 |                             className={`w-8 h-8 rounded-lg text-xs font-semibold font-mono transition-all cursor-pointer ${
+487 |                               echoRounds === n ? 'bg-white text-black' : 'bg-neutral-900 text-neutral-400 hover:text-white border border-[#1f1f1f]'
+488 |                             }`}
+489 |                           >
+490 |                             {n}
+491 |                           </button>
+492 |                         ))}
+493 |                       </div>
+494 |                     </div>
+495 |                     <div className="space-y-1.5">
+496 |                       <span className="text-[9px] font-mono uppercase tracking-wider text-neutral-600 font-bold block">Tone</span>
+497 |                       <div className="flex gap-1 flex-wrap">
+498 |                         {(['Realistic', 'Compassionate', 'Confrontational'] as const).map((t) => (
+499 |                           <button
+500 |                             key={t}
+501 |                             onClick={() => setEchoTone(t)}
+502 |                             className={`px-2.5 py-1 rounded-lg text-[10px] font-mono transition-all cursor-pointer ${
+503 |                               echoTone === t ? 'bg-white text-black font-semibold' : 'bg-neutral-900 text-neutral-400 hover:text-white border border-[#1f1f1f]'
+504 |                             }`}
+505 |                           >
+506 |                             {t}
+507 |                           </button>
+508 |                         ))}
+509 |                       </div>
+510 |                     </div>
+511 |                   </div>
+512 |                 )}
+513 |               </div>
+514 |             </div>
+515 |           )}
+516 |         </Panel>
+517 |       </ReactFlow>
+518 | 
+519 |       {/* EchoHouse Inline Creation Form */}
+520 |       {isEchoHouseCreateFormOpen && isEchoHouseMode && (
+521 |         <div className="absolute bottom-28 left-4 w-72 bg-[#0c0c0c]/95 border border-[#1f1f1f] rounded-xl p-4 shadow-2xl z-30 space-y-3 select-none">
+522 |           <div className="flex justify-between items-center pb-2 border-b border-[#1f1f1f]">
+523 |             <span className="text-xs font-bold text-white uppercase tracking-wider">Add Person</span>
+524 |             <button onClick={() => setIsEchoHouseCreateFormOpen(false)} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+525 |           </div>
+526 |           <div className="space-y-2 text-xs">
+527 |             <div className="space-y-1">
+528 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">Name</label>
+529 |               <input
+530 |                 type="text"
+531 |                 value={formName}
+532 |                 onChange={(e) => setFormName(e.target.value)}
+533 |                 placeholder="Sarah, Dad, Crush..."
+534 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-white outline-none focus:border-neutral-500"
+535 |               />
+536 |             </div>
+537 |             <div className="space-y-1">
+538 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">Role in your life</label>
+539 |               <input
+540 |                 type="text"
+541 |                 value={formRole}
+542 |                 onChange={(e) => setFormRole(e.target.value)}
+543 |                 placeholder="Girlfriend, Father, Best Friend..."
+544 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-white outline-none focus:border-neutral-500"
+545 |               />
+546 |             </div>
+547 |             <div className="space-y-1">
+548 |               <label className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider font-bold">What do they think about your situation?</label>
+549 |               <textarea
+550 |                 value={formProblem}
+551 |                 onChange={(e) => setFormProblem(e.target.value)}
+552 |                 placeholder="Their perspective/context..."
+553 |                 rows={3}
+554 |                 className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2 text-white outline-none focus:border-neutral-500 resize-none"
+555 |               />
+556 |             </div>
+557 |             <button
+558 |               onClick={handleCreateEchoHousePerson}
+559 |               disabled={!formName.trim() || !formRole.trim() || !formProblem.trim()}
+560 |               className="w-full py-2 bg-white text-black font-bold rounded-lg text-xs hover:bg-neutral-200 active:scale-95 transition-all disabled:opacity-30 disabled:scale-100 cursor-pointer text-center"
+561 |             >
+562 |               Add Person
+563 |             </button>
+564 |           </div>
+565 |         </div>
+566 |       )}
+567 |     </div>
+568 |   );
+569 | }
+570 |
 ```
 
 ### File: `Frontend/components/MarkdownRenderer.tsx`
@@ -9529,7 +9636,7 @@ SoloSpace/
 
 ### File: `Frontend/store/workflowStore.ts`
 
-> 1423 lines | 48.9 KB
+> 1423 lines | 49.0 KB
 
 ```typescript
    1 | import { create } from 'zustand';
@@ -9822,7 +9929,7 @@ SoloSpace/
  288 |   },
  289 |   loadBackupKeys: async () => {
  290 |     try {
- 291 |       const providers = ['gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia', 'glm', 'z.ai', 'mistral', 'cerebras', 'xai', 'together', 'fireworks', 'perplexity', 'cohere', 'lmstudio', 'custom', 'bedrock', 'azure_openai'];
+ 291 |       const providers = ['gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia', 'glm', 'z.ai', 'mistral', 'cerebras', 'xai', 'together', 'fireworks', 'perplexity', 'cohere', 'lmstudio', 'custom', 'bedrock', 'azure_openai', 'ollama_cloud'];
  292 |       const loadedBackup: Record<string, string[]> = {};
  293 |       for (const p of providers) {
  294 |         const keys: string[] = [];
@@ -9854,7 +9961,7 @@ SoloSpace/
  320 |   loadPersistedKeys: async () => {
  321 |     try {
  322 |       const state = get();
- 323 |       const providers = ['gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia', 'glm', 'z.ai', 'mistral', 'cerebras', 'xai', 'together', 'fireworks', 'perplexity', 'cohere', 'lmstudio', 'custom', 'bedrock', 'azure_openai'];
+ 323 |       const providers = ['gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia', 'glm', 'z.ai', 'mistral', 'cerebras', 'xai', 'together', 'fireworks', 'perplexity', 'cohere', 'lmstudio', 'custom', 'bedrock', 'azure_openai', 'ollama_cloud'];
  324 |       const loadedKeys: Record<string, string> = {};
  325 |       for (const p of providers) {
  326 |         const encrypted = await idbGet<string>(`apikey_${p}`);
@@ -9900,7 +10007,7 @@ SoloSpace/
  366 |       }
  367 | 
  368 |       // Load custom models per-provider
- 369 |       const providers = ['gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia', 'glm', 'z.ai', 'mistral', 'cerebras', 'xai', 'together', 'fireworks', 'perplexity', 'cohere', 'lmstudio', 'custom', 'bedrock', 'azure_openai'];
+ 369 |       const providers = ['gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia', 'glm', 'z.ai', 'mistral', 'cerebras', 'xai', 'together', 'fireworks', 'perplexity', 'cohere', 'lmstudio', 'custom', 'bedrock', 'azure_openai', 'ollama_cloud'];
  370 |       const customModels: Record<string, any[]> = {};
  371 |       for (const p of providers) {
  372 |         const customModel = await idbGet<string>(`solospace_custom_model_${p}`);
@@ -10255,304 +10362,304 @@ SoloSpace/
  721 |     if (ctrl) ctrl.abort();
  722 | 
  723 |     const currentSessionId = get().activeSessionId;
- 724 |     if (currentSessionId) {
- 725 |       const currentSession: ChatSession = {
- 726 |         id: currentSessionId,
- 727 |         title: get().sessions[currentSessionId]?.title || "Chat",
- 728 |         prompt: get().sessions[currentSessionId]?.prompt || "",
- 729 |         mode: get().sessions[currentSessionId]?.mode || "auto",
- 730 |         nodes: get().nodes,
- 731 |         edges: get().edges,
- 732 |         chatMessages: get().chatMessages,
- 733 |         agentTalkLogs: get().agentTalkLogs,
- 734 |         executionState: get().executionState,
- 735 |         statusMessage: get().statusMessage,
- 736 |         followUpSuggestions: get().followUpSuggestions
- 737 |       };
- 738 |       set((state) => ({
- 739 |         sessions: { ...state.sessions, [currentSessionId]: currentSession }
- 740 |       }));
- 741 |     }
- 742 | 
- 743 |     const newSession = get().sessions[sessionId];
- 744 |     if (newSession) {
- 745 |       set({
- 746 |         activeSessionId: sessionId,
- 747 |         nodes: newSession.nodes,
- 748 |         edges: newSession.edges,
- 749 |         chatMessages: newSession.chatMessages,
- 750 |         agentTalkLogs: newSession.agentTalkLogs,
- 751 |         executionState: newSession.executionState,
- 752 |         statusMessage: "",
- 753 |         followUpSuggestions: [],
- 754 |         selectedNodeId: null,
- 755 |         isOrchestrating: false,
- 756 |         isThinking: false,
- 757 |         liveThoughts: "",
- 758 |         pendingApproval: null,
- 759 |         abortController: null
- 760 |       });
- 761 |     }
- 762 |   },
- 763 | 
- 764 |   saveCurrentSession: () => {
- 765 |     const currentSessionId = get().activeSessionId;
- 766 |     if (!currentSessionId) return;
- 767 |     debounceSave(currentSessionId, get, set);
- 768 |   },
- 769 | 
- 770 |   fetchSessions: async () => {
- 771 |     try {
- 772 |       const response = await fetch("/api/gemini/sessions");
- 773 |       if (response.ok) {
- 774 |         const list = await response.json();
- 775 |         const updatedSessions: Record<string, ChatSession> = { ...get().sessions };
- 776 |         for (const s of list) {
- 777 |           if (!updatedSessions[s.session_id]) {
- 778 |             updatedSessions[s.session_id] = {
- 779 |               id: s.session_id,
- 780 |               title: s.title,
- 781 |               prompt: s.prompt,
- 782 |               mode: s.mode,
- 783 |               nodes: [],
- 784 |               edges: [],
- 785 |               chatMessages: [],
- 786 |               agentTalkLogs: [],
- 787 |               executionState: s.execution_state,
- 788 |               statusMessage: s.status_message,
- 789 |               followUpSuggestions: []
- 790 |             };
- 791 |           }
- 792 |         }
- 793 |         set({ sessions: updatedSessions });
- 794 |       }
- 795 |     } catch (e) {
- 796 |       console.error("Failed to fetch sessions from DB", e);
- 797 |     }
- 798 |   },
- 799 | 
- 800 |   loadSessionFromDb: async (sessionId: string) => {
- 801 |     const ctrl = get().abortController;
- 802 |     if (ctrl) ctrl.abort();
- 803 | 
- 804 |     try {
- 805 |       const response = await fetch(`/api/gemini/sessions/${sessionId}`);
- 806 |       if (response.ok) {
- 807 |         const fullSession = await response.json();
- 808 |         const session: ChatSession = {
- 809 |           id: fullSession.id,
- 810 |           title: fullSession.title,
- 811 |           prompt: fullSession.prompt,
- 812 |           mode: fullSession.mode,
- 813 |           nodes: fullSession.nodes,
- 814 |           edges: fullSession.edges,
- 815 |           chatMessages: fullSession.chatMessages,
- 816 |           agentTalkLogs: fullSession.agentTalkLogs,
- 817 |           executionState: fullSession.executionState,
- 818 |           statusMessage: fullSession.statusMessage,
- 819 |           followUpSuggestions: fullSession.followUpSuggestions
- 820 |         };
- 821 |         
- 822 |         set((state) => ({
- 823 |           sessions: { ...state.sessions, [sessionId]: session },
- 824 |           activeSessionId: sessionId,
- 825 |           nodes: session.nodes,
- 826 |           edges: session.edges,
- 827 |           chatMessages: session.chatMessages,
- 828 |           agentTalkLogs: session.agentTalkLogs,
- 829 |           executionState: session.executionState,
- 830 |           statusMessage: "",
- 831 |           followUpSuggestions: [],
- 832 |           selectedNodeId: null,
- 833 |           isOrchestrating: false,
- 834 |           isThinking: false,
- 835 |           liveThoughts: "",
- 836 |           pendingApproval: null,
- 837 |           abortController: null
- 838 |         }));
- 839 |       }
- 840 |     } catch (e) {
- 841 |       console.error("Failed to load session from DB", e);
- 842 |     }
- 843 |   },
- 844 | 
- 845 |   deleteSessionFromDb: async (sessionId: string) => {
- 846 |     // Abort orchestration if deleting the currently active session
- 847 |     if (get().activeSessionId === sessionId) {
- 848 |       const ctrl = get().abortController;
- 849 |       if (ctrl) ctrl.abort();
- 850 |     }
- 851 | 
- 852 |     try {
- 853 |       const response = await fetch(`/api/gemini/sessions/${sessionId}`, {
- 854 |         method: "DELETE"
- 855 |       });
- 856 |       if (response.ok) {
- 857 |         set((state) => {
- 858 |           const updated = { ...state.sessions };
- 859 |           delete updated[sessionId];
- 860 |           const newActiveId = state.activeSessionId === sessionId ? null : state.activeSessionId;
- 861 |           return {
- 862 |             sessions: updated,
- 863 |             activeSessionId: newActiveId,
- 864 |             abortController: state.activeSessionId === sessionId ? null : state.abortController,
- 865 |             isOrchestrating: state.activeSessionId === sessionId ? false : state.isOrchestrating,
- 866 |             isThinking: state.activeSessionId === sessionId ? false : state.isThinking,
- 867 |             ...(newActiveId ? {} : {
- 868 |               nodes: [],
- 869 |               edges: [],
- 870 |               chatMessages: [],
- 871 |               agentTalkLogs: [],
- 872 |               executionState: "setup",
- 873 |               statusMessage: "",
- 874 |               followUpSuggestions: []
- 875 |             })
- 876 |           };
- 877 |         });
- 878 |       }
- 879 |     } catch (e) {
- 880 |       console.error("Failed to delete session", e);
- 881 |     }
- 882 |   },
- 883 | 
- 884 |   triggerSteerOrchestration: async (promptText, execute = true, mode) => {
- 885 |     if (!promptText.trim()) return;
- 886 | 
- 887 |     // Abort any active orchestration
- 888 |     const currentController = get().abortController;
- 889 |     if (currentController) {
- 890 |       currentController.abort();
- 891 |     }
+ 724 |     const newSession = get().sessions[sessionId];
+ 725 |     if (!newSession) return;
+ 726 | 
+ 727 |     set((state) => {
+ 728 |       const updatedSessions = { ...state.sessions };
+ 729 |       if (currentSessionId && state.sessions[currentSessionId]) {
+ 730 |         updatedSessions[currentSessionId] = {
+ 731 |           ...state.sessions[currentSessionId],
+ 732 |           nodes: state.nodes,
+ 733 |           edges: state.edges,
+ 734 |           chatMessages: state.chatMessages,
+ 735 |           agentTalkLogs: state.agentTalkLogs,
+ 736 |           executionState: state.executionState,
+ 737 |           statusMessage: state.statusMessage,
+ 738 |           followUpSuggestions: state.followUpSuggestions
+ 739 |         };
+ 740 |       }
+ 741 | 
+ 742 |       return {
+ 743 |         sessions: updatedSessions,
+ 744 |         activeSessionId: sessionId,
+ 745 |         nodes: newSession.nodes,
+ 746 |         edges: newSession.edges,
+ 747 |         chatMessages: newSession.chatMessages,
+ 748 |         agentTalkLogs: newSession.agentTalkLogs,
+ 749 |         executionState: newSession.executionState,
+ 750 |         statusMessage: "",
+ 751 |         followUpSuggestions: [],
+ 752 |         selectedNodeId: null,
+ 753 |         isOrchestrating: false,
+ 754 |         isThinking: false,
+ 755 |         liveThoughts: "",
+ 756 |         pendingApproval: null,
+ 757 |         abortController: null
+ 758 |       };
+ 759 |     });
+ 760 |   },
+ 761 | 
+ 762 |   saveCurrentSession: () => {
+ 763 |     const currentSessionId = get().activeSessionId;
+ 764 |     if (!currentSessionId) return;
+ 765 |     debounceSave(currentSessionId, get, set);
+ 766 |   },
+ 767 | 
+ 768 |   fetchSessions: async () => {
+ 769 |     try {
+ 770 |       const response = await fetch("/api/gemini/sessions");
+ 771 |       if (response.ok) {
+ 772 |         const list = await response.json();
+ 773 |         const updatedSessions: Record<string, ChatSession> = { ...get().sessions };
+ 774 |         for (const s of list) {
+ 775 |           if (!updatedSessions[s.session_id]) {
+ 776 |             updatedSessions[s.session_id] = {
+ 777 |               id: s.session_id,
+ 778 |               title: s.title,
+ 779 |               prompt: s.prompt,
+ 780 |               mode: s.mode,
+ 781 |               nodes: [],
+ 782 |               edges: [],
+ 783 |               chatMessages: [],
+ 784 |               agentTalkLogs: [],
+ 785 |               executionState: s.execution_state,
+ 786 |               statusMessage: s.status_message,
+ 787 |               followUpSuggestions: []
+ 788 |             };
+ 789 |           }
+ 790 |         }
+ 791 |         set({ sessions: updatedSessions });
+ 792 |       }
+ 793 |     } catch (e) {
+ 794 |       console.error("Failed to fetch sessions from DB", e);
+ 795 |     }
+ 796 |   },
+ 797 | 
+ 798 |   loadSessionFromDb: async (sessionId: string) => {
+ 799 |     const ctrl = get().abortController;
+ 800 |     if (ctrl) ctrl.abort();
+ 801 | 
+ 802 |     try {
+ 803 |       const response = await fetch(`/api/gemini/sessions/${sessionId}`);
+ 804 |       if (response.ok) {
+ 805 |         const fullSession = await response.json();
+ 806 |         const session: ChatSession = {
+ 807 |           id: fullSession.id,
+ 808 |           title: fullSession.title,
+ 809 |           prompt: fullSession.prompt,
+ 810 |           mode: fullSession.mode,
+ 811 |           nodes: fullSession.nodes,
+ 812 |           edges: fullSession.edges,
+ 813 |           chatMessages: fullSession.chatMessages,
+ 814 |           agentTalkLogs: fullSession.agentTalkLogs,
+ 815 |           executionState: fullSession.executionState,
+ 816 |           statusMessage: fullSession.statusMessage,
+ 817 |           followUpSuggestions: fullSession.followUpSuggestions
+ 818 |         };
+ 819 |         
+ 820 |         set((state) => ({
+ 821 |           sessions: { ...state.sessions, [sessionId]: session },
+ 822 |           activeSessionId: sessionId,
+ 823 |           nodes: session.nodes,
+ 824 |           edges: session.edges,
+ 825 |           chatMessages: session.chatMessages,
+ 826 |           agentTalkLogs: session.agentTalkLogs,
+ 827 |           executionState: session.executionState,
+ 828 |           statusMessage: "",
+ 829 |           followUpSuggestions: [],
+ 830 |           selectedNodeId: null,
+ 831 |           isOrchestrating: false,
+ 832 |           isThinking: false,
+ 833 |           liveThoughts: "",
+ 834 |           pendingApproval: null,
+ 835 |           abortController: null
+ 836 |         }));
+ 837 |       }
+ 838 |     } catch (e) {
+ 839 |       console.error("Failed to load session from DB", e);
+ 840 |     }
+ 841 |   },
+ 842 | 
+ 843 |   deleteSessionFromDb: async (sessionId: string) => {
+ 844 |     // Abort orchestration if deleting the currently active session
+ 845 |     if (get().activeSessionId === sessionId) {
+ 846 |       const ctrl = get().abortController;
+ 847 |       if (ctrl) ctrl.abort();
+ 848 |     }
+ 849 | 
+ 850 |     try {
+ 851 |       const response = await fetch(`/api/gemini/sessions/${sessionId}`, {
+ 852 |         method: "DELETE"
+ 853 |       });
+ 854 |       if (response.ok) {
+ 855 |         set((state) => {
+ 856 |           const updated = { ...state.sessions };
+ 857 |           delete updated[sessionId];
+ 858 |           const newActiveId = state.activeSessionId === sessionId ? null : state.activeSessionId;
+ 859 |           return {
+ 860 |             sessions: updated,
+ 861 |             activeSessionId: newActiveId,
+ 862 |             abortController: state.activeSessionId === sessionId ? null : state.abortController,
+ 863 |             isOrchestrating: state.activeSessionId === sessionId ? false : state.isOrchestrating,
+ 864 |             isThinking: state.activeSessionId === sessionId ? false : state.isThinking,
+ 865 |             ...(newActiveId ? {} : {
+ 866 |               nodes: [],
+ 867 |               edges: [],
+ 868 |               chatMessages: [],
+ 869 |               agentTalkLogs: [],
+ 870 |               executionState: "setup",
+ 871 |               statusMessage: "",
+ 872 |               followUpSuggestions: []
+ 873 |             })
+ 874 |           };
+ 875 |         });
+ 876 |       }
+ 877 |     } catch (e) {
+ 878 |       console.error("Failed to delete session", e);
+ 879 |     }
+ 880 |   },
+ 881 | 
+ 882 |   triggerSteerOrchestration: async (promptText, execute = true, mode) => {
+ 883 |     if (!promptText.trim()) return;
+ 884 | 
+ 885 |     // Abort any active orchestration
+ 886 |     const currentController = get().abortController;
+ 887 |     if (currentController) {
+ 888 |       currentController.abort();
+ 889 |     }
+ 890 | 
+ 891 |     const controller = new AbortController();
  892 | 
- 893 |     const controller = new AbortController();
- 894 | 
- 895 |     const preExistingNodes = [...get().nodes];
- 896 |     const preExistingEdges = [...get().edges];
- 897 | 
- 898 |     const chatMsgs = get().chatMessages;
- 899 |     const lastMsg = chatMsgs[chatMsgs.length - 1];
- 900 |     const isDuplicate = lastMsg && lastMsg.sender === "user" && lastMsg.text === promptText;
- 901 | 
- 902 |     const userMsg: ChatMessage = {
- 903 |       id: Date.now().toString(),
- 904 |       sender: "user",
- 905 |       text: promptText,
- 906 |       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
- 907 |     };
- 908 | 
- 909 |     set((state) => ({
- 910 |       chatMessages: isDuplicate ? state.chatMessages : [...state.chatMessages, userMsg],
- 911 |       isOrchestrating: true,
- 912 |       isThinking: true,
- 913 |       statusMessage: "",
- 914 |       liveThoughts: "",
- 915 |       agentTalkLogs: [],
- 916 |       followUpSuggestions: [],
- 917 |       abortController: controller
- 918 |     }));
- 919 |     get().saveCurrentSession();
- 920 | 
- 921 |     // Create target AI message placeholder
- 922 |     const aiMsgId = (Date.now() + 1).toString();
- 923 |     set((state) => ({
- 924 |       chatMessages: [
- 925 |         ...state.chatMessages,
- 926 |         {
- 927 |           id: aiMsgId,
- 928 |           sender: "ai",
- 929 |           text: "",
- 930 |           thinkingSummary: "",
- 931 |           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
- 932 |         }
- 933 |       ]
- 934 |     }));
- 935 |     get().saveCurrentSession();
- 936 | 
- 937 |     try {
- 938 |       const response = await fetch("/api/gemini/orchestrate", {
- 939 |         method: "POST",
- 940 |         headers: { "Content-Type": "application/json" },
- 941 |         body: JSON.stringify({
- 942 |           prompt: promptText,
- 943 |           history: get().chatMessages
- 944 |             .filter(m => m.id !== aiMsgId) // Exclude current empty prompt placeholder
- 945 |             .map(m => ({ sender: m.sender, text: m.text })),
- 946 |           api_key: get().apiKeys[get().provider] || get().apiKey || "",
- 947 |           api_keys: get().apiKeys,
- 948 |           session_id: get().activeSessionId || "",
- 949 |           execute_agents: execute,
- 950 |           provider: get().provider,
- 951 |           model: get().model,
- 952 |           fallback_provider: get().fallbackProvider || null,
- 953 |           base_url: get().providerBaseUrls[get().provider] || null,
- 954 |           existing_nodes: preExistingNodes,
- 955 |           existing_edges: preExistingEdges,
- 956 |           mode: mode || (execute ? "auto" : "custom"),
- 957 |           backup_api_keys: get().backupApiKeys[get().provider] || []
- 958 |         }),
- 959 |         signal: controller.signal
- 960 |       });
- 961 | 
- 962 |       if (!response.ok) {
- 963 |         const errData = await response.json().catch(() => ({ detail: "Orchestration failed." }));
- 964 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
- 965 |       }
- 966 | 
- 967 |       let assistantResponse = "";
- 968 |       let thinkingSummary = "";
- 969 | 
- 970 |       const handlers = {
- 971 |         onText: (token: string) => {
- 972 |           assistantResponse += token;
- 973 |           set((state) => ({
- 974 |             isThinking: false,
- 975 |             chatMessages: state.chatMessages.map(m =>
- 976 |               m.id === aiMsgId ? { ...m, text: assistantResponse } : m
- 977 |             )
- 978 |           }));
- 979 |         },
- 980 |         onThinking: (thought: string) => {
- 981 |           thinkingSummary += thought;
- 982 |           set((state) => ({
- 983 |             liveThoughts: thinkingSummary,
- 984 |             chatMessages: state.chatMessages.map(m =>
- 985 |               m.id === aiMsgId ? { ...m, thinkingSummary } : m
- 986 |             )
- 987 |           }));
- 988 |         },
- 989 |         onStatus: (msg: string) => set({ statusMessage: msg }),
- 990 |         onMetadata: (meta: Record<string, any>) => {
- 991 |           const activeSession = get().sessions[get().activeSessionId || ''];
- 992 |           const currentMode = activeSession?.mode || 'auto';
- 993 | 
- 994 |           if (currentMode === 'auto' || (currentMode === 'custom' && !execute)) {
- 995 |             const { nodes: mergedNodes, edges: mergedEdges } = mergeCanvasState(
- 996 |               preExistingNodes, preExistingEdges,
- 997 |               meta.nodes || [], meta.edges || []
- 998 |             );
- 999 |             set({ nodes: mergedNodes, edges: mergedEdges });
-1000 |           }
-1001 | 
-1002 |           set({ agentTalkLogs: meta.agent_talk || [], followUpSuggestions: meta.follow_up_suggestions || [] });
-1003 |           // If plan-only mode (execute=false), mark as paused so Proceed button appears
-1004 |           if (!execute && (meta.nodes || []).length > 0) {
-1005 |             set({ executionState: 'paused' });
-1006 |           }
-1007 |           const talk = meta.agent_talk || [];
-1008 |           if (talk.length > 0) {
-1009 |             const latest = talk[talk.length - 1];
-1010 |             set({ statusMessage: `⚙️ **${latest.senderName}** completed — ${latest.text?.substring(0, 80) ?? ''}${(latest.text?.length ?? 0) > 80 ? '...' : ''}` });
-1011 |           }
-1012 |         },
-1013 |         onToolApproval: (approval: Record<string, any>) => set({ pendingApproval: approval as any }),
-1014 |         onDone: () => {},
-1015 |         onError: (err: Error) => { throw err; },
-1016 |       };
+ 893 |     const preExistingNodes = [...get().nodes];
+ 894 |     const preExistingEdges = [...get().edges];
+ 895 | 
+ 896 |     const chatMsgs = get().chatMessages;
+ 897 |     const lastMsg = chatMsgs[chatMsgs.length - 1];
+ 898 |     const isDuplicate = lastMsg && lastMsg.sender === "user" && lastMsg.text === promptText;
+ 899 | 
+ 900 |     const userMsg: ChatMessage = {
+ 901 |       id: Date.now().toString(),
+ 902 |       sender: "user",
+ 903 |       text: promptText,
+ 904 |       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+ 905 |     };
+ 906 | 
+ 907 |     set((state) => ({
+ 908 |       chatMessages: isDuplicate ? state.chatMessages : [...state.chatMessages, userMsg],
+ 909 |       isOrchestrating: true,
+ 910 |       isThinking: true,
+ 911 |       statusMessage: "",
+ 912 |       liveThoughts: "",
+ 913 |       agentTalkLogs: [],
+ 914 |       followUpSuggestions: [],
+ 915 |       abortController: controller
+ 916 |     }));
+ 917 |     get().saveCurrentSession();
+ 918 | 
+ 919 |     // Create target AI message placeholder
+ 920 |     const aiMsgId = (Date.now() + 1).toString();
+ 921 |     set((state) => ({
+ 922 |       chatMessages: [
+ 923 |         ...state.chatMessages,
+ 924 |         {
+ 925 |           id: aiMsgId,
+ 926 |           sender: "ai",
+ 927 |           text: "",
+ 928 |           thinkingSummary: "",
+ 929 |           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+ 930 |         }
+ 931 |       ]
+ 932 |     }));
+ 933 |     get().saveCurrentSession();
+ 934 | 
+ 935 |     try {
+ 936 |       const response = await fetch("/api/gemini/orchestrate", {
+ 937 |         method: "POST",
+ 938 |         headers: { "Content-Type": "application/json" },
+ 939 |         body: JSON.stringify({
+ 940 |           prompt: promptText,
+ 941 |           history: get().chatMessages
+ 942 |             .filter(m => m.id !== aiMsgId) // Exclude current empty prompt placeholder
+ 943 |             .map(m => ({ sender: m.sender, text: m.text })),
+ 944 |           api_key: get().apiKeys[get().provider] || get().apiKey || "",
+ 945 |           api_keys: get().apiKeys,
+ 946 |           session_id: get().activeSessionId || "",
+ 947 |           execute_agents: execute,
+ 948 |           provider: get().provider,
+ 949 |           model: get().model,
+ 950 |           fallback_provider: get().fallbackProvider || null,
+ 951 |           base_url: get().providerBaseUrls[get().provider] || null,
+ 952 |           existing_nodes: preExistingNodes,
+ 953 |           existing_edges: preExistingEdges,
+ 954 |           mode: mode || (execute ? "auto" : "custom"),
+ 955 |           backup_api_keys: get().backupApiKeys[get().provider] || []
+ 956 |         }),
+ 957 |         signal: controller.signal
+ 958 |       });
+ 959 | 
+ 960 |       if (!response.ok) {
+ 961 |         const errData = await response.json().catch(() => ({ detail: "Orchestration failed." }));
+ 962 |         throw new Error(errData.detail || `Server status error: ${response.status}`);
+ 963 |       }
+ 964 | 
+ 965 |       let assistantResponse = "";
+ 966 |       let thinkingSummary = "";
+ 967 | 
+ 968 |       const handlers = {
+ 969 |         onText: (token: string) => {
+ 970 |           assistantResponse += token;
+ 971 |           set((state) => ({
+ 972 |             isThinking: false,
+ 973 |             chatMessages: state.chatMessages.map(m =>
+ 974 |               m.id === aiMsgId ? { ...m, text: assistantResponse } : m
+ 975 |             )
+ 976 |           }));
+ 977 |         },
+ 978 |         onThinking: (thought: string) => {
+ 979 |           thinkingSummary += thought;
+ 980 |           set((state) => ({
+ 981 |             liveThoughts: thinkingSummary,
+ 982 |             chatMessages: state.chatMessages.map(m =>
+ 983 |               m.id === aiMsgId ? { ...m, thinkingSummary } : m
+ 984 |             )
+ 985 |           }));
+ 986 |         },
+ 987 |         onStatus: (msg: string) => set({ statusMessage: msg }),
+ 988 |         onMetadata: (meta: Record<string, any>) => {
+ 989 |           const activeSession = get().sessions[get().activeSessionId || ''];
+ 990 |           const currentMode = activeSession?.mode || 'auto';
+ 991 | 
+ 992 |           if (currentMode === 'auto' || (currentMode === 'custom' && !execute)) {
+ 993 |             const { nodes: mergedNodes, edges: mergedEdges } = mergeCanvasState(
+ 994 |               preExistingNodes, preExistingEdges,
+ 995 |               meta.nodes || [], meta.edges || []
+ 996 |             );
+ 997 |             set({ nodes: mergedNodes, edges: mergedEdges });
+ 998 |           }
+ 999 | 
+1000 |           set({ agentTalkLogs: meta.agent_talk || [], followUpSuggestions: meta.follow_up_suggestions || [] });
+1001 |           // If plan-only mode (execute=false), mark as paused so Proceed button appears
+1002 |           if (!execute && (meta.nodes || []).length > 0) {
+1003 |             set({ executionState: 'paused' });
+1004 |           }
+1005 |           const talk = meta.agent_talk || [];
+1006 |           if (talk.length > 0) {
+1007 |             const latest = talk[talk.length - 1];
+1008 |             set({ statusMessage: `⚙️ **${latest.senderName}** completed — ${latest.text?.substring(0, 80) ?? ''}${(latest.text?.length ?? 0) > 80 ? '...' : ''}` });
+1009 |           }
+1010 |         },
+1011 |         onToolApproval: (approval: Record<string, any>) => set({ pendingApproval: approval as any }),
+1012 |         onDone: () => {},
+1013 |         onError: (err: Error) => { throw err; },
+1014 |       };
+1015 | 
+1016 |       await parseSSEStream(response, handlers, controller.signal);
 1017 | 
-1018 |       await parseSSEStream(response, handlers, controller.signal);
-1019 | 
-1020 |       if (!assistantResponse) {
-1021 |         const fallbackMsg = "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again.";
+1018 |       if (!assistantResponse) {
+1019 |         const fallbackMsg = execute
+1020 |           ? "I'm sorry, I couldn't generate a response. This might be due to a temporary issue with the AI service or an invalid API key. Please check your API key in Settings and try again."
+1021 |           : "I have generated a custom agent plan for your request. You can inspect/modify the agents in the **Flow** tab and click **Proceed** when you are ready to execute.";
 1022 |         set((state) => ({
 1023 |           chatMessages: state.chatMessages.map(m =>
 1024 |             m.id === aiMsgId ? { ...m, text: fallbackMsg } : m

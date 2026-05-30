@@ -414,6 +414,22 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "key_hint": "",
         "adapter": "openai",
     },
+    "ollama_cloud": {
+        "name": "Ollama Cloud",
+        "description": "Hosted Ollama Cloud models via https://ollama.com",
+        "base_url": "https://ollama.com/v1",
+        "chat_path": "/chat/completions",
+        "default_model": "llama3",
+        "models": [
+            {"id": "llama3", "name": "Llama 3", "tier": "cloud"},
+            {"id": "mistral", "name": "Mistral", "tier": "cloud"},
+            {"id": "phi3", "name": "Phi 3", "tier": "cloud"},
+        ],
+        "capabilities": ["chat", "streaming", "json_mode"],
+        "key_url": "https://ollama.com",
+        "key_hint": "Ollama API Key",
+        "adapter": "openai",
+    },
 }
 
 
@@ -482,6 +498,7 @@ def resolve_api_key(
         "nvidia": "NVIDIA_API_KEY",
         "glm": "GLM_API_KEY",
         "z.ai": "Z_AI_API_KEY",
+        "ollama_cloud": "OLLAMA_API_KEY",
     }
     env_var_name = env_keys.get(provider.lower())
     if env_var_name:

@@ -288,7 +288,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
   loadBackupKeys: async () => {
     try {
-      const providers = ['gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia', 'glm', 'z.ai', 'mistral', 'cerebras', 'xai', 'together', 'fireworks', 'perplexity', 'cohere', 'lmstudio', 'custom', 'bedrock', 'azure_openai'];
+      const providers = ['gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia', 'glm', 'z.ai', 'mistral', 'cerebras', 'xai', 'together', 'fireworks', 'perplexity', 'cohere', 'lmstudio', 'custom', 'bedrock', 'azure_openai', 'ollama_cloud'];
       const loadedBackup: Record<string, string[]> = {};
       for (const p of providers) {
         const keys: string[] = [];
@@ -320,7 +320,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   loadPersistedKeys: async () => {
     try {
       const state = get();
-      const providers = ['gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia', 'glm', 'z.ai', 'mistral', 'cerebras', 'xai', 'together', 'fireworks', 'perplexity', 'cohere', 'lmstudio', 'custom', 'bedrock', 'azure_openai'];
+      const providers = ['gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia', 'glm', 'z.ai', 'mistral', 'cerebras', 'xai', 'together', 'fireworks', 'perplexity', 'cohere', 'lmstudio', 'custom', 'bedrock', 'azure_openai', 'ollama_cloud'];
       const loadedKeys: Record<string, string> = {};
       for (const p of providers) {
         const encrypted = await idbGet<string>(`apikey_${p}`);
@@ -366,7 +366,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       }
 
       // Load custom models per-provider
-      const providers = ['gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia', 'glm', 'z.ai', 'mistral', 'cerebras', 'xai', 'together', 'fireworks', 'perplexity', 'cohere', 'lmstudio', 'custom', 'bedrock', 'azure_openai'];
+      const providers = ['gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter', 'ollama', 'alibaba', 'nvidia', 'glm', 'z.ai', 'mistral', 'cerebras', 'xai', 'together', 'fireworks', 'perplexity', 'cohere', 'lmstudio', 'custom', 'bedrock', 'azure_openai', 'ollama_cloud'];
       const customModels: Record<string, any[]> = {};
       for (const p of providers) {
         const customModel = await idbGet<string>(`solospace_custom_model_${p}`);
@@ -721,28 +721,26 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     if (ctrl) ctrl.abort();
 
     const currentSessionId = get().activeSessionId;
-    if (currentSessionId) {
-      const currentSession: ChatSession = {
-        id: currentSessionId,
-        title: get().sessions[currentSessionId]?.title || "Chat",
-        prompt: get().sessions[currentSessionId]?.prompt || "",
-        mode: get().sessions[currentSessionId]?.mode || "auto",
-        nodes: get().nodes,
-        edges: get().edges,
-        chatMessages: get().chatMessages,
-        agentTalkLogs: get().agentTalkLogs,
-        executionState: get().executionState,
-        statusMessage: get().statusMessage,
-        followUpSuggestions: get().followUpSuggestions
-      };
-      set((state) => ({
-        sessions: { ...state.sessions, [currentSessionId]: currentSession }
-      }));
-    }
-
     const newSession = get().sessions[sessionId];
-    if (newSession) {
-      set({
+    if (!newSession) return;
+
+    set((state) => {
+      const updatedSessions = { ...state.sessions };
+      if (currentSessionId && state.sessions[currentSessionId]) {
+        updatedSessions[currentSessionId] = {
+          ...state.sessions[currentSessionId],
+          nodes: state.nodes,
+          edges: state.edges,
+          chatMessages: state.chatMessages,
+          agentTalkLogs: state.agentTalkLogs,
+          executionState: state.executionState,
+          statusMessage: state.statusMessage,
+          followUpSuggestions: state.followUpSuggestions
+        };
+      }
+
+      return {
+        sessions: updatedSessions,
         activeSessionId: sessionId,
         nodes: newSession.nodes,
         edges: newSession.edges,
@@ -757,8 +755,8 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
         liveThoughts: "",
         pendingApproval: null,
         abortController: null
-      });
-    }
+      };
+    });
   },
 
   saveCurrentSession: () => {

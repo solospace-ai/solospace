@@ -101,6 +101,18 @@ const FALLBACK_PROVIDERS = {
       { id: "phi3", name: "Phi 3", tier: "open" }
     ]
   },
+  ollama_cloud: {
+    name: "Ollama Cloud",
+    description: "Hosted Ollama Cloud models via https://ollama.com",
+    key_url: "https://ollama.com",
+    key_hint: "Ollama API Key",
+    default_model: "llama3",
+    models: [
+      { id: "llama3", name: "Llama 3", tier: "cloud" },
+      { id: "mistral", name: "Mistral", tier: "cloud" },
+      { id: "phi3", name: "Phi 3", tier: "cloud" }
+    ]
+  },
   alibaba: {
     name: "Alibaba Cloud (Qwen)",
     description: "Qwen model family via DashScope OpenAI-compatible endpoint",

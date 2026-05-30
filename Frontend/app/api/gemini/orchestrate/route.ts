@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
       
       const errStream = new ReadableStream({
         start(controller) {
-          const errMsg = `**Backend Error (${pyResponse.status})**\n\n${errorData.detail || "The Python orchestrator returned an error."}\n\n*Make sure your Gemini API key is configured correctly in Settings.*`;
+          const errMsg = `**Backend Error (${pyResponse.status})**\n\n${errorData.detail || "The Python orchestrator returned an error."}\n\n*Make sure your API key is configured correctly in Settings.*`;
           const metaMsg = JSON.stringify({
             complexity: "simple",
             capabilities: [],
@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
     
     const errStream = new ReadableStream({
       start(controller) {
-        const errMsg = "**Python backend is unavailable.**\n\nPlease ensure the backend server is running:\n\n```bash\ncd Backend\npython -m uvicorn main:app --reload\n```\n\nAlso verify your Gemini API key is set in Settings (key icon in the header).";
+        const errMsg = "**Python backend is unavailable.**\n\nPlease ensure the backend server is running:\n\n```bash\ncd Backend\npython -m uvicorn main:app --reload\n```\n\nAlso verify your API key is set in Settings.";
         const metaMsg = JSON.stringify({
           complexity: "simple",
           capabilities: [],
