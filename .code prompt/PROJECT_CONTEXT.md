@@ -1,10 +1,10 @@
 # Full Project Context
 
-> Generated: 2026-05-31T06:08:11.962Z
+> Generated: 2026-05-31T06:12:54.513Z
 > Mode: Full Project
 > Files: 68
-> Total Lines: 11,284
-> Total Size: 447.5 KB
+> Total Lines: 11,274
+> Total Size: 443.8 KB
 > Directories: 34
 
 ---
@@ -5600,7 +5600,7 @@ SoloSpace/
 
 ### File: `Frontend/app/globals.css`
 
-> 263 lines | 6.4 KB
+> 268 lines | 6.5 KB
 
 ```css
   1 | @import "tailwindcss";
@@ -5756,116 +5756,121 @@ SoloSpace/
 151 | }
 152 | 
 153 | /* Custom subtle scrollbars */
-154 | .custom-scrollbar::-webkit-scrollbar {
-155 |   width: 5px;
-156 |   height: 5px;
+154 | .custom-scrollbar {
+155 |   scrollbar-width: thin;
+156 |   scrollbar-color: rgba(255, 255, 255, 0.1) #000000;
 157 | }
 158 | 
-159 | .custom-scrollbar::-webkit-scrollbar-track {
-160 |   background: #000000;
-161 | }
-162 | 
-163 | .custom-scrollbar::-webkit-scrollbar-thumb {
-164 |   background: rgba(255, 255, 255, 0.1);
-165 |   border-radius: 99px;
+159 | .custom-scrollbar::-webkit-scrollbar {
+160 |   width: 5px;
+161 |   height: 5px;
+162 | }
+163 | 
+164 | .custom-scrollbar::-webkit-scrollbar-track {
+165 |   background: #000000;
 166 | }
 167 | 
-168 | .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-169 |   background: rgba(255, 255, 255, 0.2);
-170 | }
-171 | 
-172 | /* Animated connection dash array */
-173 | @keyframes dash {
-174 |   to {
-175 |     stroke-dashoffset: -40;
-176 |   }
-177 | }
-178 | 
-179 | .connection-line {
-180 |   animation: dash 2.5s linear infinite;
-181 | }
-182 | 
-183 | /* ─── In-progress connection wire (while dragging between handles) ─── */
-184 | .react-flow__connection-line {
-185 |   stroke: #06b6d4 !important;
-186 |   stroke-width: 2 !important;
-187 |   stroke-dasharray: 8, 4;
-188 |   animation: dash 0.8s linear infinite;
-189 | }
-190 | 
-191 | .react-flow__connection-path {
-192 |   stroke: #06b6d4 !important;
-193 |   stroke-width: 2 !important;
-194 |   stroke-dasharray: 8, 4;
-195 |   animation: dash 0.8s linear infinite;
-196 | }
-197 | 
-198 | /* Override default handle cyan to use per-handle colors set in component */
-199 | .react-flow__handle-connecting {
-200 |   transform: scale(1.5) !important;
+168 | .custom-scrollbar::-webkit-scrollbar-thumb {
+169 |   background: rgba(255, 255, 255, 0.1);
+170 |   border-radius: 99px;
+171 | }
+172 | 
+173 | .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+174 |   background: rgba(255, 255, 255, 0.2);
+175 | }
+176 | 
+177 | /* Animated connection dash array */
+178 | @keyframes dash {
+179 |   to {
+180 |     stroke-dashoffset: -40;
+181 |   }
+182 | }
+183 | 
+184 | .connection-line {
+185 |   animation: dash 2.5s linear infinite;
+186 | }
+187 | 
+188 | /* ─── In-progress connection wire (while dragging between handles) ─── */
+189 | .react-flow__connection-line {
+190 |   stroke: #06b6d4 !important;
+191 |   stroke-width: 2 !important;
+192 |   stroke-dasharray: 8, 4;
+193 |   animation: dash 0.8s linear infinite;
+194 | }
+195 | 
+196 | .react-flow__connection-path {
+197 |   stroke: #06b6d4 !important;
+198 |   stroke-width: 2 !important;
+199 |   stroke-dasharray: 8, 4;
+200 |   animation: dash 0.8s linear infinite;
 201 | }
 202 | 
-203 | .react-flow__handle-valid {
-204 |   transform: scale(1.6) !important;
-205 |   box-shadow: 0 0 14px rgba(6, 182, 212, 0.9) !important;
+203 | /* Override default handle cyan to use per-handle colors set in component */
+204 | .react-flow__handle-connecting {
+205 |   transform: scale(1.5) !important;
 206 | }
 207 | 
-208 | @keyframes typewriterBlink {
-209 |   0%, 100% { opacity: 0; }
-210 |   50% { opacity: 1; }
+208 | .react-flow__handle-valid {
+209 |   transform: scale(1.6) !important;
+210 |   box-shadow: 0 0 14px rgba(6, 182, 212, 0.9) !important;
 211 | }
 212 | 
-213 | .animate-blink {
-214 |   animation: typewriterBlink 0.8s step-end infinite;
-215 | }
-216 | 
-217 | /* Progress bar animation */
-218 | @keyframes progress-slide {
-219 |   0% { transform: translateX(-100%); }
-220 |   50% { transform: translateX(0%); }
-221 |   100% { transform: translateX(100%); }
-222 | }
-223 | 
-224 | .animate-progress-slide {
-225 |   animation: progress-slide 2s ease-in-out infinite;
-226 | }
-227 | 
-228 | /* Mobile Bottom Sheet Styles */
-229 | .mobile-bottom-sheet {
-230 |   position: fixed;
-231 |   bottom: 0;
-232 |   left: 0;
-233 |   right: 0;
-234 |   background-color: #0d0d0d;
-235 |   border-top: 1px solid #1f1f1f;
-236 |   border-top-left-radius: 20px;
-237 |   border-top-right-radius: 20px;
-238 |   z-index: 45;
-239 |   box-shadow: 0 -10px 40px rgba(0,0,0,0.8);
-240 |   transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-241 | }
-242 | 
-243 | .mobile-bottom-sheet-header {
-244 |   height: 40px;
-245 |   display: flex;
-246 |   align-items: center;
-247 |   justify-content: center;
-248 |   cursor: grab;
-249 |   user-select: none;
-250 |   background-color: #0a0a0a;
-251 |   border-top-left-radius: 20px;
-252 |   border-top-right-radius: 20px;
-253 |   border-bottom: 1px solid #141414;
-254 | }
-255 | 
-256 | .mobile-bottom-sheet-handle {
-257 |   width: 40px;
-258 |   height: 4px;
-259 |   background-color: #2e2e2e;
-260 |   border-radius: 2px;
-261 | }
-262 | 
-263 |
+213 | @keyframes typewriterBlink {
+214 |   0%, 100% { opacity: 0; }
+215 |   50% { opacity: 1; }
+216 | }
+217 | 
+218 | .animate-blink {
+219 |   animation: typewriterBlink 0.8s step-end infinite;
+220 | }
+221 | 
+222 | /* Progress bar animation */
+223 | @keyframes progress-slide {
+224 |   0% { transform: translateX(-100%); }
+225 |   50% { transform: translateX(0%); }
+226 |   100% { transform: translateX(100%); }
+227 | }
+228 | 
+229 | .animate-progress-slide {
+230 |   animation: progress-slide 2s ease-in-out infinite;
+231 | }
+232 | 
+233 | /* Mobile Bottom Sheet Styles */
+234 | .mobile-bottom-sheet {
+235 |   position: fixed;
+236 |   bottom: 0;
+237 |   left: 0;
+238 |   right: 0;
+239 |   background-color: #0d0d0d;
+240 |   border-top: 1px solid #1f1f1f;
+241 |   border-top-left-radius: 20px;
+242 |   border-top-right-radius: 20px;
+243 |   z-index: 45;
+244 |   box-shadow: 0 -10px 40px rgba(0,0,0,0.8);
+245 |   transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+246 | }
+247 | 
+248 | .mobile-bottom-sheet-header {
+249 |   height: 40px;
+250 |   display: flex;
+251 |   align-items: center;
+252 |   justify-content: center;
+253 |   cursor: grab;
+254 |   user-select: none;
+255 |   background-color: #0a0a0a;
+256 |   border-top-left-radius: 20px;
+257 |   border-top-right-radius: 20px;
+258 |   border-bottom: 1px solid #141414;
+259 | }
+260 | 
+261 | .mobile-bottom-sheet-handle {
+262 |   width: 40px;
+263 |   height: 4px;
+264 |   background-color: #2e2e2e;
+265 |   border-radius: 2px;
+266 | }
+267 | 
+268 |
 ```
 
 ### File: `Frontend/app/layout.tsx`
@@ -7531,15 +7536,15 @@ SoloSpace/
 
 ### File: `Frontend/components/APIKeysModal.tsx`
 
-> 865 lines | 40.3 KB
+> 850 lines | 36.5 KB
 
 ```tsx
   1 | 'use client';
   2 | 
-  3 | import React, { useState, useEffect } from "react";
+  3 | import React, { useState, useEffect, useRef } from "react";
   4 | import { 
   5 |   X, Key, Eye, EyeOff, ExternalLink, ShieldCheck, AlertCircle, 
-  6 |   Check, Globe, Sliders, Settings, Sparkles, HelpCircle, ChevronDown 
+  6 |   Check, Globe, Sliders, Settings, Sparkles, HelpCircle, ChevronDown
   7 | } from "lucide-react";
   8 | import { motion, AnimatePresence } from "motion/react";
   9 | import { useWorkflowStore } from "@/store/workflowStore";
@@ -7710,695 +7715,680 @@ SoloSpace/
 174 |   }
 175 | };
 176 | 
-177 | export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
-178 |   const apiKeys = useWorkflowStore((s) => s.apiKeys);
-179 |   const setProviderApiKey = useWorkflowStore((s) => s.setProviderApiKey);
-180 |   const backupApiKeys = useWorkflowStore((s) => s.backupApiKeys);
-181 |   const setBackupApiKey = useWorkflowStore((s) => s.setBackupApiKey);
-182 |   const activeProvider = useWorkflowStore((s) => s.provider);
-183 |   const setProvider = useWorkflowStore((s) => s.setProvider);
-184 |   const activeModel = useWorkflowStore((s) => s.model);
-185 |   const setModel = useWorkflowStore((s) => s.setModel);
-186 |   const availableProvidersFromStore = useWorkflowStore((s) => s.availableProviders);
-187 |   const providerBaseUrls = useWorkflowStore((s) => s.providerBaseUrls);
-188 |   const setProviderBaseUrl = useWorkflowStore((s) => s.setProviderBaseUrl);
-189 |   const providerModels = useWorkflowStore((s) => s.providerModels);
-190 |   const fetchProviderModels = useWorkflowStore((s) => s.fetchProviderModels);
-191 |   const fallbackProvider = useWorkflowStore((s) => s.fallbackProvider);
-192 |   const setFallbackProvider = useWorkflowStore((s) => s.setFallbackProvider);
-193 | 
-194 |   // Local Form State
-195 |   const [selectedProvider, setSelectedProvider] = useState<string>("gemini");
-196 |   const [selectedModel, setSelectedModel] = useState<string>("");
-197 |   const [isCustomModelInput, setIsCustomModelInput] = useState<boolean>(false);
-198 |   const [customModelText, setCustomModelText] = useState<string>("");
-199 |   const [apiKeyInput, setApiKeyInput] = useState<string>("");
-200 |   const [backupKey1Input, setBackupKey1Input] = useState<string>("");
-201 |   const [backupKey2Input, setBackupKey2Input] = useState<string>("");
-202 |   const [showBackupKey1, setShowBackupKey1] = useState<boolean>(false);
-203 |   const [showBackupKey2, setShowBackupKey2] = useState<boolean>(false);
-204 |   const [showBackupExpander, setShowBackupExpander] = useState<boolean>(false);
-205 |   const [showSecondBackup, setShowSecondBackup] = useState<boolean>(false);
-206 |   const [baseUrlInput, setUrlInput] = useState<string>("");
-207 |   const [fallbackProv, setFallbackProv] = useState<string>("");
-208 |   const [showKey, setShowKey] = useState<boolean>(false);
-209 |   const [isProviderDropdownOpen, setIsProviderDropdownOpen] = useState<boolean>(false);
-210 |   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState<boolean>(false);
-211 |   const [isFallbackDropdownOpen, setIsFallbackDropdownOpen] = useState<boolean>(false);
-212 |   
-213 |   // Ollama status check state
-214 |   const [ollamaStatus, setOllamaStatus] = useState<'checking' | 'available' | 'unavailable'>('checking');
-215 |   
-216 |   // Connection Testing State
-217 |   const [isTesting, setIsTesting] = useState<boolean>(false);
-218 |   const [testResult, setTestResult] = useState<{ status: 'idle' | 'success' | 'error'; message: string }>({ status: 'idle', message: '' });
-219 | 
-220 |   // Load backend providers config or fallback
-221 |   const providersConfig: Record<string, any> = Object.keys(availableProvidersFromStore || {}).length > 0 
-222 |     ? availableProvidersFromStore 
-223 |     : FALLBACK_PROVIDERS;
+177 | interface CustomSelectOption {
+178 |   value: string;
+179 |   label: string;
+180 |   disabled?: boolean;
+181 | }
+182 | 
+183 | const CustomSelect = ({
+184 |   value,
+185 |   onChange,
+186 |   options,
+187 |   disabled = false
+188 | }: {
+189 |   value: string;
+190 |   onChange: (val: string) => void;
+191 |   options: CustomSelectOption[];
+192 |   disabled?: boolean;
+193 | }) => {
+194 |   const [isOpen, setIsOpen] = useState(false);
+195 |   const containerRef = useRef<HTMLDivElement>(null);
+196 | 
+197 |   useEffect(() => {
+198 |     const handleOutsideClick = (e: MouseEvent) => {
+199 |       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+200 |         setIsOpen(false);
+201 |       }
+202 |     };
+203 |     if (isOpen) {
+204 |       document.addEventListener("mousedown", handleOutsideClick);
+205 |     }
+206 |     return () => {
+207 |       document.removeEventListener("mousedown", handleOutsideClick);
+208 |     };
+209 |   }, [isOpen]);
+210 | 
+211 |   const selectedOption = options.find(o => o.value === value);
+212 | 
+213 |   return (
+214 |     <div ref={containerRef} className="relative w-full">
+215 |       <button
+216 |         type="button"
+217 |         disabled={disabled}
+218 |         onClick={() => setIsOpen(!isOpen)}
+219 |         className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer flex justify-between items-center text-left disabled:opacity-50 select-none"
+220 |       >
+221 |         <span className="truncate">{selectedOption?.label || value || "Select..."}</span>
+222 |         <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 shrink-0 ${isOpen ? "rotate-180" : ""}`} />
+223 |       </button>
 224 | 
-225 |   const checkOllama = async () => {
-226 |     setOllamaStatus('checking');
-227 |     try {
-228 |       const resp = await fetch("/api/gemini/ollama");
-229 |       if (resp.ok) {
-230 |         const data = await resp.json();
-231 |         if (data.ollama_available || (Array.isArray(data.models) && data.models.length > 0)) {
-232 |           setOllamaStatus('available');
-233 |         } else {
-234 |           setOllamaStatus('unavailable');
-235 |         }
-236 |       } else {
-237 |         setOllamaStatus('unavailable');
-238 |       }
-239 |     } catch (e) {
-240 |       setOllamaStatus('unavailable');
-241 |     }
-242 |   };
-243 | 
-244 |   // Initialize fields when modal opens
-245 |   useEffect(() => {
-246 |     if (isOpen) {
-247 |       const currentProv = activeProvider || "gemini";
-248 |       setSelectedProvider(currentProv);
-249 |       setSelectedModel(activeModel || "");
-250 |       setFallbackProv(fallbackProvider || "");
-251 |       setApiKeyInput(apiKeys[currentProv] || "");
-252 |       
-253 |       const backupKeys = backupApiKeys[currentProv] || [];
-254 |       setBackupKey1Input(backupKeys[0] || "");
-255 |       setBackupKey2Input(backupKeys[1] || "");
-256 |       setShowBackupExpander(!!(backupKeys[0] || backupKeys[1]));
-257 |       setShowSecondBackup(!!backupKeys[1]);
+225 |       <AnimatePresence>
+226 |         {isOpen && (
+227 |           <motion.div
+228 |             initial={{ opacity: 0, y: -4 }}
+229 |             animate={{ opacity: 1, y: 0 }}
+230 |             exit={{ opacity: 0, y: -4 }}
+231 |             className="absolute z-50 w-full mt-1.5 bg-[#0d0d0d] border border-[#1f1f1f] rounded-xl shadow-2xl overflow-y-auto max-h-60 custom-scrollbar p-1"
+232 |           >
+233 |             {options.map((opt) => (
+234 |               <button
+235 |                 key={opt.value}
+236 |                 type="button"
+237 |                 disabled={opt.disabled}
+238 |                 onClick={() => {
+239 |                   onChange(opt.value);
+240 |                   setIsOpen(false);
+241 |                 }}
+242 |                 className={`w-full text-left px-3 py-2.5 text-xs rounded-lg transition-colors cursor-pointer flex items-center justify-between disabled:opacity-30 ${
+243 |                   opt.value === value
+244 |                     ? "bg-white text-black font-semibold"
+245 |                     : "text-neutral-300 hover:bg-neutral-900 hover:text-white"
+246 |                 }`}
+247 |               >
+248 |                 <span className="truncate pr-4">{opt.label}</span>
+249 |                 {opt.value === value && <Check className="w-3.5 h-3.5 shrink-0" />}
+250 |               </button>
+251 |             ))}
+252 |           </motion.div>
+253 |         )}
+254 |       </AnimatePresence>
+255 |     </div>
+256 |   );
+257 | };
 258 | 
-259 |       const defaultUrl = currentProv === 'ollama' ? "http://localhost:11434/v1" : "";
-260 |       setUrlInput(providerBaseUrls[currentProv] || defaultUrl);
-261 |       setShowKey(false);
-262 |       setTestResult({ status: 'idle', message: '' });
-263 | 
-264 |       const provConfig = providersConfig[currentProv] || {};
-265 |       const modelsList = providerModels[currentProv] || provConfig.models || [];
-266 |       const isPredefined = modelsList.some((m: any) => m.id === activeModel);
-267 |       if (!isPredefined && activeModel) {
-268 |         setIsCustomModelInput(true);
-269 |         setCustomModelText(activeModel);
-270 |       } else {
-271 |         setIsCustomModelInput(false);
-272 |         setCustomModelText("");
-273 |       }
-274 | 
-275 |       fetchProviderModels(currentProv).catch(() => {});
-276 |       if (currentProv === 'ollama') {
-277 |         checkOllama();
-278 |       }
-279 |       setIsProviderDropdownOpen(false);
-280 |       setIsModelDropdownOpen(false);
-281 |       setIsFallbackDropdownOpen(false);
-282 |     }
-283 |   }, [isOpen]);
-284 | 
-285 |   // Sync inputs when selected provider changes
-286 |   const handleProviderChange = (newProvider: string) => {
-287 |     setSelectedProvider(newProvider);
-288 |     setApiKeyInput(apiKeys[newProvider] || "");
-289 |     
-290 |     const backupKeys = backupApiKeys[newProvider] || [];
-291 |     setBackupKey1Input(backupKeys[0] || "");
-292 |     setBackupKey2Input(backupKeys[1] || "");
-293 |     setShowBackupExpander(!!(backupKeys[0] || backupKeys[1]));
-294 |     setShowSecondBackup(!!backupKeys[1]);
-295 |     
-296 |     const defaultUrl = newProvider === 'ollama' ? "http://localhost:11434/v1" : "";
-297 |     setUrlInput(providerBaseUrls[newProvider] || defaultUrl);
-298 |     setTestResult({ status: 'idle', message: '' });
-299 | 
-300 |     // Pick default model or first model for this new provider
-301 |     const provConfig = providersConfig[newProvider] || {};
-302 |     const modelsList = providerModels[newProvider] || provConfig.models || [];
-303 |     const defaultMod = modelsList.length > 0 ? modelsList[0].id : (provConfig.default_model || "");
-304 |     setSelectedModel(defaultMod);
-305 |     setIsCustomModelInput(modelsList.length === 0 && newProvider !== 'ollama');
-306 |     setCustomModelText("");
-307 | 
-308 |     // Fetch latest models list in the background
-309 |     fetchProviderModels(newProvider).catch(() => {});
-310 |     if (newProvider === 'ollama') {
-311 |       checkOllama();
-312 |     }
-313 |   };
-314 | 
-315 |   const handleTestConnection = async () => {
-316 |     setIsTesting(true);
-317 |     setTestResult({ status: 'idle', message: '' });
-318 | 
-319 |     try {
-320 |       const response = await fetch("/api/gemini/test_agent", {
-321 |         method: "POST",
-322 |         headers: { "Content-Type": "application/json" },
-323 |         body: JSON.stringify({
-324 |           node: {
-325 |             id: "test",
-326 |             data: {
-327 |               name: "Test Connection Agent",
-328 |               systemPrompt: "You are a friendly connection validation utility. Keep answers brief.",
-329 |               model: selectedModel
-330 |             }
-331 |           },
-332 |           provider: selectedProvider,
-333 |           api_key: apiKeyInput.trim(),
-334 |           api_keys: { ...apiKeys, [selectedProvider]: apiKeyInput.trim() },
-335 |           base_url: baseUrlInput.trim() || undefined
-336 |         })
-337 |       });
-338 | 
-339 |       const data = await response.json();
-340 |       if (response.ok && data.status === "success") {
-341 |         setTestResult({
-342 |           status: 'success',
-343 |           message: `Connection successful! Output: "${data.response?.substring(0, 50) || 'Success'}"`
-344 |         });
-345 |       } else {
-346 |         setTestResult({
-347 |           status: 'error',
-348 |           message: data.detail || data.error || "Connection failed. Please check credentials and endpoint."
-349 |         });
-350 |       }
-351 |     } catch (e: any) {
-352 |       setTestResult({
-353 |         status: 'error',
-354 |         message: e.message || "Failed to reach the API server. Ensure your backend is running."
-355 |       });
-356 |     } finally {
-357 |       setIsTesting(false);
+259 | export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
+260 |   const apiKeys = useWorkflowStore((s) => s.apiKeys);
+261 |   const setProviderApiKey = useWorkflowStore((s) => s.setProviderApiKey);
+262 |   const backupApiKeys = useWorkflowStore((s) => s.backupApiKeys);
+263 |   const setBackupApiKey = useWorkflowStore((s) => s.setBackupApiKey);
+264 |   const activeProvider = useWorkflowStore((s) => s.provider);
+265 |   const setProvider = useWorkflowStore((s) => s.setProvider);
+266 |   const activeModel = useWorkflowStore((s) => s.model);
+267 |   const setModel = useWorkflowStore((s) => s.setModel);
+268 |   const availableProvidersFromStore = useWorkflowStore((s) => s.availableProviders);
+269 |   const providerBaseUrls = useWorkflowStore((s) => s.providerBaseUrls);
+270 |   const setProviderBaseUrl = useWorkflowStore((s) => s.setProviderBaseUrl);
+271 |   const providerModels = useWorkflowStore((s) => s.providerModels);
+272 |   const fetchProviderModels = useWorkflowStore((s) => s.fetchProviderModels);
+273 |   const fallbackProvider = useWorkflowStore((s) => s.fallbackProvider);
+274 |   const setFallbackProvider = useWorkflowStore((s) => s.setFallbackProvider);
+275 | 
+276 |   // Local Form State
+277 |   const [selectedProvider, setSelectedProvider] = useState<string>("gemini");
+278 |   const [selectedModel, setSelectedModel] = useState<string>("");
+279 |   const [isCustomModelInput, setIsCustomModelInput] = useState<boolean>(false);
+280 |   const [customModelText, setCustomModelText] = useState<string>("");
+281 |   const [apiKeyInput, setApiKeyInput] = useState<string>("");
+282 |   const [backupKey1Input, setBackupKey1Input] = useState<string>("");
+283 |   const [backupKey2Input, setBackupKey2Input] = useState<string>("");
+284 |   const [showBackupKey1, setShowBackupKey1] = useState<boolean>(false);
+285 |   const [showBackupKey2, setShowBackupKey2] = useState<boolean>(false);
+286 |   const [showBackupExpander, setShowBackupExpander] = useState<boolean>(false);
+287 |   const [showSecondBackup, setShowSecondBackup] = useState<boolean>(false);
+288 |   const [baseUrlInput, setUrlInput] = useState<string>("");
+289 |   const [fallbackProv, setFallbackProv] = useState<string>("");
+290 |   const [showKey, setShowKey] = useState<boolean>(false);
+291 |   
+292 |   // Ollama status check state
+293 |   const [ollamaStatus, setOllamaStatus] = useState<'checking' | 'available' | 'unavailable'>('checking');
+294 |   
+295 |   // Connection Testing State
+296 |   const [isTesting, setIsTesting] = useState<boolean>(false);
+297 |   const [testResult, setTestResult] = useState<{ status: 'idle' | 'success' | 'error'; message: string }>({ status: 'idle', message: '' });
+298 | 
+299 |   // Load backend providers config or fallback
+300 |   const providersConfig: Record<string, any> = Object.keys(availableProvidersFromStore || {}).length > 0 
+301 |     ? availableProvidersFromStore 
+302 |     : FALLBACK_PROVIDERS;
+303 | 
+304 |   const checkOllama = async () => {
+305 |     setOllamaStatus('checking');
+306 |     try {
+307 |       const resp = await fetch("/api/gemini/ollama");
+308 |       if (resp.ok) {
+309 |         const data = await resp.json();
+310 |         if (data.ollama_available || (Array.isArray(data.models) && data.models.length > 0)) {
+311 |           setOllamaStatus('available');
+312 |         } else {
+313 |           setOllamaStatus('unavailable');
+314 |         }
+315 |       } else {
+316 |         setOllamaStatus('unavailable');
+317 |       }
+318 |     } catch (e) {
+319 |       setOllamaStatus('unavailable');
+320 |     }
+321 |   };
+322 | 
+323 |   // Initialize fields when modal opens
+324 |   useEffect(() => {
+325 |     if (isOpen) {
+326 |       const currentProv = activeProvider || "gemini";
+327 |       setSelectedProvider(currentProv);
+328 |       setSelectedModel(activeModel || "");
+329 |       setFallbackProv(fallbackProvider || "");
+330 |       setApiKeyInput(apiKeys[currentProv] || "");
+331 |       
+332 |       const backupKeys = backupApiKeys[currentProv] || [];
+333 |       setBackupKey1Input(backupKeys[0] || "");
+334 |       setBackupKey2Input(backupKeys[1] || "");
+335 |       setShowBackupExpander(!!(backupKeys[0] || backupKeys[1]));
+336 |       setShowSecondBackup(!!backupKeys[1]);
+337 | 
+338 |       const defaultUrl = currentProv === 'ollama' ? "http://localhost:11434/v1" : "";
+339 |       setUrlInput(providerBaseUrls[currentProv] || defaultUrl);
+340 |       setShowKey(false);
+341 |       setTestResult({ status: 'idle', message: '' });
+342 | 
+343 |       const provConfig = providersConfig[currentProv] || {};
+344 |       const modelsList = providerModels[currentProv] || provConfig.models || [];
+345 |       const isPredefined = modelsList.some((m: any) => m.id === activeModel);
+346 |       if (!isPredefined && activeModel) {
+347 |         setIsCustomModelInput(true);
+348 |         setCustomModelText(activeModel);
+349 |       } else {
+350 |         setIsCustomModelInput(false);
+351 |         setCustomModelText("");
+352 |       }
+353 | 
+354 |       fetchProviderModels(currentProv).catch(() => {});
+355 |       if (currentProv === 'ollama') {
+356 |         checkOllama();
+357 |       }
 358 |     }
-359 |   };
+359 |   }, [isOpen]);
 360 | 
-361 |   const handleSaveSettings = async () => {
-362 |     // Save to Zustand store & IndexedDB
-363 |     await setProviderApiKey(selectedProvider, apiKeyInput.trim());
-364 |     await setBackupApiKey(selectedProvider, 0, backupKey1Input.trim());
-365 |     await setBackupApiKey(selectedProvider, 1, backupKey2Input.trim());
-366 |     setProviderBaseUrl(selectedProvider, baseUrlInput.trim());
-367 |     await setProvider(selectedProvider);
-368 |     await setModel(selectedModel);
-369 |     setFallbackProvider(fallbackProv);
-370 | 
-371 |     // Save custom model custom string if user selected custom
-372 |     if (isCustomModelInput && customModelText.trim()) {
-373 |       await idbSet(`solospace_custom_model_${selectedProvider}`, customModelText.trim());
-374 |     } else {
-375 |       await idbDel(`solospace_custom_model_${selectedProvider}`);
-376 |     }
-377 | 
-378 |     onClose();
-379 |   };
-380 | 
-381 |   if (!isOpen) return null;
-382 | 
-383 |   const currentProviderInfo = providersConfig[selectedProvider] || {};
-384 |   const modelsList = providerModels[selectedProvider] || currentProviderInfo.models || [];
-385 |   
-386 |   // Custom or local providers require base URL
-387 |   const isCustomOrLocal = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || selectedProvider === 'custom' || currentProviderInfo.is_custom || currentProviderInfo.is_local;
-388 |   const isLocalProvider = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || !!currentProviderInfo.is_local;
-389 | 
-390 |   return (
-391 |     <motion.div
-392 |       initial={{ opacity: 0 }}
-393 |       animate={{ opacity: 1 }}
-394 |       exit={{ opacity: 0 }}
-395 |       className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
-396 |     >
-397 |       <motion.div
-398 |         initial={{ scale: 0.95 }}
-399 |         animate={{ scale: 1 }}
-400 |         exit={{ scale: 0.95 }}
-401 |         className="w-full max-w-md bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl text-white overflow-y-auto max-h-[90vh] custom-scrollbar"
-402 |       >
-403 |         {/* Close Button */}
-404 |         <button onClick={onClose} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer transition-colors">
-405 |           <X className="w-5 h-5" />
-406 |         </button>
-407 | 
-408 |         {/* Header */}
-409 |         <div className="flex gap-4 items-center mb-6">
-410 |           <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
-411 |             <Key className="w-6 h-6 text-white" />
-412 |           </div>
-413 |           <div>
-414 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">AI Engine Settings</h3>
-415 |             <p className="text-xs text-neutral-400 font-sans mt-0.5">Powered by OpenAI GPT-4.1 & Codex. Configure your active AI provider, model routing, and keys.</p>
-416 |           </div>
-417 |         </div>
-418 | 
-419 |         <div className="space-y-4">
-420 |           {/* 1. Provider Selector */}
-421 |           <div className="space-y-1.5 relative">
-422 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Provider</label>
-423 |             <div className="relative">
-424 |               <button
-425 |                 type="button"
-426 |                 onClick={() => setIsProviderDropdownOpen(!isProviderDropdownOpen)}
-427 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer flex justify-between items-center text-left"
-428 |               >
-429 |                 <span>{providersConfig[selectedProvider]?.name || selectedProvider}</span>
-430 |                 <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${isProviderDropdownOpen ? 'rotate-180' : ''}`} />
-431 |               </button>
-432 |               
-433 |               {isProviderDropdownOpen && (
-434 |                 <>
-435 |                   <div className="fixed inset-0 z-40" onClick={() => setIsProviderDropdownOpen(false)} />
-436 |                   <div className="absolute top-full left-0 right-0 mt-1 bg-black border border-[#1f1f1f] rounded-xl shadow-2xl z-50 max-h-48 overflow-y-auto custom-scrollbar p-1">
-437 |                     {Object.keys(providersConfig).map((pKey) => (
-438 |                       <button
-439 |                         key={pKey}
-440 |                         type="button"
-441 |                         onClick={() => {
-442 |                           handleProviderChange(pKey);
-443 |                           setIsProviderDropdownOpen(false);
-444 |                         }}
-445 |                         className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors hover:bg-neutral-900 cursor-pointer flex items-center justify-between ${selectedProvider === pKey ? 'bg-neutral-800 text-white font-semibold' : 'text-neutral-300'}`}
-446 |                       >
-447 |                         <span>{providersConfig[pKey]?.name || pKey}</span>
-448 |                         {selectedProvider === pKey && <Check className="w-3.5 h-3.5 text-white" />}
-449 |                       </button>
-450 |                     ))}
-451 |                   </div>
-452 |                 </>
-453 |               )}
-454 |             </div>
-455 |           </div>
+361 |   // Sync inputs when selected provider changes
+362 |   const handleProviderChange = (newProvider: string) => {
+363 |     setSelectedProvider(newProvider);
+364 |     setApiKeyInput(apiKeys[newProvider] || "");
+365 |     
+366 |     const backupKeys = backupApiKeys[newProvider] || [];
+367 |     setBackupKey1Input(backupKeys[0] || "");
+368 |     setBackupKey2Input(backupKeys[1] || "");
+369 |     setShowBackupExpander(!!(backupKeys[0] || backupKeys[1]));
+370 |     setShowSecondBackup(!!backupKeys[1]);
+371 |     
+372 |     const defaultUrl = newProvider === 'ollama' ? "http://localhost:11434/v1" : "";
+373 |     setUrlInput(providerBaseUrls[newProvider] || defaultUrl);
+374 |     setTestResult({ status: 'idle', message: '' });
+375 | 
+376 |     // Pick default model or first model for this new provider
+377 |     const provConfig = providersConfig[newProvider] || {};
+378 |     const modelsList = providerModels[newProvider] || provConfig.models || [];
+379 |     const defaultMod = modelsList.length > 0 ? modelsList[0].id : (provConfig.default_model || "");
+380 |     setSelectedModel(defaultMod);
+381 |     setIsCustomModelInput(modelsList.length === 0 && newProvider !== 'ollama');
+382 |     setCustomModelText("");
+383 | 
+384 |     // Fetch latest models list in the background
+385 |     fetchProviderModels(newProvider).catch(() => {});
+386 |     if (newProvider === 'ollama') {
+387 |       checkOllama();
+388 |     }
+389 |   };
+390 | 
+391 |   const handleTestConnection = async () => {
+392 |     setIsTesting(true);
+393 |     setTestResult({ status: 'idle', message: '' });
+394 | 
+395 |     try {
+396 |       const response = await fetch("/api/gemini/test_agent", {
+397 |         method: "POST",
+398 |         headers: { "Content-Type": "application/json" },
+399 |         body: JSON.stringify({
+400 |           node: {
+401 |             id: "test",
+402 |             data: {
+403 |               name: "Test Connection Agent",
+404 |               systemPrompt: "You are a friendly connection validation utility. Keep answers brief.",
+405 |               model: selectedModel
+406 |             }
+407 |           },
+408 |           provider: selectedProvider,
+409 |           api_key: apiKeyInput.trim(),
+410 |           api_keys: { ...apiKeys, [selectedProvider]: apiKeyInput.trim() },
+411 |           base_url: baseUrlInput.trim() || undefined
+412 |         })
+413 |       });
+414 | 
+415 |       const data = await response.json();
+416 |       if (response.ok && data.status === "success") {
+417 |         setTestResult({
+418 |           status: 'success',
+419 |           message: `Connection successful! Output: "${data.response?.substring(0, 50) || 'Success'}"`
+420 |         });
+421 |       } else {
+422 |         setTestResult({
+423 |           status: 'error',
+424 |           message: data.detail || data.error || "Connection failed. Please check credentials and endpoint."
+425 |         });
+426 |       }
+427 |     } catch (e: any) {
+428 |       setTestResult({
+429 |         status: 'error',
+430 |         message: e.message || "Failed to reach the API server. Ensure your backend is running."
+431 |       });
+432 |     } finally {
+433 |       setIsTesting(false);
+434 |     }
+435 |   };
+436 | 
+437 |   const handleSaveSettings = async () => {
+438 |     // Save to Zustand store & IndexedDB
+439 |     await setProviderApiKey(selectedProvider, apiKeyInput.trim());
+440 |     await setBackupApiKey(selectedProvider, 0, backupKey1Input.trim());
+441 |     await setBackupApiKey(selectedProvider, 1, backupKey2Input.trim());
+442 |     setProviderBaseUrl(selectedProvider, baseUrlInput.trim());
+443 |     await setProvider(selectedProvider);
+444 |     await setModel(selectedModel);
+445 |     setFallbackProvider(fallbackProv);
+446 | 
+447 |     // Save custom model custom string if user selected custom
+448 |     if (isCustomModelInput && customModelText.trim()) {
+449 |       await idbSet(`solospace_custom_model_${selectedProvider}`, customModelText.trim());
+450 |     } else {
+451 |       await idbDel(`solospace_custom_model_${selectedProvider}`);
+452 |     }
+453 | 
+454 |     onClose();
+455 |   };
 456 | 
-457 |           {/* 2. Model Selector */}
-458 |           <div className="space-y-1.5">
-459 |             <div className="flex justify-between items-center">
-460 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Model</label>
-461 |               {(modelsList.length > 0 || selectedProvider === 'ollama') && (
-462 |                 <button
-463 |                   type="button"
-464 |                   onClick={() => {
-465 |                     const willBeCustom = !isCustomModelInput;
-466 |                     setIsCustomModelInput(willBeCustom);
-467 |                     if (willBeCustom) {
-468 |                       setCustomModelText(selectedModel);
-469 |                     } else {
-470 |                       const defaultMod = modelsList[0]?.id || currentProviderInfo.default_model || "";
-471 |                       setSelectedModel(defaultMod);
-472 |                     }
-473 |                   }}
-474 |                   className="text-[9px] text-cyan-400 hover:underline font-mono cursor-pointer"
-475 |                 >
-476 |                   {isCustomModelInput ? "Select from list" : "Enter custom model ID"}
-477 |                 </button>
-478 |               )}
-479 |             </div>
-480 |             {isCustomModelInput || (modelsList.length === 0 && selectedProvider !== 'ollama') ? (
-481 |               <input
-482 |                 type="text"
-483 |                 placeholder="e.g. custom-fine-tune-v1, llama3"
-484 |                 value={isCustomModelInput ? customModelText : selectedModel}
-485 |                 onChange={(e) => {
-486 |                   const val = e.target.value;
-487 |                   if (isCustomModelInput) {
-488 |                     setCustomModelText(val);
-489 |                   }
-490 |                   setSelectedModel(val);
-491 |                 }}
-492 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-493 |               />
-494 |             ) : (
-495 |               <div className="relative">
-496 |                 <button
-497 |                   type="button"
-498 |                   onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
-499 |                   className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer flex justify-between items-center text-left"
-500 |                 >
-501 |                   <span>
-502 |                     {selectedProvider === "ollama" && modelsList.length === 0
-503 |                       ? "No local models detected"
-504 |                       : (modelsList.find((m: any) => m.id === selectedModel)?.name || selectedModel || "Select Model")}
-505 |                   </span>
-506 |                   <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${isModelDropdownOpen ? 'rotate-180' : ''}`} />
-507 |                 </button>
+457 |   if (!isOpen) return null;
+458 | 
+459 |   const currentProviderInfo = providersConfig[selectedProvider] || {};
+460 |   const modelsList = providerModels[selectedProvider] || currentProviderInfo.models || [];
+461 |   
+462 |   // Custom or local providers require base URL
+463 |   const isCustomOrLocal = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || selectedProvider === 'custom' || currentProviderInfo.is_custom || currentProviderInfo.is_local;
+464 |   const isLocalProvider = selectedProvider === 'ollama' || selectedProvider === 'lmstudio' || !!currentProviderInfo.is_local;
+465 | 
+466 |   return (
+467 |     <motion.div
+468 |       initial={{ opacity: 0 }}
+469 |       animate={{ opacity: 1 }}
+470 |       exit={{ opacity: 0 }}
+471 |       className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-6 select-none"
+472 |     >
+473 |       <motion.div
+474 |         initial={{ scale: 0.95 }}
+475 |         animate={{ scale: 1 }}
+476 |         exit={{ scale: 0.95 }}
+477 |         className="w-full max-w-md bg-[#0d0d0d] border border-[#1f1f1f] rounded-2xl p-6 relative shadow-2xl text-white overflow-y-auto max-h-[90vh] custom-scrollbar"
+478 |       >
+479 |         {/* Close Button */}
+480 |         <button onClick={onClose} className="absolute top-4 right-4 text-neutral-500 hover:text-white cursor-pointer transition-colors">
+481 |           <X className="w-5 h-5" />
+482 |         </button>
+483 | 
+484 |         {/* Header */}
+485 |         <div className="flex gap-4 items-center mb-6">
+486 |           <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
+487 |             <Key className="w-6 h-6 text-white" />
+488 |           </div>
+489 |           <div>
+490 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">AI Engine Settings</h3>
+491 |             <p className="text-xs text-neutral-400 font-sans mt-0.5">Powered by OpenAI GPT-4.1 & Codex. Configure your active AI provider, model routing, and keys.</p>
+492 |           </div>
+493 |         </div>
+494 | 
+495 |         <div className="space-y-4">
+496 |           {/* 1. Provider Selector */}
+497 |           <div className="space-y-1.5">
+498 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Provider</label>
+499 |             <CustomSelect
+500 |               value={selectedProvider}
+501 |               onChange={handleProviderChange}
+502 |               options={Object.keys(providersConfig).map((pKey) => ({
+503 |                 value: pKey,
+504 |                 label: providersConfig[pKey]?.name || pKey
+505 |               }))}
+506 |             />
+507 |           </div>
 508 | 
-509 |                 {isModelDropdownOpen && (
-510 |                   <>
-511 |                     <div className="fixed inset-0 z-40" onClick={() => setIsModelDropdownOpen(false)} />
-512 |                     <div className="absolute top-full left-0 right-0 mt-1 bg-black border border-[#1f1f1f] rounded-xl shadow-2xl z-50 max-h-48 overflow-y-auto custom-scrollbar p-1">
-513 |                       {selectedProvider === "ollama" && modelsList.length === 0 ? (
-514 |                         <div className="px-3 py-2 text-xs text-neutral-500 italic">No local models detected</div>
-515 |                       ) : (
-516 |                         modelsList.map((m: any) => (
-517 |                           <button
-518 |                             key={m.id}
-519 |                             type="button"
-520 |                             onClick={() => {
-521 |                               setSelectedModel(m.id);
-522 |                               setIsModelDropdownOpen(false);
-523 |                             }}
-524 |                             className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors hover:bg-neutral-900 cursor-pointer flex items-center justify-between ${selectedModel === m.id ? 'bg-neutral-800 text-white font-semibold' : 'text-neutral-300'}`}
-525 |                           >
-526 |                             <span>{m.name || m.id} ({m.tier || "standard"})</span>
-527 |                             {selectedModel === m.id && <Check className="w-3.5 h-3.5 text-white" />}
-528 |                           </button>
-529 |                         ))
-530 |                       )}
-531 |                       <button
-532 |                         type="button"
-533 |                         onClick={() => {
-534 |                           setIsCustomModelInput(true);
-535 |                           setCustomModelText(selectedModel);
-536 |                           setIsModelDropdownOpen(false);
-537 |                         }}
-538 |                         className="w-full text-left px-3 py-2 rounded-lg text-xs transition-colors hover:bg-neutral-900 cursor-pointer text-cyan-400 font-semibold"
-539 |                       >
-540 |                         Custom Model ID...
-541 |                       </button>
-542 |                     </div>
-543 |                   </>
-544 |                 )}
-545 |               </div>
-546 |             )}
-547 |           </div>
-548 | 
-549 |           {/* 3. Custom Base URL Gateway */}
-550 |           <div className="space-y-1.5">
-551 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold flex items-center gap-1">
-552 |               <Globe className="w-3.5 h-3.5" /> Base URL {isCustomOrLocal ? "(Required)" : "(Optional)"}
-553 |             </label>
-554 |             <input
-555 |               type="text"
-556 |               placeholder={currentProviderInfo.base_url || "https://api.provider.com/v1"}
-557 |               value={baseUrlInput}
-558 |               onChange={(e) => setUrlInput(e.target.value)}
-559 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-560 |             />
-561 |           </div>
-562 | 
-563 |           {/* 4. API Key Input or Status Box (Ollama) */}
-564 |           {selectedProvider === "ollama" ? (
-565 |             <div className="space-y-1.5">
-566 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
-567 |                 Ollama Status
-568 |               </label>
-569 |               <div className="bg-black border border-[#1f1f1f] rounded-xl p-4 flex flex-col gap-2">
-570 |                 <div className="flex items-center gap-2 text-xs">
-571 |                   {ollamaStatus === "checking" && (
-572 |                     <>
-573 |                       <div className="w-3.5 h-3.5 border-2 border-neutral-400 border-t-transparent rounded-full animate-spin shrink-0" />
-574 |                       <span className="text-neutral-400 font-mono">Checking local Ollama availability...</span>
-575 |                     </>
-576 |                   )}
-577 |                   {ollamaStatus === "available" && (
-578 |                     <>
-579 |                       <Check className="w-4 h-4 text-emerald-500 shrink-0" />
-580 |                       <span className="text-emerald-400 font-mono font-bold">Ollama running locally</span>
-581 |                     </>
-582 |                   )}
-583 |                   {ollamaStatus === "unavailable" && (
-584 |                     <>
-585 |                       <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
-586 |                       <span className="text-rose-400 font-mono font-bold">Ollama not detected</span>
-587 |                     </>
-588 |                   )}
-589 |                 </div>
-590 |                 {ollamaStatus === "unavailable" && (
-591 |                   <p className="text-[10px] text-neutral-400 leading-normal font-sans">
-592 |                     Make sure Ollama is running on your machine. You can download it from{" "}
-593 |                     <a
-594 |                       href="https://ollama.com"
-595 |                       target="_blank"
-596 |                       rel="noreferrer"
-597 |                       className="text-cyan-400 hover:underline inline-flex items-center gap-0.5"
-598 |                     >
-599 |                       ollama.com <ExternalLink className="w-2.5 h-2.5" />
-600 |                     </a>
-601 |                   </p>
-602 |                 )}
-603 |               </div>
-604 |             </div>
-605 |           ) : (
-606 |             <div className="space-y-1.5">
-607 |               <div className="flex justify-between items-center">
-608 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
-609 |                   {selectedProvider.toUpperCase()}_API_KEY
-610 |                 </label>
-611 |                 {currentProviderInfo.key_url && (
-612 |                   <a
-613 |                     href={currentProviderInfo.key_url}
-614 |                     target="_blank"
-615 |                     rel="noreferrer"
-616 |                     className="text-[9px] text-cyan-400 hover:underline flex items-center gap-1 cursor-pointer"
-617 |                   >
-618 |                     Get key <ExternalLink className="w-3 h-3" />
-619 |                   </a>
-620 |                 )}
-621 |               </div>
-622 |               <div className="relative">
-623 |                 <input
-624 |                   type={showKey ? "text" : "password"}
-625 |                   placeholder={
-626 |                     currentProviderInfo.key_hint
-627 |                       ? `Enter key (starts with ${currentProviderInfo.key_hint})`
-628 |                       : "Enter API key"
-629 |                   }
-630 |                   value={apiKeyInput}
-631 |                   onChange={(e) => setApiKeyInput(e.target.value)}
-632 |                   className="w-full bg-black border border-[#1f1f1f] rounded-xl pl-4 pr-12 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-633 |                 />
-634 |                 <button
-635 |                   type="button"
-636 |                   onClick={() => setShowKey(!showKey)}
-637 |                   className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
-638 |                 >
-639 |                   {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-640 |                 </button>
-641 |               </div>
-642 |             </div>
-643 |           )}
-644 | 
-645 |           {/* Backup API Keys Expandable Section */}
-646 |           {selectedProvider !== "ollama" && (
-647 |             <div className="space-y-2 mt-2">
-648 |               {!showBackupExpander ? (
-649 |                 <button
-650 |                   type="button"
-651 |                   onClick={() => setShowBackupExpander(true)}
-652 |                   className="text-[10px] text-cyan-400 hover:underline font-mono cursor-pointer flex items-center gap-1"
-653 |                 >
-654 |                   + Add backup key
-655 |                 </button>
-656 |               ) : (
-657 |                 <div className="border border-[#1f1f1f] bg-black/40 rounded-xl p-3 space-y-3">
-658 |                   <div className="flex justify-between items-center">
-659 |                     <span className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Backup Keys</span>
-660 |                     <button
-661 |                       type="button"
-662 |                       onClick={() => {
-663 |                         setShowBackupExpander(false);
-664 |                         setBackupKey1Input("");
-665 |                         setBackupKey2Input("");
-666 |                         setShowSecondBackup(false);
-667 |                       }}
-668 |                       className="text-[9px] text-rose-400 hover:underline font-mono cursor-pointer"
-669 |                     >
-670 |                       Remove all
-671 |                     </button>
-672 |                   </div>
-673 |                   
-674 |                   {/* Backup Key 1 */}
-675 |                   <div className="space-y-1">
-676 |                     <label className="text-[9px] font-mono uppercase text-neutral-500">Backup Key 1</label>
-677 |                     <div className="relative">
-678 |                       <input
-679 |                         type={showBackupKey1 ? "text" : "password"}
-680 |                         placeholder="Enter backup key 1"
-681 |                         value={backupKey1Input}
-682 |                         onChange={(e) => setBackupKey1Input(e.target.value)}
-683 |                         className="w-full bg-black border border-[#1f1f1f] rounded-lg pl-3 pr-10 py-2 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-684 |                       />
-685 |                       <button
-686 |                         type="button"
-687 |                         onClick={() => setShowBackupKey1(!showBackupKey1)}
-688 |                         className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
-689 |                       >
-690 |                         {showBackupKey1 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-691 |                       </button>
-692 |                     </div>
+509 |           {/* 2. Model Selector */}
+510 |           <div className="space-y-1.5">
+511 |             <div className="flex justify-between items-center">
+512 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Model</label>
+513 |               {(modelsList.length > 0 || selectedProvider === 'ollama') && (
+514 |                 <button
+515 |                   type="button"
+516 |                   onClick={() => {
+517 |                     const willBeCustom = !isCustomModelInput;
+518 |                     setIsCustomModelInput(willBeCustom);
+519 |                     if (willBeCustom) {
+520 |                       setCustomModelText(selectedModel);
+521 |                     } else {
+522 |                       const defaultMod = modelsList[0]?.id || currentProviderInfo.default_model || "";
+523 |                       setSelectedModel(defaultMod);
+524 |                     }
+525 |                   }}
+526 |                   className="text-[9px] text-cyan-400 hover:underline font-mono cursor-pointer"
+527 |                 >
+528 |                   {isCustomModelInput ? "Select from list" : "Enter custom model ID"}
+529 |                 </button>
+530 |               )}
+531 |             </div>
+532 |             {isCustomModelInput || (modelsList.length === 0 && selectedProvider !== 'ollama') ? (
+533 |               <input
+534 |                 type="text"
+535 |                 placeholder="e.g. custom-fine-tune-v1, llama3"
+536 |                 value={isCustomModelInput ? customModelText : selectedModel}
+537 |                 onChange={(e) => {
+538 |                   const val = e.target.value;
+539 |                   if (isCustomModelInput) {
+540 |                     setCustomModelText(val);
+541 |                   }
+542 |                   setSelectedModel(val);
+543 |                 }}
+544 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+545 |               />
+546 |             ) : (
+547 |               <CustomSelect
+548 |                 value={selectedModel}
+549 |                 onChange={(val) => {
+550 |                   if (val === "__custom__") {
+551 |                     setIsCustomModelInput(true);
+552 |                     setCustomModelText(selectedModel);
+553 |                   } else {
+554 |                     setSelectedModel(val);
+555 |                   }
+556 |                 }}
+557 |                 options={[
+558 |                   ...(selectedProvider === "ollama" && modelsList.length === 0
+559 |                     ? [{ value: "", label: "No local models detected", disabled: true }]
+560 |                     : modelsList.map((m: any) => ({
+561 |                         value: m.id,
+562 |                         label: `${m.name || m.id} (${m.tier || "standard"})`
+563 |                       }))),
+564 |                   { value: "__custom__", label: "Custom Model ID..." }
+565 |                 ]}
+566 |               />
+567 |             )}
+568 |           </div>
+569 | 
+570 |           {/* 3. Custom Base URL Gateway */}
+571 |           <div className="space-y-1.5">
+572 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold flex items-center gap-1">
+573 |               <Globe className="w-3.5 h-3.5" /> Base URL {isCustomOrLocal ? "(Required)" : "(Optional)"}
+574 |             </label>
+575 |             <input
+576 |               type="text"
+577 |               placeholder={currentProviderInfo.base_url || "https://api.provider.com/v1"}
+578 |               value={baseUrlInput}
+579 |               onChange={(e) => setUrlInput(e.target.value)}
+580 |               className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+581 |             />
+582 |           </div>
+583 | 
+584 |           {/* 4. API Key Input or Status Box (Ollama) */}
+585 |           {selectedProvider === "ollama" ? (
+586 |             <div className="space-y-1.5">
+587 |               <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
+588 |                 Ollama Status
+589 |               </label>
+590 |               <div className="bg-black border border-[#1f1f1f] rounded-xl p-4 flex flex-col gap-2">
+591 |                 <div className="flex items-center gap-2 text-xs">
+592 |                   {ollamaStatus === "checking" && (
+593 |                     <>
+594 |                       <div className="w-3.5 h-3.5 border-2 border-neutral-400 border-t-transparent rounded-full animate-spin shrink-0" />
+595 |                       <span className="text-neutral-400 font-mono">Checking local Ollama availability...</span>
+596 |                     </>
+597 |                   )}
+598 |                   {ollamaStatus === "available" && (
+599 |                     <>
+600 |                       <Check className="w-4 h-4 text-emerald-500 shrink-0" />
+601 |                       <span className="text-emerald-400 font-mono font-bold">Ollama running locally</span>
+602 |                     </>
+603 |                   )}
+604 |                   {ollamaStatus === "unavailable" && (
+605 |                     <>
+606 |                       <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+607 |                       <span className="text-rose-400 font-mono font-bold">Ollama not detected</span>
+608 |                     </>
+609 |                   )}
+610 |                 </div>
+611 |                 {ollamaStatus === "unavailable" && (
+612 |                   <p className="text-[10px] text-neutral-400 leading-normal font-sans">
+613 |                     Make sure Ollama is running on your machine. You can download it from{" "}
+614 |                     <a
+615 |                       href="https://ollama.com"
+616 |                       target="_blank"
+617 |                       rel="noreferrer"
+618 |                       className="text-cyan-400 hover:underline inline-flex items-center gap-0.5"
+619 |                     >
+620 |                       ollama.com <ExternalLink className="w-2.5 h-2.5" />
+621 |                     </a>
+622 |                   </p>
+623 |                 )}
+624 |               </div>
+625 |             </div>
+626 |           ) : (
+627 |             <div className="space-y-1.5">
+628 |               <div className="flex justify-between items-center">
+629 |                 <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">
+630 |                   {selectedProvider.toUpperCase()}_API_KEY
+631 |                 </label>
+632 |                 {currentProviderInfo.key_url && (
+633 |                   <a
+634 |                     href={currentProviderInfo.key_url}
+635 |                     target="_blank"
+636 |                     rel="noreferrer"
+637 |                     className="text-[9px] text-cyan-400 hover:underline flex items-center gap-1 cursor-pointer"
+638 |                   >
+639 |                     Get key <ExternalLink className="w-3 h-3" />
+640 |                   </a>
+641 |                 )}
+642 |               </div>
+643 |               <div className="relative">
+644 |                 <input
+645 |                   type={showKey ? "text" : "password"}
+646 |                   placeholder={
+647 |                     currentProviderInfo.key_hint
+648 |                       ? `Enter key (starts with ${currentProviderInfo.key_hint})`
+649 |                       : "Enter API key"
+650 |                   }
+651 |                   value={apiKeyInput}
+652 |                   onChange={(e) => setApiKeyInput(e.target.value)}
+653 |                   className="w-full bg-black border border-[#1f1f1f] rounded-xl pl-4 pr-12 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+654 |                 />
+655 |                 <button
+656 |                   type="button"
+657 |                   onClick={() => setShowKey(!showKey)}
+658 |                   className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
+659 |                 >
+660 |                   {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+661 |                 </button>
+662 |               </div>
+663 |             </div>
+664 |           )}
+665 | 
+666 |           {/* Backup API Keys Expandable Section */}
+667 |           {selectedProvider !== "ollama" && (
+668 |             <div className="space-y-2 mt-2">
+669 |               {!showBackupExpander ? (
+670 |                 <button
+671 |                   type="button"
+672 |                   onClick={() => setShowBackupExpander(true)}
+673 |                   className="text-[10px] text-cyan-400 hover:underline font-mono cursor-pointer flex items-center gap-1"
+674 |                 >
+675 |                   + Add backup key
+676 |                 </button>
+677 |               ) : (
+678 |                 <div className="border border-[#1f1f1f] bg-black/40 rounded-xl p-3 space-y-3">
+679 |                   <div className="flex justify-between items-center">
+680 |                     <span className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Backup Keys</span>
+681 |                     <button
+682 |                       type="button"
+683 |                       onClick={() => {
+684 |                         setShowBackupExpander(false);
+685 |                         setBackupKey1Input("");
+686 |                         setBackupKey2Input("");
+687 |                         setShowSecondBackup(false);
+688 |                       }}
+689 |                       className="text-[9px] text-rose-400 hover:underline font-mono cursor-pointer"
+690 |                     >
+691 |                       Remove all
+692 |                     </button>
 693 |                   </div>
-694 | 
-695 |                   {/* Backup Key 2 */}
-696 |                   {!showSecondBackup ? (
-697 |                     <button
-698 |                       type="button"
-699 |                       onClick={() => setShowSecondBackup(true)}
-700 |                       className="text-[10px] text-cyan-400 hover:underline font-mono cursor-pointer flex items-center gap-1"
-701 |                     >
-702 |                       + Add another backup key
-703 |                     </button>
-704 |                   ) : (
-705 |                     <div className="space-y-1">
-706 |                       <div className="flex justify-between items-center">
-707 |                         <label className="text-[9px] font-mono uppercase text-neutral-500">Backup Key 2</label>
-708 |                         <button
-709 |                           type="button"
-710 |                           onClick={() => {
-711 |                             setShowSecondBackup(false);
-712 |                             setBackupKey2Input("");
-713 |                           }}
-714 |                           className="text-[9px] text-neutral-500 hover:text-neutral-300 font-mono cursor-pointer"
-715 |                         >
-716 |                           Remove
-717 |                         </button>
-718 |                       </div>
-719 |                       <div className="relative">
-720 |                         <input
-721 |                           type={showBackupKey2 ? "text" : "password"}
-722 |                           placeholder="Enter backup key 2"
-723 |                           value={backupKey2Input}
-724 |                           onChange={(e) => setBackupKey2Input(e.target.value)}
-725 |                           className="w-full bg-black border border-[#1f1f1f] rounded-lg pl-3 pr-10 py-2 text-xs text-white outline-none focus:border-neutral-500 font-mono"
-726 |                         />
-727 |                         <button
-728 |                           type="button"
-729 |                           onClick={() => setShowBackupKey2(!showBackupKey2)}
-730 |                           className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
-731 |                         >
-732 |                           {showBackupKey2 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-733 |                         </button>
-734 |                       </div>
-735 |                     </div>
-736 |                   )}
-737 |                 </div>
-738 |               )}
-739 |             </div>
-740 |           )}
-741 | 
-742 |           {/* 5. Fallback Provider Selector */}
-743 |           <div className="space-y-1.5 relative">
-744 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Automatic Fallback</label>
-745 |             <div className="relative">
-746 |               <button
-747 |                 type="button"
-748 |                 onClick={() => setIsFallbackDropdownOpen(!isFallbackDropdownOpen)}
-749 |                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer flex justify-between items-center text-left"
-750 |               >
-751 |                 <span>
-752 |                   {fallbackProv === ""
-753 |                     ? "No Fallback (Error immediately)"
-754 |                     : `Fallback: ${providersConfig[fallbackProv]?.name || fallbackProv}`}
-755 |                 </span>
-756 |                 <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${isFallbackDropdownOpen ? 'rotate-180' : ''}`} />
-757 |               </button>
-758 | 
-759 |               {isFallbackDropdownOpen && (
-760 |                 <>
-761 |                   <div className="fixed inset-0 z-40" onClick={() => setIsFallbackDropdownOpen(false)} />
-762 |                   <div className="absolute top-full left-0 right-0 mt-1 bg-black border border-[#1f1f1f] rounded-xl shadow-2xl z-50 max-h-48 overflow-y-auto custom-scrollbar p-1">
-763 |                     <button
-764 |                       type="button"
-765 |                       onClick={() => {
-766 |                         setFallbackProv("");
-767 |                         setIsFallbackDropdownOpen(false);
-768 |                       }}
-769 |                       className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors hover:bg-neutral-900 cursor-pointer flex items-center justify-between ${fallbackProv === "" ? 'bg-neutral-800 text-white font-semibold' : 'text-neutral-300'}`}
-770 |                     >
-771 |                       <span>No Fallback (Error immediately)</span>
-772 |                       {fallbackProv === "" && <Check className="w-3.5 h-3.5 text-white" />}
-773 |                     </button>
-774 |                     {Object.keys(providersConfig)
-775 |                       .filter((pKey) => pKey !== selectedProvider)
-776 |                       .map((pKey) => (
-777 |                         <button
-778 |                           key={pKey}
-779 |                           type="button"
-780 |                           onClick={() => {
-781 |                             setFallbackProv(pKey);
-782 |                             setIsFallbackDropdownOpen(false);
-783 |                           }}
-784 |                           className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors hover:bg-neutral-900 cursor-pointer flex items-center justify-between ${fallbackProv === pKey ? 'bg-neutral-800 text-white font-semibold' : 'text-neutral-300'}`}
-785 |                         >
-786 |                           <span>Fallback: {providersConfig[pKey]?.name || pKey}</span>
-787 |                           {fallbackProv === pKey && <Check className="w-3.5 h-3.5 text-white" />}
-788 |                         </button>
-789 |                       ))}
-790 |                   </div>
-791 |                 </>
-792 |               )}
-793 |             </div>
-794 |           </div>
-795 | 
-796 |           {/* Connection Test pipeline */}
-797 |           {isLocalProvider ? (
-798 |             <div className="p-3 bg-neutral-950/40 border border-[#1f1f1f] rounded-xl text-[10px] text-neutral-400 font-mono leading-normal">
-799 |               ℹ️ Local models run directly on your machine and do not require API connection testing.
-800 |             </div>
-801 |           ) : (
-802 |             <div className="pt-2">
-803 |               <button
-804 |                 type="button"
-805 |                 onClick={handleTestConnection}
-806 |                 disabled={isTesting || (!apiKeyInput && selectedProvider !== "ollama" && selectedProvider !== "lmstudio")}
-807 |                 className="w-full py-2 bg-neutral-900 hover:bg-neutral-800 border border-[#1f1f1f] text-neutral-300 hover:text-white font-bold rounded-xl text-xs font-mono transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-20 disabled:scale-100"
-808 |               >
-809 |                 {isTesting ? (
-810 |                   <>
-811 |                     <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-812 |                     Testing Pipeline...
-813 |                   </>
-814 |                 ) : (
-815 |                   "Test Connection"
-816 |                 )}
-817 |               </button>
-818 | 
-819 |               {/* Test Connection Results */}
-820 |               <AnimatePresence>
-821 |                 {testResult.status !== 'idle' && (
-822 |                   <motion.div
-823 |                     initial={{ opacity: 0, y: 5 }}
-824 |                     animate={{ opacity: 1, y: 0 }}
-825 |                     exit={{ opacity: 0, y: 5 }}
-826 |                     className={`mt-3 flex items-start gap-2.5 p-3 rounded-xl text-[10px] leading-normal font-mono border ${
-827 |                       testResult.status === 'success'
-828 |                         ? 'bg-emerald-950/20 border-emerald-950/30 text-emerald-400'
-829 |                         : 'bg-rose-950/20 border-rose-950/30 text-rose-400'
-830 |                     }`}
-831 |                   >
-832 |                     {testResult.status === 'success' ? (
-833 |                       <Check className="w-4 h-4 shrink-0 text-emerald-500 mt-0.5" />
-834 |                     ) : (
-835 |                       <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
-836 |                     )}
-837 |                     <span className="whitespace-pre-wrap">{testResult.message}</span>
-838 |                   </motion.div>
-839 |                 )}
-840 |               </AnimatePresence>
-841 |             </div>
-842 |           )}
-843 | 
-844 |           {/* 6. Save and Cancel Buttons */}
-845 |           <div className="pt-4 flex gap-3 border-t border-[#141414]">
-846 |             <button
-847 |               id="save-api-key-btn"
-848 |               onClick={handleSaveSettings}
-849 |               className="flex-1 py-2.5 bg-white hover:bg-neutral-100 text-black font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
-850 |             >
-851 |               Save Settings
-852 |             </button>
-853 |             <button
-854 |               onClick={onClose}
-855 |               className="px-5 py-2.5 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-xl text-xs font-mono transition-colors cursor-pointer"
-856 |             >
-857 |               Cancel
-858 |             </button>
-859 |           </div>
-860 |         </div>
-861 |       </motion.div>
-862 |     </motion.div>
-863 |   );
-864 | }
-865 |
+694 |                   
+695 |                   {/* Backup Key 1 */}
+696 |                   <div className="space-y-1">
+697 |                     <label className="text-[9px] font-mono uppercase text-neutral-500">Backup Key 1</label>
+698 |                     <div className="relative">
+699 |                       <input
+700 |                         type={showBackupKey1 ? "text" : "password"}
+701 |                         placeholder="Enter backup key 1"
+702 |                         value={backupKey1Input}
+703 |                         onChange={(e) => setBackupKey1Input(e.target.value)}
+704 |                         className="w-full bg-black border border-[#1f1f1f] rounded-lg pl-3 pr-10 py-2 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+705 |                       />
+706 |                       <button
+707 |                         type="button"
+708 |                         onClick={() => setShowBackupKey1(!showBackupKey1)}
+709 |                         className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
+710 |                       >
+711 |                         {showBackupKey1 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+712 |                       </button>
+713 |                     </div>
+714 |                   </div>
+715 | 
+716 |                   {/* Backup Key 2 */}
+717 |                   {!showSecondBackup ? (
+718 |                     <button
+719 |                       type="button"
+720 |                       onClick={() => setShowSecondBackup(true)}
+721 |                       className="text-[10px] text-cyan-400 hover:underline font-mono cursor-pointer flex items-center gap-1"
+722 |                     >
+723 |                       + Add another backup key
+724 |                     </button>
+725 |                   ) : (
+726 |                     <div className="space-y-1">
+727 |                       <div className="flex justify-between items-center">
+728 |                         <label className="text-[9px] font-mono uppercase text-neutral-500">Backup Key 2</label>
+729 |                         <button
+730 |                           type="button"
+731 |                           onClick={() => {
+732 |                             setShowSecondBackup(false);
+733 |                             setBackupKey2Input("");
+734 |                           }}
+735 |                           className="text-[9px] text-neutral-500 hover:text-neutral-300 font-mono cursor-pointer"
+736 |                         >
+737 |                           Remove
+738 |                         </button>
+739 |                       </div>
+740 |                       <div className="relative">
+741 |                         <input
+742 |                           type={showBackupKey2 ? "text" : "password"}
+743 |                           placeholder="Enter backup key 2"
+744 |                           value={backupKey2Input}
+745 |                           onChange={(e) => setBackupKey2Input(e.target.value)}
+746 |                           className="w-full bg-black border border-[#1f1f1f] rounded-lg pl-3 pr-10 py-2 text-xs text-white outline-none focus:border-neutral-500 font-mono"
+747 |                         />
+748 |                         <button
+749 |                           type="button"
+750 |                           onClick={() => setShowBackupKey2(!showBackupKey2)}
+751 |                           className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white cursor-pointer"
+752 |                         >
+753 |                           {showBackupKey2 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+754 |                         </button>
+755 |                       </div>
+756 |                     </div>
+757 |                   )}
+758 |                 </div>
+759 |               )}
+760 |             </div>
+761 |           )}
+762 | 
+763 |           {/* 5. Fallback Provider Selector */}
+764 |           <div className="space-y-1.5">
+765 |             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Automatic Fallback</label>
+766 |             <CustomSelect
+767 |               value={fallbackProv}
+768 |               onChange={setFallbackProv}
+769 |               options={[
+770 |                 { value: "", label: "No Fallback (Error immediately)" },
+771 |                 ...Object.keys(providersConfig)
+772 |                   .filter((pKey) => pKey !== selectedProvider)
+773 |                   .map((pKey) => ({
+774 |                     value: pKey,
+775 |                     label: `Fallback: ${providersConfig[pKey]?.name || pKey}`
+776 |                   }))
+777 |               ]}
+778 |             />
+779 |           </div>
+780 | 
+781 |           {/* Connection Test pipeline */}
+782 |           {isLocalProvider ? (
+783 |             <div className="p-3 bg-neutral-950/40 border border-[#1f1f1f] rounded-xl text-[10px] text-neutral-400 font-mono leading-normal">
+784 |               ℹ️ Local models run directly on your machine and do not require API connection testing.
+785 |             </div>
+786 |           ) : (
+787 |             <div className="pt-2">
+788 |               <button
+789 |                 type="button"
+790 |                 onClick={handleTestConnection}
+791 |                 disabled={isTesting || (!apiKeyInput && selectedProvider !== "ollama" && selectedProvider !== "lmstudio")}
+792 |                 className="w-full py-2 bg-neutral-900 hover:bg-neutral-800 border border-[#1f1f1f] text-neutral-300 hover:text-white font-bold rounded-xl text-xs font-mono transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-20 disabled:scale-100"
+793 |               >
+794 |                 {isTesting ? (
+795 |                   <>
+796 |                     <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+797 |                     Testing Pipeline...
+798 |                   </>
+799 |                 ) : (
+800 |                   "Test Connection"
+801 |                 )}
+802 |               </button>
+803 | 
+804 |               {/* Test Connection Results */}
+805 |               <AnimatePresence>
+806 |                 {testResult.status !== 'idle' && (
+807 |                   <motion.div
+808 |                     initial={{ opacity: 0, y: 5 }}
+809 |                     animate={{ opacity: 1, y: 0 }}
+810 |                     exit={{ opacity: 0, y: 5 }}
+811 |                     className={`mt-3 flex items-start gap-2.5 p-3 rounded-xl text-[10px] leading-normal font-mono border ${
+812 |                       testResult.status === 'success'
+813 |                         ? 'bg-emerald-950/20 border-emerald-950/30 text-emerald-400'
+814 |                         : 'bg-rose-950/20 border-rose-950/30 text-rose-400'
+815 |                     }`}
+816 |                   >
+817 |                     {testResult.status === 'success' ? (
+818 |                       <Check className="w-4 h-4 shrink-0 text-emerald-500 mt-0.5" />
+819 |                     ) : (
+820 |                       <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
+821 |                     )}
+822 |                     <span className="whitespace-pre-wrap">{testResult.message}</span>
+823 |                   </motion.div>
+824 |                 )}
+825 |               </AnimatePresence>
+826 |             </div>
+827 |           )}
+828 | 
+829 |           {/* 6. Save and Cancel Buttons */}
+830 |           <div className="pt-4 flex gap-3 border-t border-[#141414]">
+831 |             <button
+832 |               id="save-api-key-btn"
+833 |               onClick={handleSaveSettings}
+834 |               className="flex-1 py-2.5 bg-white hover:bg-neutral-100 text-black font-bold rounded-xl text-xs font-mono transition-colors cursor-pointer"
+835 |             >
+836 |               Save Settings
+837 |             </button>
+838 |             <button
+839 |               onClick={onClose}
+840 |               className="px-5 py-2.5 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-xl text-xs font-mono transition-colors cursor-pointer"
+841 |             >
+842 |               Cancel
+843 |             </button>
+844 |           </div>
+845 |         </div>
+846 |       </motion.div>
+847 |     </motion.div>
+848 |   );
+849 | }
+850 |
 ```
 
 ### File: `Frontend/components/ContextMenu.tsx`

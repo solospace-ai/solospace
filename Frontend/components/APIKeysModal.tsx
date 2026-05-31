@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   X, Key, Eye, EyeOff, ExternalLink, ShieldCheck, AlertCircle, 
-  Check, Globe, Sliders, Settings, Sparkles, HelpCircle, ChevronDown 
+  Check, Globe, Sliders, Settings, Sparkles, HelpCircle, ChevronDown
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useWorkflowStore } from "@/store/workflowStore";
@@ -174,6 +174,88 @@ const FALLBACK_PROVIDERS = {
   }
 };
 
+interface CustomSelectOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+}
+
+const CustomSelect = ({
+  value,
+  onChange,
+  options,
+  disabled = false
+}: {
+  value: string;
+  onChange: (val: string) => void;
+  options: CustomSelectOption[];
+  disabled?: boolean;
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    if (isOpen) {
+      document.addEventListener("mousedown", handleOutsideClick);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+    };
+  }, [isOpen]);
+
+  const selectedOption = options.find(o => o.value === value);
+
+  return (
+    <div ref={containerRef} className="relative w-full">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer flex justify-between items-center text-left disabled:opacity-50 select-none"
+      >
+        <span className="truncate">{selectedOption?.label || value || "Select..."}</span>
+        <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 shrink-0 ${isOpen ? "rotate-180" : ""}`} />
+      </button>
+
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            className="absolute z-50 w-full mt-1.5 bg-[#0d0d0d] border border-[#1f1f1f] rounded-xl shadow-2xl overflow-y-auto max-h-60 custom-scrollbar p-1"
+          >
+            {options.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                disabled={opt.disabled}
+                onClick={() => {
+                  onChange(opt.value);
+                  setIsOpen(false);
+                }}
+                className={`w-full text-left px-3 py-2.5 text-xs rounded-lg transition-colors cursor-pointer flex items-center justify-between disabled:opacity-30 ${
+                  opt.value === value
+                    ? "bg-white text-black font-semibold"
+                    : "text-neutral-300 hover:bg-neutral-900 hover:text-white"
+                }`}
+              >
+                <span className="truncate pr-4">{opt.label}</span>
+                {opt.value === value && <Check className="w-3.5 h-3.5 shrink-0" />}
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
 export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
   const apiKeys = useWorkflowStore((s) => s.apiKeys);
   const setProviderApiKey = useWorkflowStore((s) => s.setProviderApiKey);
@@ -206,9 +288,6 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
   const [baseUrlInput, setUrlInput] = useState<string>("");
   const [fallbackProv, setFallbackProv] = useState<string>("");
   const [showKey, setShowKey] = useState<boolean>(false);
-  const [isProviderDropdownOpen, setIsProviderDropdownOpen] = useState<boolean>(false);
-  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState<boolean>(false);
-  const [isFallbackDropdownOpen, setIsFallbackDropdownOpen] = useState<boolean>(false);
   
   // Ollama status check state
   const [ollamaStatus, setOllamaStatus] = useState<'checking' | 'available' | 'unavailable'>('checking');
@@ -276,9 +355,6 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
       if (currentProv === 'ollama') {
         checkOllama();
       }
-      setIsProviderDropdownOpen(false);
-      setIsModelDropdownOpen(false);
-      setIsFallbackDropdownOpen(false);
     }
   }, [isOpen]);
 
@@ -418,40 +494,16 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
 
         <div className="space-y-4">
           {/* 1. Provider Selector */}
-          <div className="space-y-1.5 relative">
+          <div className="space-y-1.5">
             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Provider</label>
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setIsProviderDropdownOpen(!isProviderDropdownOpen)}
-                className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer flex justify-between items-center text-left"
-              >
-                <span>{providersConfig[selectedProvider]?.name || selectedProvider}</span>
-                <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${isProviderDropdownOpen ? 'rotate-180' : ''}`} />
-              </button>
-              
-              {isProviderDropdownOpen && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setIsProviderDropdownOpen(false)} />
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-black border border-[#1f1f1f] rounded-xl shadow-2xl z-50 max-h-48 overflow-y-auto custom-scrollbar p-1">
-                    {Object.keys(providersConfig).map((pKey) => (
-                      <button
-                        key={pKey}
-                        type="button"
-                        onClick={() => {
-                          handleProviderChange(pKey);
-                          setIsProviderDropdownOpen(false);
-                        }}
-                        className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors hover:bg-neutral-900 cursor-pointer flex items-center justify-between ${selectedProvider === pKey ? 'bg-neutral-800 text-white font-semibold' : 'text-neutral-300'}`}
-                      >
-                        <span>{providersConfig[pKey]?.name || pKey}</span>
-                        {selectedProvider === pKey && <Check className="w-3.5 h-3.5 text-white" />}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
+            <CustomSelect
+              value={selectedProvider}
+              onChange={handleProviderChange}
+              options={Object.keys(providersConfig).map((pKey) => ({
+                value: pKey,
+                label: providersConfig[pKey]?.name || pKey
+              }))}
+            />
           </div>
 
           {/* 2. Model Selector */}
@@ -492,57 +544,26 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
                 className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 font-mono"
               />
             ) : (
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
-                  className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer flex justify-between items-center text-left"
-                >
-                  <span>
-                    {selectedProvider === "ollama" && modelsList.length === 0
-                      ? "No local models detected"
-                      : (modelsList.find((m: any) => m.id === selectedModel)?.name || selectedModel || "Select Model")}
-                  </span>
-                  <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${isModelDropdownOpen ? 'rotate-180' : ''}`} />
-                </button>
-
-                {isModelDropdownOpen && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setIsModelDropdownOpen(false)} />
-                    <div className="absolute top-full left-0 right-0 mt-1 bg-black border border-[#1f1f1f] rounded-xl shadow-2xl z-50 max-h-48 overflow-y-auto custom-scrollbar p-1">
-                      {selectedProvider === "ollama" && modelsList.length === 0 ? (
-                        <div className="px-3 py-2 text-xs text-neutral-500 italic">No local models detected</div>
-                      ) : (
-                        modelsList.map((m: any) => (
-                          <button
-                            key={m.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedModel(m.id);
-                              setIsModelDropdownOpen(false);
-                            }}
-                            className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors hover:bg-neutral-900 cursor-pointer flex items-center justify-between ${selectedModel === m.id ? 'bg-neutral-800 text-white font-semibold' : 'text-neutral-300'}`}
-                          >
-                            <span>{m.name || m.id} ({m.tier || "standard"})</span>
-                            {selectedModel === m.id && <Check className="w-3.5 h-3.5 text-white" />}
-                          </button>
-                        ))
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsCustomModelInput(true);
-                          setCustomModelText(selectedModel);
-                          setIsModelDropdownOpen(false);
-                        }}
-                        className="w-full text-left px-3 py-2 rounded-lg text-xs transition-colors hover:bg-neutral-900 cursor-pointer text-cyan-400 font-semibold"
-                      >
-                        Custom Model ID...
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
+              <CustomSelect
+                value={selectedModel}
+                onChange={(val) => {
+                  if (val === "__custom__") {
+                    setIsCustomModelInput(true);
+                    setCustomModelText(selectedModel);
+                  } else {
+                    setSelectedModel(val);
+                  }
+                }}
+                options={[
+                  ...(selectedProvider === "ollama" && modelsList.length === 0
+                    ? [{ value: "", label: "No local models detected", disabled: true }]
+                    : modelsList.map((m: any) => ({
+                        value: m.id,
+                        label: `${m.name || m.id} (${m.tier || "standard"})`
+                      }))),
+                  { value: "__custom__", label: "Custom Model ID..." }
+                ]}
+              />
             )}
           </div>
 
@@ -740,57 +761,21 @@ export default function APIKeysModal({ isOpen, onClose }: APIKeysModalProps) {
           )}
 
           {/* 5. Fallback Provider Selector */}
-          <div className="space-y-1.5 relative">
+          <div className="space-y-1.5">
             <label className="text-[9px] font-mono uppercase text-neutral-400 font-bold">Automatic Fallback</label>
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setIsFallbackDropdownOpen(!isFallbackDropdownOpen)}
-                className="w-full bg-black border border-[#1f1f1f] rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-neutral-500 cursor-pointer flex justify-between items-center text-left"
-              >
-                <span>
-                  {fallbackProv === ""
-                    ? "No Fallback (Error immediately)"
-                    : `Fallback: ${providersConfig[fallbackProv]?.name || fallbackProv}`}
-                </span>
-                <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 ${isFallbackDropdownOpen ? 'rotate-180' : ''}`} />
-              </button>
-
-              {isFallbackDropdownOpen && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setIsFallbackDropdownOpen(false)} />
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-black border border-[#1f1f1f] rounded-xl shadow-2xl z-50 max-h-48 overflow-y-auto custom-scrollbar p-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFallbackProv("");
-                        setIsFallbackDropdownOpen(false);
-                      }}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors hover:bg-neutral-900 cursor-pointer flex items-center justify-between ${fallbackProv === "" ? 'bg-neutral-800 text-white font-semibold' : 'text-neutral-300'}`}
-                    >
-                      <span>No Fallback (Error immediately)</span>
-                      {fallbackProv === "" && <Check className="w-3.5 h-3.5 text-white" />}
-                    </button>
-                    {Object.keys(providersConfig)
-                      .filter((pKey) => pKey !== selectedProvider)
-                      .map((pKey) => (
-                        <button
-                          key={pKey}
-                          type="button"
-                          onClick={() => {
-                            setFallbackProv(pKey);
-                            setIsFallbackDropdownOpen(false);
-                          }}
-                          className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors hover:bg-neutral-900 cursor-pointer flex items-center justify-between ${fallbackProv === pKey ? 'bg-neutral-800 text-white font-semibold' : 'text-neutral-300'}`}
-                        >
-                          <span>Fallback: {providersConfig[pKey]?.name || pKey}</span>
-                          {fallbackProv === pKey && <Check className="w-3.5 h-3.5 text-white" />}
-                        </button>
-                      ))}
-                  </div>
-                </>
-              )}
-            </div>
+            <CustomSelect
+              value={fallbackProv}
+              onChange={setFallbackProv}
+              options={[
+                { value: "", label: "No Fallback (Error immediately)" },
+                ...Object.keys(providersConfig)
+                  .filter((pKey) => pKey !== selectedProvider)
+                  .map((pKey) => ({
+                    value: pKey,
+                    label: `Fallback: ${providersConfig[pKey]?.name || pKey}`
+                  }))
+              ]}
+            />
           </div>
 
           {/* Connection Test pipeline */}
