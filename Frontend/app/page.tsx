@@ -109,6 +109,7 @@ function SolospaceContent() {
   const provider = useWorkflowStore((s) => s.provider);
   const model = useWorkflowStore((s) => s.model);
   const followUpSuggestions = useWorkflowStore((s) => s.followUpSuggestions);
+  const executionState = useWorkflowStore((s) => s.executionState);
 
   const setSelectedNodeId = useWorkflowStore((s) => s.setSelectedNodeId);
   const setNodes = useWorkflowStore((s) => s.setNodes);
@@ -126,6 +127,7 @@ function SolospaceContent() {
   const deleteSessionFromDb = useWorkflowStore((s) => s.deleteSessionFromDb);
   const fetchAvailableProviders = useWorkflowStore((s) => s.fetchAvailableProviders);
   const triggerSteerOrchestration = useWorkflowStore((s) => s.triggerSteerOrchestration);
+  const triggerCustomExecution = useWorkflowStore((s) => s.triggerCustomExecution);
   const loadPersistedKeys = useWorkflowStore((s) => s.loadPersistedKeys);
   const loadPersistedState = useWorkflowStore((s) => s.loadPersistedState);
 
@@ -511,11 +513,11 @@ function SolospaceContent() {
         <div className="flex items-center gap-3 h-16 border-b border-[#1f1f1f] px-4 justify-between">
           {isSidebarExpanded ? (
             <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
+              <img src="/icon.svg" className="w-7 h-7 rounded-lg object-contain" alt="Solospace Logo" />
               <h1 className="text-sm font-bold text-white tracking-tight leading-none">Solospace</h1>
             </div>
           ) : (
-            <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center mx-auto"><Bot className="w-4 h-4 text-black stroke-[2.5]" /></div>
+            <img src="/icon.svg" className="w-7 h-7 rounded-lg mx-auto object-contain" alt="Solospace Logo" />
           )}
           {isSidebarExpanded && <button onClick={(e) => { e.stopPropagation(); setIsSidebarExpanded(false); }} className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>}
         </div>
@@ -914,11 +916,11 @@ function SolospaceContent() {
                                       <button onClick={() => setCurrentTab("arena")} className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max">
                                         <GitFork className="w-3.5 h-3.5 text-cyan-400" /><span>See Agent Flow</span>
                                       </button>
-                                      {!isEchoHouseMode && useWorkflowStore.getState().executionState === "paused" && (
+                                      {!isEchoHouseMode && (activeSession?.mode === "custom" || executionMode === "custom") && executionState === "paused" && (
                                         <button
                                           onClick={async () => {
                                             setExecutionState("running");
-                                            await useWorkflowStore.getState().triggerCustomExecution();
+                                            await triggerCustomExecution();
                                           }}
                                           className="px-4 py-2 bg-white hover:bg-neutral-200 rounded-xl text-xs font-bold text-black transition-all flex items-center gap-1.5 cursor-pointer max-w-max"
                                         >

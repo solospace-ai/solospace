@@ -1056,7 +1056,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       set({ abortController: null, isThinking: false, isOrchestrating: false });
       get().saveCurrentSession();
     } finally {
-      set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '' });
+      set({ isOrchestrating: false, isThinking: false, statusMessage: '', liveThoughts: '', executionState: 'setup' });
       get().saveCurrentSession();
     }
   },
