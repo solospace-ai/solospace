@@ -1,10 +1,10 @@
 # Full Project Context
 
-> Generated: 2026-05-31T06:12:54.513Z
+> Generated: 2026-05-31T06:43:51.924Z
 > Mode: Full Project
 > Files: 68
-> Total Lines: 11,274
-> Total Size: 443.8 KB
+> Total Lines: 11,314
+> Total Size: 445.5 KB
 > Directories: 34
 
 ---
@@ -5916,7 +5916,7 @@ SoloSpace/
 
 ### File: `Frontend/app/page.tsx`
 
-> 1092 lines | 67.0 KB
+> 1132 lines | 68.7 KB
 
 ```tsx
    1 | 'use client';
@@ -6184,833 +6184,873 @@ SoloSpace/
  263 |   };
  264 | 
  265 |   const beginEchoHouseSimulation = () => {
- 266 |     const selfMember = echoCast.find(m => m.is_self || m.role === "self");
- 267 |     const selfNode = {
- 268 |       id: "self-node",
- 269 |       type: "custom",
- 270 |       position: { x: 300, y: 200 },
- 271 |       data: {
- 272 |         name: selfMember?.inferred_name || "You (Self)",
- 273 |         tag: "SELF",
- 274 |         icon: "bot",
- 275 |         objective: echoSituation.length > 120 ? echoSituation.substring(0, 120) + "..." : echoSituation,
- 276 |         systemPrompt: "You are the user themselves, experiencing this problem from the inside.",
- 277 |         status: "IDLE" as const,
- 278 |         enabled: true,
- 279 |         isEchoHouseAgent: true,
- 280 |         echohouseRole: "self",
- 281 |         echohouseProblem: echoSituation,
- 282 |         emotional_core: selfMember?.emotional_core || "",
- 283 |         rules: [],
- 284 |         dependencies: [],
- 285 |         tools: [],
- 286 |         toolPermissions: {},
- 287 |         temp: 0.7,
- 288 |         logic: 70,
- 289 |         empathy: 50,
- 290 |         priority: 5,
- 291 |         toolLogs: [],
- 292 |         personality: "",
- 293 |         senderId: "self-node"
- 294 |       }
- 295 |     };
- 296 |     const nodesList: any[] = [selfNode];
- 297 |     echoCast.forEach((member: any, idx: number) => {
- 298 |       if (member.is_self || member.role === "self") return;
- 299 |       const angle = (idx * 2 * Math.PI) / Math.max(echoCast.length - 1, 1);
- 300 |       const x = 300 + Math.cos(angle) * 280;
- 301 |       const y = 200 + Math.sin(angle) * 260;
- 302 |       nodesList.push({
- 303 |         id: `echo-agent-${idx}-${Date.now()}`,
- 304 |         type: "custom",
- 305 |         position: { x: Math.max(50, x), y: Math.max(50, y) },
- 306 |         data: {
- 307 |           name: member.inferred_name,
- 308 |           tag: member.role.toUpperCase().replace(/\s+/g, "_"),
- 309 |           icon: "science",
- 310 |           objective: `Provide perspective as ${member.inferred_name} (${member.role}).`,
- 311 |           systemPrompt: `You are ${member.inferred_name}, whose role in the user's life is ${member.role}. From your perspective about their situation: ${member.inferred_problem}`,
- 312 |           status: "IDLE" as const,
- 313 |           enabled: true,
- 314 |           isEchoHouseAgent: true,
- 315 |           echohouseRole: member.role,
- 316 |           echohouseProblem: member.inferred_problem,
- 317 |           emotional_core: member.emotional_core || "",
- 318 |           rules: [],
- 319 |           dependencies: [],
- 320 |           tools: [],
- 321 |           toolPermissions: {},
- 322 |           temp: 0.8,
- 323 |           logic: 70,
- 324 |           empathy: 50,
- 325 |           priority: 5,
- 326 |           toolLogs: [],
- 327 |           personality: "",
- 328 |           senderId: `echo-agent-${idx}-${Date.now()}`
- 329 |         }
- 330 |       });
- 331 |     });
- 332 |     setNodes(nodesList);
- 333 |     setEdges([]);
- 334 |     setWorkspaceState("active");
- 335 |     setCurrentTab("arena");
- 336 |   };
- 337 | 
- 338 |   const startOrchestration = async (promptText: string) => {
- 339 |     if (!promptText.trim()) return;
- 340 | 
- 341 |     if (isEchoHouseMode) {
- 342 |       const userMsgId = Date.now().toString();
- 343 |       const userMsg: ChatMessage = {
- 344 |         id: userMsgId,
- 345 |         sender: "user",
- 346 |         text: promptText,
- 347 |         speakerName: "You (Self)",
- 348 |         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
- 349 |       };
- 350 |       setChatMessages((prev) => [...prev, userMsg]);
- 351 |       setUserQuery("");
- 352 |       setCurrentTab("arena");
+ 266 |     const titleText = `Echohouse: ${echoSituation}`;
+ 267 |     const truncatedTitle = titleText.length > 50 ? titleText.substring(0, 50) + "..." : titleText;
+ 268 |     const activeId = useWorkflowStore.getState().activeSessionId;
+ 269 |     
+ 270 |     useWorkflowStore.setState((state) => {
+ 271 |       const updatedSessions = { ...state.sessions };
+ 272 |       if (activeId && updatedSessions[activeId]) {
+ 273 |         updatedSessions[activeId] = {
+ 274 |           ...updatedSessions[activeId],
+ 275 |           title: truncatedTitle,
+ 276 |           prompt: echoSituation
+ 277 |         };
+ 278 |       }
+ 279 |       return { sessions: updatedSessions };
+ 280 |     });
+ 281 | 
+ 282 |     const selfMember = echoCast.find(m => m.is_self || m.role === "self");
+ 283 |     const selfNode = {
+ 284 |       id: "self-node",
+ 285 |       type: "custom",
+ 286 |       position: { x: 300, y: 200 },
+ 287 |       data: {
+ 288 |         name: selfMember?.inferred_name || "You (Self)",
+ 289 |         tag: "SELF",
+ 290 |         icon: "bot",
+ 291 |         objective: echoSituation.length > 120 ? echoSituation.substring(0, 120) + "..." : echoSituation,
+ 292 |         systemPrompt: "You are the user themselves, experiencing this problem from the inside.",
+ 293 |         status: "IDLE" as const,
+ 294 |         enabled: true,
+ 295 |         isEchoHouseAgent: true,
+ 296 |         echohouseRole: "self",
+ 297 |         echohouseProblem: echoSituation,
+ 298 |         emotional_core: selfMember?.emotional_core || "",
+ 299 |         rules: [],
+ 300 |         dependencies: [],
+ 301 |         tools: [],
+ 302 |         toolPermissions: {},
+ 303 |         temp: 0.7,
+ 304 |         logic: 70,
+ 305 |         empathy: 50,
+ 306 |         priority: 5,
+ 307 |         toolLogs: [],
+ 308 |         personality: "",
+ 309 |         senderId: "self-node"
+ 310 |       }
+ 311 |     };
+ 312 |     const nodesList: any[] = [selfNode];
+ 313 |     echoCast.forEach((member: any, idx: number) => {
+ 314 |       if (member.is_self || member.role === "self") return;
+ 315 |       const angle = (idx * 2 * Math.PI) / Math.max(echoCast.length - 1, 1);
+ 316 |       const x = 300 + Math.cos(angle) * 280;
+ 317 |       const y = 200 + Math.sin(angle) * 260;
+ 318 |       nodesList.push({
+ 319 |         id: `echo-agent-${idx}-${Date.now()}`,
+ 320 |         type: "custom",
+ 321 |         position: { x: Math.max(50, x), y: Math.max(50, y) },
+ 322 |         data: {
+ 323 |           name: member.inferred_name,
+ 324 |           tag: member.role.toUpperCase().replace(/\s+/g, "_"),
+ 325 |           icon: "science",
+ 326 |           objective: `Provide perspective as ${member.inferred_name} (${member.role}).`,
+ 327 |           systemPrompt: `You are ${member.inferred_name}, whose role in the user's life is ${member.role}. From your perspective about their situation: ${member.inferred_problem}`,
+ 328 |           status: "IDLE" as const,
+ 329 |           enabled: true,
+ 330 |           isEchoHouseAgent: true,
+ 331 |           echohouseRole: member.role,
+ 332 |           echohouseProblem: member.inferred_problem,
+ 333 |           emotional_core: member.emotional_core || "",
+ 334 |           rules: [],
+ 335 |           dependencies: [],
+ 336 |           tools: [],
+ 337 |           toolPermissions: {},
+ 338 |           temp: 0.8,
+ 339 |           logic: 70,
+ 340 |           empathy: 50,
+ 341 |           priority: 5,
+ 342 |           toolLogs: [],
+ 343 |           personality: "",
+ 344 |           senderId: `echo-agent-${idx}-${Date.now()}`
+ 345 |         }
+ 346 |       });
+ 347 |     });
+ 348 |     setNodes(nodesList);
+ 349 |     setEdges([]);
+ 350 |     setWorkspaceState("active");
+ 351 |     setCurrentTab("arena");
+ 352 |   };
  353 | 
- 354 |       const selfNode = {
- 355 |         id: "self-node",
- 356 |         type: "custom",
- 357 |         position: { x: 300, y: 200 },
- 358 |         data: {
- 359 |           name: "You (Self)",
- 360 |           tag: "SELF",
- 361 |           icon: "bot",
- 362 |           objective: promptText.length > 120 ? promptText.substring(0, 120) + "..." : promptText,
- 363 |           systemPrompt: "You are the user themselves, experiencing this problem from the inside.",
- 364 |           status: "IDLE" as const,
- 365 |           enabled: true,
- 366 |           isEchoHouseAgent: true,
- 367 |           echohouseRole: "self",
- 368 |           echohouseProblem: promptText,
- 369 |           rules: [],
- 370 |           dependencies: [],
- 371 |           tools: [],
- 372 |           toolPermissions: {},
- 373 |           temp: 0.7,
- 374 |           logic: 70,
- 375 |           empathy: 50,
- 376 |           priority: 5,
- 377 |           toolLogs: [],
- 378 |           personality: "",
- 379 |           senderId: "self-node"
- 380 |         }
- 381 |       };
- 382 |       setNodes([selfNode]);
- 383 |       setEdges([]);
- 384 | 
- 385 |       if (executionMode === "custom") {
- 386 |         return;
- 387 |       }
- 388 | 
- 389 |       try {
- 390 |         const activeProv = useWorkflowStore.getState().provider;
- 391 |         const apiKey = useWorkflowStore.getState().apiKeys[activeProv] || useWorkflowStore.getState().apiKey || "";
- 392 |         const resp = await fetch("/api/gemini/echohouse/init", {
- 393 |           method: "POST",
- 394 |           headers: { "Content-Type": "application/json" },
- 395 |           body: JSON.stringify({
- 396 |             problem_text: promptText,
- 397 |             provider: activeProv,
- 398 |             model: useWorkflowStore.getState().model,
- 399 |             api_key: apiKey,
- 400 |             api_keys: useWorkflowStore.getState().apiKeys,
- 401 |             base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null,
- 402 |             backup_api_keys: useWorkflowStore.getState().backupApiKeys[activeProv] || []
- 403 |           })
- 404 |         });
- 405 |         if (resp.ok) {
- 406 |           const suggestedCast = await resp.json();
- 407 |           const nodesList = [selfNode];
- 408 |           suggestedCast.forEach((member: any, idx: number) => {
- 409 |             if (member.is_self || member.role === "self") return;
- 410 |             
- 411 |             const angle = (idx * 2 * Math.PI) / (suggestedCast.length - 1 || 1);
- 412 |             const x = 300 + Math.cos(angle) * 280;
- 413 |             const y = 200 + Math.sin(angle) * 260;
- 414 |             
- 415 |             nodesList.push({
- 416 |               id: `echo-agent-${idx}-${Date.now()}`,
- 417 |               type: "custom",
- 418 |               position: { x: Math.max(50, x), y: Math.max(50, y) },
- 419 |               data: {
- 420 |                 name: member.inferred_name,
- 421 |                 tag: member.role.toUpperCase().replace(/\s+/g, "_"),
- 422 |                 icon: "science",
- 423 |                 objective: `Provide perspective as ${member.inferred_name} (${member.role}).`,
- 424 |                 systemPrompt: `You are ${member.inferred_name}, whose role in the user's life is ${member.role}. From your perspective about their situation: ${member.inferred_problem}`,
- 425 |                 status: "IDLE" as const,
- 426 |                 enabled: true,
- 427 |                 isEchoHouseAgent: true,
- 428 |                 echohouseRole: member.role,
- 429 |                 echohouseProblem: member.inferred_problem,
- 430 |                 rules: [],
- 431 |                 dependencies: [],
- 432 |                 tools: [],
- 433 |                 toolPermissions: {},
- 434 |                 temp: 0.8,
- 435 |                 logic: 70,
- 436 |                 empathy: 50,
- 437 |                 priority: 5,
- 438 |                 toolLogs: [],
- 439 |                 personality: "",
- 440 |                 senderId: `echo-agent-${idx}-${Date.now()}`
- 441 |               }
- 442 |             });
- 443 |           });
- 444 |           setNodes(nodesList);
- 445 |         }
- 446 |       } catch (e) {
- 447 |         console.error("Failed to suggest cast:", e);
- 448 |       }
- 449 |       return;
- 450 |     }
- 451 | 
- 452 |     setWorkspaceState("active");
- 453 |     let sessionId = activeSessionId;
- 454 |     if (!sessionId) sessionId = createSession(promptText, executionMode);
- 455 |     setExecutionState("running");
- 456 |     if (executionMode === "custom") {
- 457 |       setCurrentTab("arena");
- 458 |       triggerSteerOrchestration(promptText, false, "custom");
- 459 |       // executionState will be set to "paused" by the store after the plan arrives
- 460 |     } else {
- 461 |       setCurrentTab("chat");
- 462 |       triggerSteerOrchestration(promptText, true, "auto");
- 463 |     }
- 464 |     setUserQuery("");
- 465 |   };
- 466 | 
- 467 |   const handleRegenerate = () => {
- 468 |     const lastAIIdx = chatMessages.findLastIndex(m => m.sender === "ai");
- 469 |     if (lastAIIdx === -1) return;
- 470 |     
- 471 |     const lastUserMsg = chatMessages.slice(0, lastAIIdx).findLast(m => m.sender === "user");
- 472 |     if (!lastUserMsg) return;
- 473 | 
- 474 |     setChatMessages((prev) => prev.slice(0, lastAIIdx));
- 475 |     startOrchestration(lastUserMsg.text);
- 476 |   };
- 477 | 
- 478 |   const handleAddRule = () => {
- 479 |     if (!newRuleText.trim() || !selectedNodeId) return;
- 480 |     addRule(selectedNodeId, newRuleText.trim());
- 481 |     setNewRuleText("");
- 482 |   };
- 483 | 
- 484 |   const activeNodeDetail = nodes.find(n => n.id === selectedNodeId) as any;
+ 354 |   const startOrchestration = async (promptText: string) => {
+ 355 |     if (!promptText.trim()) return;
+ 356 | 
+ 357 |     if (isEchoHouseMode) {
+ 358 |       const activeId = useWorkflowStore.getState().activeSessionId;
+ 359 |       const currentSession = activeId ? sessions[activeId] : null;
+ 360 |       if (currentSession && (currentSession.title === "EchoHouse Simulation" || currentSession.title === "New Session" || !currentSession.title)) {
+ 361 |         const titleText = `Echohouse: ${promptText}`;
+ 362 |         const truncatedTitle = titleText.length > 50 ? titleText.substring(0, 50) + "..." : titleText;
+ 363 |         useWorkflowStore.setState((state) => {
+ 364 |           const updatedSessions = { ...state.sessions };
+ 365 |           if (activeId && updatedSessions[activeId]) {
+ 366 |             updatedSessions[activeId] = {
+ 367 |               ...updatedSessions[activeId],
+ 368 |               title: truncatedTitle,
+ 369 |               prompt: promptText
+ 370 |             };
+ 371 |           }
+ 372 |           return { sessions: updatedSessions };
+ 373 |         });
+ 374 |       }
+ 375 | 
+ 376 |       const userMsgId = Date.now().toString();
+ 377 |       const userMsg: ChatMessage = {
+ 378 |         id: userMsgId,
+ 379 |         sender: "user",
+ 380 |         text: promptText,
+ 381 |         speakerName: "You (Self)",
+ 382 |         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+ 383 |       };
+ 384 |       setChatMessages((prev) => [...prev, userMsg]);
+ 385 |       setUserQuery("");
+ 386 |       setCurrentTab("arena");
+ 387 | 
+ 388 |       const selfNode = {
+ 389 |         id: "self-node",
+ 390 |         type: "custom",
+ 391 |         position: { x: 300, y: 200 },
+ 392 |         data: {
+ 393 |           name: "You (Self)",
+ 394 |           tag: "SELF",
+ 395 |           icon: "bot",
+ 396 |           objective: promptText.length > 120 ? promptText.substring(0, 120) + "..." : promptText,
+ 397 |           systemPrompt: "You are the user themselves, experiencing this problem from the inside.",
+ 398 |           status: "IDLE" as const,
+ 399 |           enabled: true,
+ 400 |           isEchoHouseAgent: true,
+ 401 |           echohouseRole: "self",
+ 402 |           echohouseProblem: promptText,
+ 403 |           rules: [],
+ 404 |           dependencies: [],
+ 405 |           tools: [],
+ 406 |           toolPermissions: {},
+ 407 |           temp: 0.7,
+ 408 |           logic: 70,
+ 409 |           empathy: 50,
+ 410 |           priority: 5,
+ 411 |           toolLogs: [],
+ 412 |           personality: "",
+ 413 |           senderId: "self-node"
+ 414 |         }
+ 415 |       };
+ 416 |       setNodes([selfNode]);
+ 417 |       setEdges([]);
+ 418 | 
+ 419 |       if (executionMode === "custom") {
+ 420 |         return;
+ 421 |       }
+ 422 | 
+ 423 |       try {
+ 424 |         const activeProv = useWorkflowStore.getState().provider;
+ 425 |         const apiKey = useWorkflowStore.getState().apiKeys[activeProv] || useWorkflowStore.getState().apiKey || "";
+ 426 |         const resp = await fetch("/api/gemini/echohouse/init", {
+ 427 |           method: "POST",
+ 428 |           headers: { "Content-Type": "application/json" },
+ 429 |           body: JSON.stringify({
+ 430 |             problem_text: promptText,
+ 431 |             provider: activeProv,
+ 432 |             model: useWorkflowStore.getState().model,
+ 433 |             api_key: apiKey,
+ 434 |             api_keys: useWorkflowStore.getState().apiKeys,
+ 435 |             base_url: useWorkflowStore.getState().providerBaseUrls[activeProv] || null,
+ 436 |             backup_api_keys: useWorkflowStore.getState().backupApiKeys[activeProv] || []
+ 437 |           })
+ 438 |         });
+ 439 |         if (resp.ok) {
+ 440 |           const suggestedCast = await resp.json();
+ 441 |           const nodesList = [selfNode];
+ 442 |           suggestedCast.forEach((member: any, idx: number) => {
+ 443 |             if (member.is_self || member.role === "self") return;
+ 444 |             
+ 445 |             const angle = (idx * 2 * Math.PI) / (suggestedCast.length - 1 || 1);
+ 446 |             const x = 300 + Math.cos(angle) * 280;
+ 447 |             const y = 200 + Math.sin(angle) * 260;
+ 448 |             
+ 449 |             nodesList.push({
+ 450 |               id: `echo-agent-${idx}-${Date.now()}`,
+ 451 |               type: "custom",
+ 452 |               position: { x: Math.max(50, x), y: Math.max(50, y) },
+ 453 |               data: {
+ 454 |                 name: member.inferred_name,
+ 455 |                 tag: member.role.toUpperCase().replace(/\s+/g, "_"),
+ 456 |                 icon: "science",
+ 457 |                 objective: `Provide perspective as ${member.inferred_name} (${member.role}).`,
+ 458 |                 systemPrompt: `You are ${member.inferred_name}, whose role in the user's life is ${member.role}. From your perspective about their situation: ${member.inferred_problem}`,
+ 459 |                 status: "IDLE" as const,
+ 460 |                 enabled: true,
+ 461 |                 isEchoHouseAgent: true,
+ 462 |                 echohouseRole: member.role,
+ 463 |                 echohouseProblem: member.inferred_problem,
+ 464 |                 rules: [],
+ 465 |                 dependencies: [],
+ 466 |                 tools: [],
+ 467 |                 toolPermissions: {},
+ 468 |                 temp: 0.8,
+ 469 |                 logic: 70,
+ 470 |                 empathy: 50,
+ 471 |                 priority: 5,
+ 472 |                 toolLogs: [],
+ 473 |                 personality: "",
+ 474 |                 senderId: `echo-agent-${idx}-${Date.now()}`
+ 475 |               }
+ 476 |             });
+ 477 |           });
+ 478 |           setNodes(nodesList);
+ 479 |         }
+ 480 |       } catch (e) {
+ 481 |         console.error("Failed to suggest cast:", e);
+ 482 |       }
+ 483 |       return;
+ 484 |     }
  485 | 
- 486 |   const ModeSelector = () => (
- 487 |     <div className="flex items-center gap-1 bg-neutral-900/40 rounded-full p-0.5 border border-[#1f1f1f]">
- 488 |       <button onClick={() => setExecutionMode("auto")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "auto" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Smart</button>
- 489 |       <button onClick={() => setExecutionMode("custom")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "custom" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Custom</button>
- 490 |     </div>
- 491 |   );
- 492 | 
- 493 |   const handleFileAttach = () => {
- 494 |     const input = document.createElement("input");
- 495 |     input.type = "file";
- 496 |     input.accept = ".txt,.md,.json,.csv,.py,.js,.ts,.tsx,.html,.css,.yaml,.yml,.xml,.ini,.cfg,.pdf,.jpg,.png";
- 497 |     input.onchange = (e: any) => {
- 498 |       const file = e.target.files?.[0];
- 499 |       if (!file) return;
- 500 |       const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
- 501 |       if (['.txt', '.md', '.json', '.csv', '.py', '.js', '.ts', '.tsx', '.html', '.css', '.yaml', '.yml', '.xml', '.ini', '.cfg'].includes(ext)) {
- 502 |         const reader = new FileReader();
- 503 |         reader.onload = (ev) => setUserQuery((prev) => prev + `\n[Attached: ${file.name}]\n${ev.target?.result as string}\n`);
- 504 |         reader.readAsText(file);
- 505 |       }
- 506 |     };
- 507 |     input.click();
- 508 |   };
- 509 | 
- 510 |   return (
- 511 |     <div className="flex h-screen w-full bg-black text-[#f5f5f5] overflow-hidden font-sans">
- 512 |       <aside onClick={() => { if (!isSidebarExpanded) setIsSidebarExpanded(true); }} className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-30 select-none cursor-pointer ${isSidebarExpanded ? "w-64 cursor-default" : "w-[60px]"}`}>
- 513 |         <div className="flex items-center gap-3 h-16 border-b border-[#1f1f1f] px-4 justify-between">
- 514 |           {isSidebarExpanded ? (
- 515 |             <div className="flex items-center gap-2.5">
- 516 |               <img src="/icon.svg" className="w-7 h-7 rounded-lg object-contain" alt="Solospace Logo" />
- 517 |               <h1 className="text-sm font-bold text-white tracking-tight leading-none">Solospace</h1>
- 518 |             </div>
- 519 |           ) : (
- 520 |             <img src="/icon.svg" className="w-7 h-7 rounded-lg mx-auto object-contain" alt="Solospace Logo" />
- 521 |           )}
- 522 |           {isSidebarExpanded && <button onClick={(e) => { e.stopPropagation(); setIsSidebarExpanded(false); }} className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>}
- 523 |         </div>
- 524 | 
- 525 |         <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto custom-scrollbar">
- 526 |           <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); useWorkflowStore.getState().abortController?.abort(); setWorkspaceState("home"); setUserQuery(""); useWorkflowStore.setState({ activeSessionId: null, nodes: [], edges: [], chatMessages: [], agentTalkLogs: [], executionState: "setup", statusMessage: "", isThinking: false, isOrchestrating: false, liveThoughts: "", pendingApproval: null, followUpSuggestions: [], abortController: null }); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
- 527 |             <SquarePlus className="w-5 h-5 stroke-[1.8]" />
- 528 |             {isSidebarExpanded && <span className="text-xs font-semibold">New Chat</span>}
- 529 |           </button>
- 530 | 
- 531 |           <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsSecretOpen(true); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
- 532 |             <Key className="w-5 h-5 stroke-[1.8]" />
- 533 |             {isSidebarExpanded && <span className="text-xs font-semibold">API Keys</span>}
- 534 |           </button>
- 535 | 
- 536 |           {/* Templates Section */}
- 537 |           <div className="pt-2 select-none">
- 538 |             {isSidebarExpanded ? (
- 539 |               <>
- 540 |                 <button
- 541 |                   onClick={(e) => { e.stopPropagation(); setIsTemplatesExpanded(!isTemplatesExpanded); }}
- 542 |                   className="w-full flex items-center justify-between px-3 py-1.5 text-neutral-600 hover:text-neutral-400 cursor-pointer"
- 543 |                 >
- 544 |                   <span className="text-[10px] font-bold uppercase tracking-widest font-mono">Templates</span>
- 545 |                   <ChevronRight className={`w-3.5 h-3.5 transition-transform duration-200 ${isTemplatesExpanded ? "rotate-90" : ""}`} />
- 546 |                 </button>
- 547 |                 {isTemplatesExpanded && (
- 548 |                   <button
- 549 |                     onClick={(e) => {
- 550 |                       e.stopPropagation();
- 551 |                       createSession("EchoHouse Simulation", "echohouse");
- 552 |                       setWorkspaceState("active");
- 553 |                       setCurrentTab("chat");
- 554 |                     }}
- 555 |                     className="w-full flex items-center rounded-lg transition-all duration-150 py-2.5 px-3 gap-3 hover:bg-neutral-900 text-neutral-200 cursor-pointer"
- 556 |                   >
- 557 |                     <Globe className="w-5 h-5 stroke-[1.8]" />
- 558 |                     <span className="text-xs font-semibold">EchoHouse</span>
- 559 |                   </button>
- 560 |                 )}
- 561 |               </>
- 562 |             ) : (
- 563 |               <button
- 564 |                 onClick={() => {
- 565 |                   createSession("EchoHouse Simulation", "echohouse");
- 566 |                   setWorkspaceState("active");
- 567 |                   setCurrentTab("chat");
- 568 |                 }}
- 569 |                 className="w-full flex items-center justify-center rounded-lg transition-all duration-150 py-2.5 hover:bg-neutral-900 text-neutral-400 cursor-pointer"
- 570 |                 title="EchoHouse Template"
- 571 |               >
- 572 |                 <Globe className="w-5 h-5 stroke-[1.8]" />
- 573 |               </button>
- 574 |             )}
- 575 |           </div>
- 576 | 
- 577 |           {isSidebarExpanded && (
- 578 |             <div className="pt-6 space-y-2 select-none">
- 579 |               <div className="flex items-center gap-1.5 px-3"><History className="w-3.5 h-3.5 text-neutral-600" /><span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest font-mono">Recents</span></div>
- 580 |               <div className="space-y-1 max-h-[220px] overflow-y-auto custom-scrollbar">
- 581 |                 {Object.values(sessions).length === 0 ? <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span> : (
- 582 |                   Object.values(sessions).reverse().map((s) => (
- 583 |                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
- 584 |                       <button disabled={isLoadingSession} onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsLoadingSession(true); try { await loadSessionFromDb(s.id); setWorkspaceState("active"); setCurrentTab("chat"); } catch (err) { console.error(err); } finally { setIsLoadingSession(false); } } }} className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${activeSessionId === s.id ? "text-white font-bold" : "text-neutral-500 hover:text-white"}`} title={s.prompt}>{s.mode === 'echohouse' ? `${s.title} [Echo]` : s.title}</button>
- 585 |                       <button onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); if (confirm(`Delete "${s.title}"?`)) await deleteSessionFromDb(s.id); } }} className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
- 586 |                     </div>
- 587 |                   ))
- 588 |                 )}
- 589 |               </div>
- 590 |             </div>
- 591 |           )}
- 592 |         </nav>
- 593 |       </aside>
- 594 | 
- 595 |       <main onClick={() => { if (isSidebarExpanded && window.innerWidth < 768) setIsSidebarExpanded(false); }} className="flex-1 flex flex-col min-w-0 bg-[#000000] relative transition-all duration-300">
- 596 |         <header className="flex justify-between items-center w-full px-6 h-16 border-b border-[#141414] shrink-0 z-10 bg-black/85 backdrop-blur-md">
- 597 |           <div className="flex items-center gap-2" />
- 598 |           <div className="flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-[2px] rounded-full select-none">
- 599 |             <button onClick={() => { if (workspaceState !== "home") setCurrentTab("chat"); }} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${currentTab === "chat" || workspaceState === "home" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>Chat</button>
- 600 |             {workspaceState === "active" && (
- 601 |               <button onClick={() => setCurrentTab("arena")} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${currentTab === "arena" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>
- 602 |                 <GitFork className="w-3 h-3" /> Flow {nodes.length > 0 && (
- 603 |                   <span className="ml-1 px-1.5 py-0.5 bg-cyan-500/20 border border-cyan-500/30 rounded text-[9px] font-mono text-cyan-400 font-bold">{nodes.length}</span>
- 604 |                 )}
- 605 |               </button>
- 606 |             )}
- 607 |           </div>
- 608 |           <div className="flex items-center gap-2 select-none">
- 609 |             <button onClick={() => alert("Solospace AI OS")} className="text-neutral-400 hover:text-white p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer"><HelpCircle className="w-4 h-4 stroke-[1.8]" /></button>
- 610 |           </div>
- 611 |         </header>
- 612 | 
- 613 |         <div className="flex-1 relative overflow-hidden">
- 614 |           {workspaceState === "home" && !isEchoHouseMode && (
- 615 |             <div className="absolute inset-0 flex flex-col justify-between overflow-y-auto custom-scrollbar">
- 616 |               <div />
- 617 |               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
- 618 |                 <div className="text-center mb-10 space-y-2 select-none">
- 619 |                   <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">What do you want to build?</h1>
- 620 |                   <p className="text-sm text-neutral-400 font-sans">Multi-agent AI OS · 20+ providers · Real tool execution</p>
- 621 |                 </div>
- 622 |                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
- 623 |                   <div className="flex items-center gap-3">
- 624 |                     <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
- 625 |                     <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder="Ask anything. Be specific. (Enter to send, Shift+Enter for newline)" className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
- 626 |                     <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim()} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
- 627 |                   </div>
- 628 |                 </div>
- 629 |                 <div className="flex items-center gap-3 mt-5 select-none">
- 630 |                   <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">Mode:</span>
- 631 |                   <button onClick={() => setExecutionMode("auto")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "auto" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sparkles className="w-3 h-3 stroke-[2]" /><span>Smart Auto</span></button>
- 632 |                   <button onClick={() => setExecutionMode("custom")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "custom" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sliders className="w-3 h-3" /><span>Custom Agent</span></button>
- 633 |                 </div>
+ 486 |     setWorkspaceState("active");
+ 487 |     let sessionId = activeSessionId;
+ 488 |     if (!sessionId) sessionId = createSession(promptText, executionMode);
+ 489 |     setExecutionState("running");
+ 490 |     if (executionMode === "custom") {
+ 491 |       setCurrentTab("arena");
+ 492 |       triggerSteerOrchestration(promptText, false, "custom");
+ 493 |       // executionState will be set to "paused" by the store after the plan arrives
+ 494 |     } else {
+ 495 |       setCurrentTab("chat");
+ 496 |       triggerSteerOrchestration(promptText, true, "auto");
+ 497 |     }
+ 498 |     setUserQuery("");
+ 499 |   };
+ 500 | 
+ 501 |   const handleRegenerate = () => {
+ 502 |     const lastAIIdx = chatMessages.findLastIndex(m => m.sender === "ai");
+ 503 |     if (lastAIIdx === -1) return;
+ 504 |     
+ 505 |     const lastUserMsg = chatMessages.slice(0, lastAIIdx).findLast(m => m.sender === "user");
+ 506 |     if (!lastUserMsg) return;
+ 507 | 
+ 508 |     setChatMessages((prev) => prev.slice(0, lastAIIdx));
+ 509 |     startOrchestration(lastUserMsg.text);
+ 510 |   };
+ 511 | 
+ 512 |   const handleAddRule = () => {
+ 513 |     if (!newRuleText.trim() || !selectedNodeId) return;
+ 514 |     addRule(selectedNodeId, newRuleText.trim());
+ 515 |     setNewRuleText("");
+ 516 |   };
+ 517 | 
+ 518 |   const activeNodeDetail = nodes.find(n => n.id === selectedNodeId) as any;
+ 519 | 
+ 520 |   const ModeSelector = () => (
+ 521 |     <div className="flex items-center gap-1 bg-neutral-900/40 rounded-full p-0.5 border border-[#1f1f1f]">
+ 522 |       <button onClick={() => setExecutionMode("auto")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "auto" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Smart</button>
+ 523 |       <button onClick={() => setExecutionMode("custom")} className={`px-3 py-1.5 rounded-full text-[11px] font-mono font-semibold transition-all ${executionMode === "custom" ? "bg-white text-black shadow-md" : "text-neutral-400 hover:text-white"}`}>Custom</button>
+ 524 |     </div>
+ 525 |   );
+ 526 | 
+ 527 |   const handleFileAttach = () => {
+ 528 |     const input = document.createElement("input");
+ 529 |     input.type = "file";
+ 530 |     input.accept = ".txt,.md,.json,.csv,.py,.js,.ts,.tsx,.html,.css,.yaml,.yml,.xml,.ini,.cfg,.pdf,.jpg,.png";
+ 531 |     input.onchange = (e: any) => {
+ 532 |       const file = e.target.files?.[0];
+ 533 |       if (!file) return;
+ 534 |       const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+ 535 |       if (['.txt', '.md', '.json', '.csv', '.py', '.js', '.ts', '.tsx', '.html', '.css', '.yaml', '.yml', '.xml', '.ini', '.cfg'].includes(ext)) {
+ 536 |         const reader = new FileReader();
+ 537 |         reader.onload = (ev) => setUserQuery((prev) => prev + `\n[Attached: ${file.name}]\n${ev.target?.result as string}\n`);
+ 538 |         reader.readAsText(file);
+ 539 |       }
+ 540 |     };
+ 541 |     input.click();
+ 542 |   };
+ 543 | 
+ 544 |   return (
+ 545 |     <div className="flex h-screen w-full bg-black text-[#f5f5f5] overflow-hidden font-sans">
+ 546 |       <aside onClick={() => { if (!isSidebarExpanded) setIsSidebarExpanded(true); }} className={`flex flex-col h-full bg-[#0d0d0d] border-r border-[#1f1f1f] shrink-0 transition-all duration-300 z-30 select-none cursor-pointer ${isSidebarExpanded ? "w-64 cursor-default" : "w-[60px]"}`}>
+ 547 |         <div className="flex items-center gap-3 h-16 border-b border-[#1f1f1f] px-4 justify-between">
+ 548 |           {isSidebarExpanded ? (
+ 549 |             <div className="flex items-center gap-2.5">
+ 550 |               <img src="/icon.svg" className="w-7 h-7 rounded-lg object-contain" alt="Solospace Logo" />
+ 551 |               <h1 className="text-sm font-bold text-white tracking-tight leading-none">Solospace</h1>
+ 552 |             </div>
+ 553 |           ) : (
+ 554 |             <img src="/icon.svg" className="w-7 h-7 rounded-lg mx-auto object-contain" alt="Solospace Logo" />
+ 555 |           )}
+ 556 |           {isSidebarExpanded && <button onClick={(e) => { e.stopPropagation(); setIsSidebarExpanded(false); }} className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-neutral-800 transition-colors cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>}
+ 557 |         </div>
+ 558 | 
+ 559 |         <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto custom-scrollbar">
+ 560 |           <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); useWorkflowStore.getState().abortController?.abort(); setWorkspaceState("home"); setUserQuery(""); useWorkflowStore.setState({ activeSessionId: null, nodes: [], edges: [], chatMessages: [], agentTalkLogs: [], executionState: "setup", statusMessage: "", isThinking: false, isOrchestrating: false, liveThoughts: "", pendingApproval: null, followUpSuggestions: [], abortController: null }); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
+ 561 |             <SquarePlus className="w-5 h-5 stroke-[1.8]" />
+ 562 |             {isSidebarExpanded && <span className="text-xs font-semibold">New Chat</span>}
+ 563 |           </button>
+ 564 | 
+ 565 |           <button onClick={(e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsSecretOpen(true); } }} className={`w-full flex items-center rounded-lg transition-all duration-150 py-2.5 cursor-pointer relative ${isSidebarExpanded ? "px-3 gap-3 hover:bg-neutral-900 text-neutral-200" : "justify-center text-neutral-400 hover:bg-neutral-900"}`}>
+ 566 |             <Key className="w-5 h-5 stroke-[1.8]" />
+ 567 |             {isSidebarExpanded && <span className="text-xs font-semibold">API Keys</span>}
+ 568 |           </button>
+ 569 | 
+ 570 |           {/* Templates Section */}
+ 571 |           <div className="pt-2 select-none">
+ 572 |             {isSidebarExpanded ? (
+ 573 |               <>
+ 574 |                 <button
+ 575 |                   onClick={(e) => { e.stopPropagation(); setIsTemplatesExpanded(!isTemplatesExpanded); }}
+ 576 |                   className="w-full flex items-center justify-between px-3 py-1.5 text-neutral-600 hover:text-neutral-400 cursor-pointer"
+ 577 |                 >
+ 578 |                   <span className="text-[10px] font-bold uppercase tracking-widest font-mono">Templates</span>
+ 579 |                   <ChevronRight className={`w-3.5 h-3.5 transition-transform duration-200 ${isTemplatesExpanded ? "rotate-90" : ""}`} />
+ 580 |                 </button>
+ 581 |                 {isTemplatesExpanded && (
+ 582 |                   <button
+ 583 |                     onClick={(e) => {
+ 584 |                       e.stopPropagation();
+ 585 |                       createSession("EchoHouse Simulation", "echohouse");
+ 586 |                       setWorkspaceState("active");
+ 587 |                       setCurrentTab("chat");
+ 588 |                     }}
+ 589 |                     className="w-full flex items-center rounded-lg transition-all duration-150 py-2.5 px-3 gap-3 hover:bg-neutral-900 text-neutral-200 cursor-pointer"
+ 590 |                   >
+ 591 |                     <Globe className="w-5 h-5 stroke-[1.8]" />
+ 592 |                     <span className="text-xs font-semibold">EchoHouse</span>
+ 593 |                   </button>
+ 594 |                 )}
+ 595 |               </>
+ 596 |             ) : (
+ 597 |               <button
+ 598 |                 onClick={() => {
+ 599 |                   createSession("EchoHouse Simulation", "echohouse");
+ 600 |                   setWorkspaceState("active");
+ 601 |                   setCurrentTab("chat");
+ 602 |                 }}
+ 603 |                 className="w-full flex items-center justify-center rounded-lg transition-all duration-150 py-2.5 hover:bg-neutral-900 text-neutral-400 cursor-pointer"
+ 604 |                 title="EchoHouse Template"
+ 605 |               >
+ 606 |                 <Globe className="w-5 h-5 stroke-[1.8]" />
+ 607 |               </button>
+ 608 |             )}
+ 609 |           </div>
+ 610 | 
+ 611 |           {isSidebarExpanded && (
+ 612 |             <div className="pt-6 space-y-2 select-none">
+ 613 |               <div className="flex items-center gap-1.5 px-3"><History className="w-3.5 h-3.5 text-neutral-600" /><span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest font-mono">Recents</span></div>
+ 614 |               <div className="space-y-1 max-h-[220px] overflow-y-auto custom-scrollbar">
+ 615 |                 {Object.values(sessions).length === 0 ? <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span> : (
+ 616 |                   Object.values(sessions)
+ 617 |                     .sort((a, b) => {
+ 618 |                       const aTime = parseInt(a.id.replace(/\D/g, ''), 10) || 0;
+ 619 |                       const bTime = parseInt(b.id.replace(/\D/g, ''), 10) || 0;
+ 620 |                       return bTime - aTime;
+ 621 |                     })
+ 622 |                     .map((s) => (
+ 623 |                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
+ 624 |                       <button disabled={isLoadingSession} onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsLoadingSession(true); try { await loadSessionFromDb(s.id); setWorkspaceState("active"); setCurrentTab("chat"); } catch (err) { console.error(err); } finally { setIsLoadingSession(false); } } }} className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${activeSessionId === s.id ? "text-white font-bold" : "text-neutral-500 hover:text-white"}`} title={s.prompt}>{s.mode === 'echohouse' ? `${s.title} [Echo]` : s.title}</button>
+ 625 |                       <button onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); if (confirm(`Delete "${s.title}"?`)) await deleteSessionFromDb(s.id); } }} className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+ 626 |                     </div>
+ 627 |                   ))
+ 628 |                 )}
+ 629 |               </div>
+ 630 |             </div>
+ 631 |           )}
+ 632 |         </nav>
+ 633 |       </aside>
  634 | 
- 635 |                 {/* EchoHouse Feature Card */}
- 636 |                 <div className="w-full mt-4">
- 637 |                   <button
- 638 |                     onClick={(e) => {
- 639 |                       createSession("EchoHouse Simulation", "echohouse");
- 640 |                       setWorkspaceState("active");
- 641 |                       setCurrentTab("chat");
- 642 |                     }}
- 643 |                     className="w-full p-4 bg-gradient-to-r from-neutral-950 to-neutral-900 border border-neutral-800 hover:border-neutral-600 rounded-2xl text-left transition-all cursor-pointer group"
- 644 |                   >
- 645 |                     <div className="flex items-center gap-3">
- 646 |                       <div className="w-8 h-8 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center justify-center text-base">🌀</div>
- 647 |                       <div className="flex-1 min-w-0">
- 648 |                         <p className="text-xs font-bold text-white">EchoHouse — Social Dynamics Simulator</p>
- 649 |                         <p className="text-[10px] text-neutral-500 mt-0.5">Simulate conversations with people in your life. Get therapeutic insights.</p>
- 650 |                       </div>
- 651 |                       <ArrowRight className="w-4 h-4 text-neutral-600 group-hover:text-white transition-colors shrink-0" />
- 652 |                     </div>
- 653 |                   </button>
- 654 |                 </div>
- 655 | 
- 656 |               </div>
- 657 |               <div />
- 658 |             </div>
- 659 |           )}
- 660 | 
- 661 |           {workspaceState === "home" && isEchoHouseMode && (
- 662 |             <div className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto custom-scrollbar px-6 py-12">
- 663 |               <div className="w-full max-w-xl space-y-8">
- 664 |                 {/* Step indicator */}
- 665 |                 <div className="flex items-center gap-2 select-none">
- 666 |                   {[1, 2, 3].map((s) => (
- 667 |                     <div key={s} className="flex items-center gap-2">
- 668 |                       <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-mono font-bold transition-all ${echoStep >= s ? 'bg-white text-black' : 'bg-neutral-800 text-neutral-500'}`}>{s}</div>
- 669 |                       {s < 3 && <div className={`w-8 h-px transition-all ${echoStep > s ? 'bg-white' : 'bg-neutral-800'}`} />}
- 670 |                     </div>
- 671 |                   ))}
- 672 |                   <span className="text-[10px] font-mono text-neutral-500 ml-2 uppercase tracking-wider">
- 673 |                     {echoStep === 1 ? 'Situation' : echoStep === 2 ? 'Focus' : 'Cast Review'}
- 674 |                   </span>
- 675 |                 </div>
- 676 | 
- 677 |                 {/* Step 1 — Situation */}
- 678 |                 {echoStep === 1 && (
- 679 |                   <div className="space-y-4">
- 680 |                     <div className="space-y-1">
- 681 |                       <h1 className="text-2xl font-bold text-white tracking-tight">Describe the situation you are navigating.</h1>
- 682 |                       <p className="text-xs text-neutral-500 font-sans">Write freely. This is private. The more specific, the more useful the simulation.</p>
- 683 |                     </div>
- 684 |                     <textarea
- 685 |                       rows={6}
- 686 |                       value={echoSituation}
- 687 |                       onChange={(e) => setEchoSituation(e.target.value)}
- 688 |                       placeholder="My manager keeps dismissing my ideas in meetings. Last week they took credit for a suggestion I made and..."
- 689 |                       className="w-full bg-neutral-950 border border-[#1f1f1f] rounded-2xl p-4 text-sm text-neutral-200 outline-none placeholder:text-neutral-700 focus:border-neutral-600 resize-none leading-relaxed transition-colors custom-scrollbar"
- 690 |                     />
- 691 |                     <button
- 692 |                       onClick={() => { if (echoSituation.trim()) setEchoStep(2); }}
- 693 |                       disabled={!echoSituation.trim()}
- 694 |                       className="w-full py-3 bg-white text-black font-semibold text-sm rounded-2xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
- 695 |                     >
- 696 |                       Continue
- 697 |                     </button>
- 698 |                   </div>
- 699 |                 )}
+ 635 |       <main onClick={() => { if (isSidebarExpanded && window.innerWidth < 768) setIsSidebarExpanded(false); }} className="flex-1 flex flex-col min-w-0 bg-[#000000] relative transition-all duration-300">
+ 636 |         <header className="flex justify-between items-center w-full px-6 h-16 border-b border-[#141414] shrink-0 z-10 bg-black/85 backdrop-blur-md">
+ 637 |           <div className="flex items-center gap-2" />
+ 638 |           <div className="flex items-center bg-[#0d0d0d] border border-[#1f1f1f] p-[2px] rounded-full select-none">
+ 639 |             <button onClick={() => { if (workspaceState !== "home") setCurrentTab("chat"); }} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${currentTab === "chat" || workspaceState === "home" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>Chat</button>
+ 640 |             {workspaceState === "active" && (
+ 641 |               <button onClick={() => setCurrentTab("arena")} className={`px-6 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${currentTab === "arena" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>
+ 642 |                 <GitFork className="w-3 h-3" /> Flow {nodes.length > 0 && (
+ 643 |                   <span className="ml-1 px-1.5 py-0.5 bg-cyan-500/20 border border-cyan-500/30 rounded text-[9px] font-mono text-cyan-400 font-bold">{nodes.length}</span>
+ 644 |                 )}
+ 645 |               </button>
+ 646 |             )}
+ 647 |           </div>
+ 648 |           <div className="flex items-center gap-2 select-none">
+ 649 |             <button onClick={() => alert("Solospace AI OS")} className="text-neutral-400 hover:text-white p-1.5 rounded-md hover:bg-neutral-900 transition-colors cursor-pointer"><HelpCircle className="w-4 h-4 stroke-[1.8]" /></button>
+ 650 |           </div>
+ 651 |         </header>
+ 652 | 
+ 653 |         <div className="flex-1 relative overflow-hidden">
+ 654 |           {workspaceState === "home" && !isEchoHouseMode && (
+ 655 |             <div className="absolute inset-0 flex flex-col justify-between overflow-y-auto custom-scrollbar">
+ 656 |               <div />
+ 657 |               <div className="w-full max-w-2xl mx-auto px-6 py-12 flex flex-col items-center">
+ 658 |                 <div className="text-center mb-10 space-y-2 select-none">
+ 659 |                   <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">What do you want to build?</h1>
+ 660 |                   <p className="text-sm text-neutral-400 font-sans">Multi-agent AI OS · 20+ providers · Real tool execution</p>
+ 661 |                 </div>
+ 662 |                 <div className="w-full chatgpt-input-box rounded-[24px] p-2 flex flex-col gap-2">
+ 663 |                   <div className="flex items-center gap-3">
+ 664 |                     <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
+ 665 |                     <textarea rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (userQuery.trim()) startOrchestration(userQuery); } }} placeholder="Ask anything. Be specific. (Enter to send, Shift+Enter for newline)" className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 resize-none py-1.5 custom-scrollbar" style={{ maxHeight: "150px" }} />
+ 666 |                     <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim()} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all font-semibold cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
+ 667 |                   </div>
+ 668 |                 </div>
+ 669 |                 <div className="flex items-center gap-3 mt-5 select-none">
+ 670 |                   <span className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">Mode:</span>
+ 671 |                   <button onClick={() => setExecutionMode("auto")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "auto" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sparkles className="w-3 h-3 stroke-[2]" /><span>Smart Auto</span></button>
+ 672 |                   <button onClick={() => setExecutionMode("custom")} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono border transition-all cursor-pointer ${executionMode === "custom" ? "bg-white text-black border-white font-bold" : "bg-neutral-950 text-neutral-400 border-[#1f1f1f] hover:text-white"}`}><Sliders className="w-3 h-3" /><span>Custom Agent</span></button>
+ 673 |                 </div>
+ 674 | 
+ 675 |                 {/* EchoHouse Feature Card */}
+ 676 |                 <div className="w-full mt-4">
+ 677 |                   <button
+ 678 |                     onClick={(e) => {
+ 679 |                       createSession("EchoHouse Simulation", "echohouse");
+ 680 |                       setWorkspaceState("active");
+ 681 |                       setCurrentTab("chat");
+ 682 |                     }}
+ 683 |                     className="w-full p-4 bg-gradient-to-r from-neutral-950 to-neutral-900 border border-neutral-800 hover:border-neutral-600 rounded-2xl text-left transition-all cursor-pointer group"
+ 684 |                   >
+ 685 |                     <div className="flex items-center gap-3">
+ 686 |                       <div className="w-8 h-8 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center justify-center text-base">🌀</div>
+ 687 |                       <div className="flex-1 min-w-0">
+ 688 |                         <p className="text-xs font-bold text-white">EchoHouse — Social Dynamics Simulator</p>
+ 689 |                         <p className="text-[10px] text-neutral-500 mt-0.5">Simulate conversations with people in your life. Get therapeutic insights.</p>
+ 690 |                       </div>
+ 691 |                       <ArrowRight className="w-4 h-4 text-neutral-600 group-hover:text-white transition-colors shrink-0" />
+ 692 |                     </div>
+ 693 |                   </button>
+ 694 |                 </div>
+ 695 | 
+ 696 |               </div>
+ 697 |               <div />
+ 698 |             </div>
+ 699 |           )}
  700 | 
- 701 |                 {/* Step 2 — Focus */}
- 702 |                 {echoStep === 2 && (
- 703 |                   <div className="space-y-4">
- 704 |                     <div className="space-y-1">
- 705 |                       <h1 className="text-2xl font-bold text-white tracking-tight">What do you want from this simulation?</h1>
- 706 |                       <p className="text-xs text-neutral-500 font-sans">Select the focus that best fits your goal.</p>
- 707 |                     </div>
- 708 |                     <div className="space-y-2">
- 709 |                       {[
- 710 |                         "Understand why this keeps happening",
- 711 |                         "Prepare for a difficult conversation",
- 712 |                         "Process feelings about a past event"
- 713 |                       ].map((option) => (
- 714 |                         <button
- 715 |                           key={option}
- 716 |                           onClick={() => setEchoFocus(option)}
- 717 |                           className={`w-full text-left px-4 py-3 rounded-xl border text-sm transition-all cursor-pointer ${echoFocus === option ? 'border-white bg-white/[0.06] text-white font-semibold' : 'border-[#1f1f1f] text-neutral-400 hover:border-neutral-600 hover:text-white'}`}
- 718 |                         >
- 719 |                           {option}
- 720 |                         </button>
- 721 |                       ))}
- 722 |                     </div>
- 723 |                     <div className="flex gap-2">
- 724 |                       <button onClick={() => setEchoStep(1)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
- 725 |                       <button
- 726 |                         onClick={async () => {
- 727 |                           if (echoFocus.trim()) {
- 728 |                             setEchoStep(3);
- 729 |                             if (executionMode === "auto") {
- 730 |                               await fetchEchoCast(echoSituation, echoFocus);
- 731 |                             } else {
- 732 |                               setEchoCast([]);
- 733 |                             }
- 734 |                           }
- 735 |                         }}
- 736 |                         disabled={!echoFocus.trim()}
- 737 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
- 738 |                       >
- 739 |                         {isLoadingCast ? "Inferring cast..." : "Next"}
- 740 |                       </button>
- 741 |                     </div>
- 742 |                   </div>
- 743 |                 )}
- 744 | 
- 745 |                 {/* Step 3 — Cast Review */}
- 746 |                 {echoStep === 3 && (
- 747 |                   <div className="space-y-4">
- 748 |                     <div className="space-y-1">
- 749 |                       <h1 className="text-2xl font-bold text-white tracking-tight">Review the cast.</h1>
- 750 |                       <p className="text-xs text-neutral-500 font-sans">These are the people who will participate in the simulation. Edit, remove, or add as needed.</p>
- 751 |                     </div>
- 752 |                     {isLoadingCast ? (
- 753 |                       <div className="flex items-center justify-center py-12">
- 754 |                         <div className="w-5 h-5 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
- 755 |                         <span className="text-xs text-neutral-500 ml-3 font-mono">Inferring cast...</span>
- 756 |                       </div>
- 757 |                     ) : (executionMode === "custom" && echoCast.length === 0) ? (
- 758 |                       <p>You are in Custom mode. Add people directly on the canvas after starting the simulation.</p>
- 759 |                     ) : (
- 760 |                       <div className="space-y-2">
- 761 |                         {echoCast.map((member, idx) => (
- 762 |                           <div key={idx} className="bg-neutral-950 border border-[#1f1f1f] rounded-xl p-3 space-y-2">
- 763 |                             {editingCastIdx === idx ? (
- 764 |                               <div className="space-y-2">
- 765 |                                 <input
- 766 |                                   type="text"
- 767 |                                   value={member.inferred_name}
- 768 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_name: e.target.value } : m))}
- 769 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
- 770 |                                   placeholder="Name"
- 771 |                                 />
- 772 |                                 <input
- 773 |                                   type="text"
- 774 |                                   value={member.role}
- 775 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, role: e.target.value } : m))}
- 776 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
- 777 |                                   placeholder="Role"
- 778 |                                 />
- 779 |                                 <textarea
- 780 |                                   value={member.inferred_problem}
- 781 |                                   rows={2}
- 782 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_problem: e.target.value } : m))}
- 783 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2.5 text-xs text-white outline-none focus:border-neutral-500 resize-none"
- 784 |                                   placeholder="Their perspective..."
- 785 |                                 />
- 786 |                                 <button onClick={() => setEditingCastIdx(null)} className="text-[10px] font-mono text-neutral-400 hover:text-white cursor-pointer">Done</button>
- 787 |                               </div>
- 788 |                             ) : (
- 789 |                               <div className="flex items-start justify-between gap-2">
- 790 |                                 <div className="min-w-0 flex-1">
- 791 |                                   <div className="flex items-center gap-2">
- 792 |                                     <span className="text-xs font-semibold text-white">{member.inferred_name}</span>
- 793 |                                     <span className="text-[9px] font-mono text-neutral-500 uppercase tracking-wider">{member.role}</span>
- 794 |                                   </div>
- 795 |                                   <p className="text-[11px] text-neutral-500 leading-relaxed mt-0.5 line-clamp-2">{member.inferred_problem}</p>
- 796 |                                 </div>
- 797 |                                 {!member.is_self && (
- 798 |                                   <div className="flex gap-1 shrink-0">
- 799 |                                     <button onClick={() => setEditingCastIdx(idx)} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><Pencil className="w-3 h-3" /></button>
- 800 |                                     <button onClick={() => setEchoCast(prev => prev.filter((_, i) => i !== idx))} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><X className="w-3 h-3" /></button>
- 801 |                                   </div>
- 802 |                                 )}
- 803 |                               </div>
- 804 |                             )}
- 805 |                           </div>
- 806 |                         ))}
- 807 |                         <button
- 808 |                           onClick={() => setEchoCast(prev => [...prev, { inferred_name: "New Person", role: "acquaintance", inferred_problem: "Enter their perspective...", emotional_core: "", is_self: false }])}
- 809 |                           className="w-full py-2.5 border border-dashed border-[#1f1f1f] rounded-xl text-xs text-neutral-500 hover:text-white hover:border-neutral-600 transition-all cursor-pointer"
- 810 |                         >
- 811 |                           Add Person
- 812 |                         </button>
- 813 |                       </div>
- 814 |                     )}
- 815 |                     <div className="flex gap-2">
- 816 |                       <button onClick={() => setEchoStep(2)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
- 817 |                       <button
- 818 |                         onClick={beginEchoHouseSimulation}
- 819 |                         disabled={isLoadingCast || (executionMode !== "custom" && echoCast.filter(m => !m.is_self).length === 0)}
- 820 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
- 821 |                       >
- 822 |                         Begin Simulation
- 823 |                       </button>
- 824 |                     </div>
- 825 |                   </div>
- 826 |                 )}
- 827 |               </div>
- 828 |             </div>
- 829 |           )}
- 830 | 
- 831 |           {workspaceState === "active" && (
- 832 |             <div className="absolute inset-0 flex">
- 833 |               {currentTab === "chat" && (
- 834 |                 <div className="flex-1 flex flex-col justify-between overflow-hidden bg-black">
- 835 |                   <div ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
- 836 |                     {isLoadingSession ? (
- 837 |                       <div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" /></div>
- 838 |                     ) : (
- 839 |                       <div className="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto space-y-4 select-text">
- 840 |                         {chatMessages.length === 0 ? (
- 841 |                           <div className="flex flex-col items-center justify-center py-20 text-center space-y-2 select-none">
- 842 |                             <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">
- 843 |                               {isEchoHouseMode ? "What is your problem in life?" : "What's on your mind?"}
- 844 |                             </h1>
- 845 |                             <p className="text-sm text-neutral-400 font-sans">
- 846 |                               {isEchoHouseMode ? "Type your struggle below to initialize the simulation." : "Start a conversation to see AI response."}
- 847 |                             </p>
- 848 |                           </div>
- 849 |                         ) : (
- 850 |                           chatMessages.map((msg, msgIdx) => (
- 851 |                             <motion.div key={msg.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={`flex w-full ${msg.sender === "divider" ? "justify-center" : msg.sender === "user" ? "justify-end" : "justify-start"}`}>
- 852 |                               {msg.sender === "divider" ? (
- 853 |                                 <div className="w-full flex items-center gap-4 my-4 select-none">
- 854 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
- 855 |                                   <span className="text-[10px] font-mono text-neutral-500 tracking-wider uppercase">{msg.text}</span>
- 856 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
- 857 |                                 </div>
- 858 |                               ) : msg.sender === "user" ? (
- 859 |                                 <div className="flex flex-col items-end space-y-1 max-w-[72%] group">
- 860 |                                   {msg.speakerName && (
- 861 |                                     <span className="text-[10px] font-mono text-neutral-500 mr-2">{msg.speakerName}</span>
- 862 |                                   )}
- 863 |                                   <div className={`rounded-3xl px-5 py-3 text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'bg-neutral-800' : 'bg-[#2f2f2f]'}`}><p className="whitespace-pre-wrap">{msg.text}</p></div>
- 864 |                                   <div className="flex items-center gap-3 mt-1.5 text-neutral-500 select-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 mr-2">
- 865 |                                     <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
- 866 |                                       {copiedMsgId === msg.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
- 867 |                                       <span>{copiedMsgId === msg.id ? "Copied" : "Copy"}</span>
- 868 |                                     </button>
- 869 |                                     <button onClick={() => { setUserQuery(msg.text); textareaRef.current?.focus(); textareaRef.current?.scrollIntoView({ behavior: "smooth" }); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
- 870 |                                       <Pencil className="w-3 h-3" />
- 871 |                                       <span>Edit</span>
- 872 |                                     </button>
- 873 |                                   </div>
- 874 |                                 </div>
- 875 |                               ) : (
- 876 |                                 <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
- 877 |                                   {msg.speakerName && msg.speakerName !== "insight" && msg.speakerName !== "takeaways" && (
- 878 |                                     <span className="text-[10px] font-mono text-neutral-500 ml-1">{msg.speakerName}</span>
- 879 |                                   )}
- 880 |                                   {msg.speakerName === "takeaways" && msg.takeaways ? (
- 881 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 space-y-3 mt-2">
- 882 |                                       <span className="text-[10px] font-mono text-neutral-400 uppercase tracking-wider font-bold block">What you can try</span>
- 883 |                                       <ol className="space-y-2">
- 884 |                                         {msg.takeaways.map((item, ti) => (
- 885 |                                           <li key={ti} className="flex gap-2.5 text-xs text-neutral-300 leading-relaxed">
- 886 |                                             <span className="font-mono text-neutral-600 shrink-0">{ti + 1}.</span>
- 887 |                                             <span>{item}</span>
- 888 |                                           </li>
- 889 |                                         ))}
- 890 |                                       </ol>
- 891 |                                     </div>
- 892 |                                   ) : msg.speakerName === "insight" ? (
- 893 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4">
- 894 |                                       {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
- 895 |                                     </div>
- 896 |                                   ) : (
- 897 |                                     <div className={`w-full text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'rounded-2xl px-4 py-3 bg-neutral-900' : 'px-1 py-2'}`}>
- 898 |                                       {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
- 899 |                                       {msg.text && (!isOrchestrating || msgIdx !== chatMessages.length - 1) && (
- 900 |                                         <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
- 901 |                                           <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
- 902 |                                             {copiedMsgId === msg.id ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400 font-medium">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
- 903 |                                           </button>
- 904 |                                           {!isEchoHouseMode && msgIdx === chatMessages.length - 1 && !isOrchestrating && (
- 905 |                                             <button onClick={handleRegenerate} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
- 906 |                                               <RefreshCw className="w-3.5 h-3.5" />
- 907 |                                               <span>Regenerate</span>
- 908 |                                             </button>
- 909 |                                           )}
- 910 |                                         </div>
- 911 |                                       )}
- 912 |                                     </div>
- 913 |                                   )}
- 914 |                                   {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && nodes.length > 0 && (
- 915 |                                     <div className="flex gap-3 mt-4 select-none">
- 916 |                                       <button onClick={() => setCurrentTab("arena")} className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max">
- 917 |                                         <GitFork className="w-3.5 h-3.5 text-cyan-400" /><span>See Agent Flow</span>
- 918 |                                       </button>
- 919 |                                       {!isEchoHouseMode && (activeSession?.mode === "custom" || executionMode === "custom") && executionState === "paused" && (
- 920 |                                         <button
- 921 |                                           onClick={async () => {
- 922 |                                             setExecutionState("running");
- 923 |                                             await triggerCustomExecution();
- 924 |                                           }}
- 925 |                                           className="px-4 py-2 bg-white hover:bg-neutral-200 rounded-xl text-xs font-bold text-black transition-all flex items-center gap-1.5 cursor-pointer max-w-max"
- 926 |                                         >
- 927 |                                           Proceed
- 928 |                                         </button>
- 929 |                                       )}
- 930 |                                     </div>
- 931 |                                   )}
- 932 |                                 </div>
- 933 |                               )}
- 934 |                             </motion.div>
- 935 |                           ))
- 936 |                         )}
- 937 |                         {/* Live agent thinking indicator */}
- 938 |                         {isThinking && chatMessages[chatMessages.length - 1]?.sender !== 'ai' && (
- 939 |                           <motion.div 
- 940 |                             initial={{ opacity: 0, y: 8 }} 
- 941 |                             animate={{ opacity: 1, y: 0 }} 
- 942 |                             className="flex justify-start"
- 943 |                           >
- 944 |                             <div className="flex items-center gap-2 px-4 py-3 bg-neutral-950 border border-[#1f1f1f] rounded-2xl max-w-[200px]">
- 945 |                               <div className="flex gap-1">
- 946 |                                 {[0, 1, 2].map(i => (
- 947 |                                   <div key={i} className="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
- 948 |                                 ))}
- 949 |                               </div>
- 950 |                               <ThinkingText prefix="thinking" className="text-[10px] text-neutral-500 font-mono" />
- 951 |                             </div>
- 952 |                           </motion.div>
- 953 |                         )}
- 954 |                         <div ref={chatEndRef} />
- 955 |                       </div>
- 956 |                     )}
- 957 |                   </div>
- 958 |                   <div className="px-4 sm:px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
- 959 |                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
- 960 |                       <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
- 961 |                       <textarea ref={textareaRef} rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery); } }} placeholder={isOrchestrating ? "Streaming..." : isEchoHouseMode ? "What is your problem in life?" : "Ask a follow-up..."} disabled={isOrchestrating} className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar" />
- 962 |                       <div className="flex items-center gap-2 shrink-0">
- 963 |                         <ModeSelector />
- 964 |                         {isOrchestrating ? (
- 965 |                           <button onClick={cancelOrchestration} className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all cursor-pointer"><Square className="w-3.5 h-3.5 text-white fill-white" /></button>
- 966 |                         ) : (
- 967 |                           <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim() || isThinking} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
- 968 |                         )}
- 969 |                       </div>
- 970 |                     </div>
- 971 |                   </div>
- 972 |                 </div>
- 973 |               )}
- 974 |               {currentTab === "arena" && (
- 975 |                 <div className="flex-1 relative overflow-hidden bg-[#000000] flex">
- 976 |                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#0d0d0d]/90 border border-[#1f1f1f] rounded-full px-4 py-2 backdrop-blur-md shadow-xl pointer-events-auto">
- 977 |                     <button onClick={() => setCurrentTab("chat")} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-mono"><ChevronLeft className="w-3.5 h-3.5" /> Back to Chat</button>
- 978 |                   </div>
- 979 |                   <FlowArena onProceed={() => setCurrentTab("chat")} />
- 980 |                 </div>
- 981 |               )}
- 982 |             </div>
- 983 |           )}
- 984 |         </div>
- 985 |       </main>
- 986 | 
- 987 |       {currentTab === "arena" && isConfigPanelOpen && activeNodeDetail && (
- 988 |         <div className="fixed top-0 right-0 h-full w-80 bg-[#0c0c0c]/95 border-l border-[#1f1f1f] z-40 flex flex-col justify-between shadow-2xl transition-transform duration-300 right-panel select-none">
- 989 |           <div className="p-5 border-b border-[#1f1f1f] flex justify-between items-center bg-[#0d0d0d]">
- 990 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider">{activeNodeDetail.data.name}</h3>
- 991 |             <button onClick={() => { setIsConfigPanelOpen(false); setSelectedNodeId(null); }} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
- 992 |           </div>
- 993 |           <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
- 994 |             {activeNodeDetail.data.isEchoHouseAgent ? (
- 995 |               <>
- 996 |                 <div className="space-y-1.5">
- 997 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label>
- 998 |                   <input
- 999 |                     type="text"
-1000 |                     value={activeNodeDetail.data.name}
-1001 |                     onChange={(e) => {
-1002 |                       const nameVal = e.target.value;
-1003 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
-1004 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
-1005 |                       updateNodeField(activeNodeDetail.id, {
-1006 |                         name: nameVal,
-1007 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
-1008 |                         objective: nameVal === "You (Self)" || roleVal === "self"
-1009 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
-1010 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
-1011 |                       });
-1012 |                     }}
-1013 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
-1014 |                   />
-1015 |                 </div>
-1016 |                 <div className="space-y-1.5">
-1017 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Role</label>
-1018 |                   <input
-1019 |                     type="text"
-1020 |                     value={activeNodeDetail.data.echohouseRole}
-1021 |                     disabled={activeNodeDetail.data.echohouseRole === "self"}
-1022 |                     onChange={(e) => {
-1023 |                       const nameVal = activeNodeDetail.data.name || "";
-1024 |                       const roleVal = e.target.value;
-1025 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
-1026 |                       updateNodeField(activeNodeDetail.id, {
-1027 |                         echohouseRole: roleVal,
-1028 |                         tag: roleVal.toUpperCase().replace(/\s+/g, '_'),
-1029 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
-1030 |                         objective: `Provide perspective as ${nameVal} (${roleVal}).`
-1031 |                       });
-1032 |                     }}
-1033 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none disabled:opacity-40"
-1034 |                   />
-1035 |                 </div>
+ 701 |           {workspaceState === "home" && isEchoHouseMode && (
+ 702 |             <div className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto custom-scrollbar px-6 py-12">
+ 703 |               <div className="w-full max-w-xl space-y-8">
+ 704 |                 {/* Step indicator */}
+ 705 |                 <div className="flex items-center gap-2 select-none">
+ 706 |                   {[1, 2, 3].map((s) => (
+ 707 |                     <div key={s} className="flex items-center gap-2">
+ 708 |                       <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-mono font-bold transition-all ${echoStep >= s ? 'bg-white text-black' : 'bg-neutral-800 text-neutral-500'}`}>{s}</div>
+ 709 |                       {s < 3 && <div className={`w-8 h-px transition-all ${echoStep > s ? 'bg-white' : 'bg-neutral-800'}`} />}
+ 710 |                     </div>
+ 711 |                   ))}
+ 712 |                   <span className="text-[10px] font-mono text-neutral-500 ml-2 uppercase tracking-wider">
+ 713 |                     {echoStep === 1 ? 'Situation' : echoStep === 2 ? 'Focus' : 'Cast Review'}
+ 714 |                   </span>
+ 715 |                 </div>
+ 716 | 
+ 717 |                 {/* Step 1 — Situation */}
+ 718 |                 {echoStep === 1 && (
+ 719 |                   <div className="space-y-4">
+ 720 |                     <div className="space-y-1">
+ 721 |                       <h1 className="text-2xl font-bold text-white tracking-tight">Describe the situation you are navigating.</h1>
+ 722 |                       <p className="text-xs text-neutral-500 font-sans">Write freely. This is private. The more specific, the more useful the simulation.</p>
+ 723 |                     </div>
+ 724 |                     <textarea
+ 725 |                       rows={6}
+ 726 |                       value={echoSituation}
+ 727 |                       onChange={(e) => setEchoSituation(e.target.value)}
+ 728 |                       placeholder="My manager keeps dismissing my ideas in meetings. Last week they took credit for a suggestion I made and..."
+ 729 |                       className="w-full bg-neutral-950 border border-[#1f1f1f] rounded-2xl p-4 text-sm text-neutral-200 outline-none placeholder:text-neutral-700 focus:border-neutral-600 resize-none leading-relaxed transition-colors custom-scrollbar"
+ 730 |                     />
+ 731 |                     <button
+ 732 |                       onClick={() => { if (echoSituation.trim()) setEchoStep(2); }}
+ 733 |                       disabled={!echoSituation.trim()}
+ 734 |                       className="w-full py-3 bg-white text-black font-semibold text-sm rounded-2xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
+ 735 |                     >
+ 736 |                       Continue
+ 737 |                     </button>
+ 738 |                   </div>
+ 739 |                 )}
+ 740 | 
+ 741 |                 {/* Step 2 — Focus */}
+ 742 |                 {echoStep === 2 && (
+ 743 |                   <div className="space-y-4">
+ 744 |                     <div className="space-y-1">
+ 745 |                       <h1 className="text-2xl font-bold text-white tracking-tight">What do you want from this simulation?</h1>
+ 746 |                       <p className="text-xs text-neutral-500 font-sans">Select the focus that best fits your goal.</p>
+ 747 |                     </div>
+ 748 |                     <div className="space-y-2">
+ 749 |                       {[
+ 750 |                         "Understand why this keeps happening",
+ 751 |                         "Prepare for a difficult conversation",
+ 752 |                         "Process feelings about a past event"
+ 753 |                       ].map((option) => (
+ 754 |                         <button
+ 755 |                           key={option}
+ 756 |                           onClick={() => setEchoFocus(option)}
+ 757 |                           className={`w-full text-left px-4 py-3 rounded-xl border text-sm transition-all cursor-pointer ${echoFocus === option ? 'border-white bg-white/[0.06] text-white font-semibold' : 'border-[#1f1f1f] text-neutral-400 hover:border-neutral-600 hover:text-white'}`}
+ 758 |                         >
+ 759 |                           {option}
+ 760 |                         </button>
+ 761 |                       ))}
+ 762 |                     </div>
+ 763 |                     <div className="flex gap-2">
+ 764 |                       <button onClick={() => setEchoStep(1)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
+ 765 |                       <button
+ 766 |                         onClick={async () => {
+ 767 |                           if (echoFocus.trim()) {
+ 768 |                             setEchoStep(3);
+ 769 |                             if (executionMode === "auto") {
+ 770 |                               await fetchEchoCast(echoSituation, echoFocus);
+ 771 |                             } else {
+ 772 |                               setEchoCast([]);
+ 773 |                             }
+ 774 |                           }
+ 775 |                         }}
+ 776 |                         disabled={!echoFocus.trim()}
+ 777 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
+ 778 |                       >
+ 779 |                         {isLoadingCast ? "Inferring cast..." : "Next"}
+ 780 |                       </button>
+ 781 |                     </div>
+ 782 |                   </div>
+ 783 |                 )}
+ 784 | 
+ 785 |                 {/* Step 3 — Cast Review */}
+ 786 |                 {echoStep === 3 && (
+ 787 |                   <div className="space-y-4">
+ 788 |                     <div className="space-y-1">
+ 789 |                       <h1 className="text-2xl font-bold text-white tracking-tight">Review the cast.</h1>
+ 790 |                       <p className="text-xs text-neutral-500 font-sans">These are the people who will participate in the simulation. Edit, remove, or add as needed.</p>
+ 791 |                     </div>
+ 792 |                     {isLoadingCast ? (
+ 793 |                       <div className="flex items-center justify-center py-12">
+ 794 |                         <div className="w-5 h-5 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
+ 795 |                         <span className="text-xs text-neutral-500 ml-3 font-mono">Inferring cast...</span>
+ 796 |                       </div>
+ 797 |                     ) : (executionMode === "custom" && echoCast.length === 0) ? (
+ 798 |                       <p>You are in Custom mode. Add people directly on the canvas after starting the simulation.</p>
+ 799 |                     ) : (
+ 800 |                       <div className="space-y-2">
+ 801 |                         {echoCast.map((member, idx) => (
+ 802 |                           <div key={idx} className="bg-neutral-950 border border-[#1f1f1f] rounded-xl p-3 space-y-2">
+ 803 |                             {editingCastIdx === idx ? (
+ 804 |                               <div className="space-y-2">
+ 805 |                                 <input
+ 806 |                                   type="text"
+ 807 |                                   value={member.inferred_name}
+ 808 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_name: e.target.value } : m))}
+ 809 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
+ 810 |                                   placeholder="Name"
+ 811 |                                 />
+ 812 |                                 <input
+ 813 |                                   type="text"
+ 814 |                                   value={member.role}
+ 815 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, role: e.target.value } : m))}
+ 816 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-neutral-500"
+ 817 |                                   placeholder="Role"
+ 818 |                                 />
+ 819 |                                 <textarea
+ 820 |                                   value={member.inferred_problem}
+ 821 |                                   rows={2}
+ 822 |                                   onChange={(e) => setEchoCast(prev => prev.map((m, i) => i === idx ? { ...m, inferred_problem: e.target.value } : m))}
+ 823 |                                   className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-2.5 text-xs text-white outline-none focus:border-neutral-500 resize-none"
+ 824 |                                   placeholder="Their perspective..."
+ 825 |                                 />
+ 826 |                                 <button onClick={() => setEditingCastIdx(null)} className="text-[10px] font-mono text-neutral-400 hover:text-white cursor-pointer">Done</button>
+ 827 |                               </div>
+ 828 |                             ) : (
+ 829 |                               <div className="flex items-start justify-between gap-2">
+ 830 |                                 <div className="min-w-0 flex-1">
+ 831 |                                   <div className="flex items-center gap-2">
+ 832 |                                     <span className="text-xs font-semibold text-white">{member.inferred_name}</span>
+ 833 |                                     <span className="text-[9px] font-mono text-neutral-500 uppercase tracking-wider">{member.role}</span>
+ 834 |                                   </div>
+ 835 |                                   <p className="text-[11px] text-neutral-500 leading-relaxed mt-0.5 line-clamp-2">{member.inferred_problem}</p>
+ 836 |                                 </div>
+ 837 |                                 {!member.is_self && (
+ 838 |                                   <div className="flex gap-1 shrink-0">
+ 839 |                                     <button onClick={() => setEditingCastIdx(idx)} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><Pencil className="w-3 h-3" /></button>
+ 840 |                                     <button onClick={() => setEchoCast(prev => prev.filter((_, i) => i !== idx))} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"><X className="w-3 h-3" /></button>
+ 841 |                                   </div>
+ 842 |                                 )}
+ 843 |                               </div>
+ 844 |                             )}
+ 845 |                           </div>
+ 846 |                         ))}
+ 847 |                         <button
+ 848 |                           onClick={() => setEchoCast(prev => [...prev, { inferred_name: "New Person", role: "acquaintance", inferred_problem: "Enter their perspective...", emotional_core: "", is_self: false }])}
+ 849 |                           className="w-full py-2.5 border border-dashed border-[#1f1f1f] rounded-xl text-xs text-neutral-500 hover:text-white hover:border-neutral-600 transition-all cursor-pointer"
+ 850 |                         >
+ 851 |                           Add Person
+ 852 |                         </button>
+ 853 |                       </div>
+ 854 |                     )}
+ 855 |                     <div className="flex gap-2">
+ 856 |                       <button onClick={() => setEchoStep(2)} className="px-4 py-3 rounded-xl border border-[#1f1f1f] text-sm text-neutral-400 hover:text-white transition-all cursor-pointer">Back</button>
+ 857 |                       <button
+ 858 |                         onClick={beginEchoHouseSimulation}
+ 859 |                         disabled={isLoadingCast || (executionMode !== "custom" && echoCast.filter(m => !m.is_self).length === 0)}
+ 860 |                         className="flex-1 py-3 bg-white text-black font-semibold text-sm rounded-xl hover:bg-neutral-200 active:scale-[0.98] disabled:opacity-20 transition-all cursor-pointer"
+ 861 |                       >
+ 862 |                         Begin Simulation
+ 863 |                       </button>
+ 864 |                     </div>
+ 865 |                   </div>
+ 866 |                 )}
+ 867 |               </div>
+ 868 |             </div>
+ 869 |           )}
+ 870 | 
+ 871 |           {workspaceState === "active" && (
+ 872 |             <div className="absolute inset-0 flex">
+ 873 |               {currentTab === "chat" && (
+ 874 |                 <div className="flex-1 flex flex-col justify-between overflow-hidden bg-black">
+ 875 |                   <div ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
+ 876 |                     {isLoadingSession ? (
+ 877 |                       <div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-neutral-700 border-t-white rounded-full animate-spin" /></div>
+ 878 |                     ) : (
+ 879 |                       <div className="max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto space-y-4 select-text">
+ 880 |                         {chatMessages.length === 0 ? (
+ 881 |                           <div className="flex flex-col items-center justify-center py-20 text-center space-y-2 select-none">
+ 882 |                             <h1 className="text-4xl font-extrabold tracking-tight text-white antialiased">
+ 883 |                               {isEchoHouseMode ? "What is your problem in life?" : "What's on your mind?"}
+ 884 |                             </h1>
+ 885 |                             <p className="text-sm text-neutral-400 font-sans">
+ 886 |                               {isEchoHouseMode ? "Type your struggle below to initialize the simulation." : "Start a conversation to see AI response."}
+ 887 |                             </p>
+ 888 |                           </div>
+ 889 |                         ) : (
+ 890 |                           chatMessages.map((msg, msgIdx) => (
+ 891 |                             <motion.div key={msg.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={`flex w-full ${msg.sender === "divider" ? "justify-center" : msg.sender === "user" ? "justify-end" : "justify-start"}`}>
+ 892 |                               {msg.sender === "divider" ? (
+ 893 |                                 <div className="w-full flex items-center gap-4 my-4 select-none">
+ 894 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
+ 895 |                                   <span className="text-[10px] font-mono text-neutral-500 tracking-wider uppercase">{msg.text}</span>
+ 896 |                                   <div className="h-px flex-1 bg-[#1f1f1f]" />
+ 897 |                                 </div>
+ 898 |                               ) : msg.sender === "user" ? (
+ 899 |                                 <div className="flex flex-col items-end space-y-1 max-w-[72%] group">
+ 900 |                                   {msg.speakerName && (
+ 901 |                                     <span className="text-[10px] font-mono text-neutral-500 mr-2">{msg.speakerName}</span>
+ 902 |                                   )}
+ 903 |                                   <div className={`rounded-3xl px-5 py-3 text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'bg-neutral-800' : 'bg-[#2f2f2f]'}`}><p className="whitespace-pre-wrap">{msg.text}</p></div>
+ 904 |                                   <div className="flex items-center gap-3 mt-1.5 text-neutral-500 select-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 mr-2">
+ 905 |                                     <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
+ 906 |                                       {copiedMsgId === msg.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+ 907 |                                       <span>{copiedMsgId === msg.id ? "Copied" : "Copy"}</span>
+ 908 |                                     </button>
+ 909 |                                     <button onClick={() => { setUserQuery(msg.text); textareaRef.current?.focus(); textareaRef.current?.scrollIntoView({ behavior: "smooth" }); }} className="flex items-center gap-1 text-[10px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded hover:bg-neutral-800">
+ 910 |                                       <Pencil className="w-3 h-3" />
+ 911 |                                       <span>Edit</span>
+ 912 |                                     </button>
+ 913 |                                   </div>
+ 914 |                                 </div>
+ 915 |                               ) : (
+ 916 |                                 <div className="flex-1 max-w-[88%] flex flex-col items-start space-y-1">
+ 917 |                                   {msg.speakerName && msg.speakerName !== "insight" && msg.speakerName !== "takeaways" && (
+ 918 |                                     <span className="text-[10px] font-mono text-neutral-500 ml-1">{msg.speakerName}</span>
+ 919 |                                   )}
+ 920 |                                   {msg.speakerName === "takeaways" && msg.takeaways ? (
+ 921 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 space-y-3 mt-2">
+ 922 |                                       <span className="text-[10px] font-mono text-neutral-400 uppercase tracking-wider font-bold block">What you can try</span>
+ 923 |                                       <ol className="space-y-2">
+ 924 |                                         {msg.takeaways.map((item, ti) => (
+ 925 |                                           <li key={ti} className="flex gap-2.5 text-xs text-neutral-300 leading-relaxed">
+ 926 |                                             <span className="font-mono text-neutral-600 shrink-0">{ti + 1}.</span>
+ 927 |                                             <span>{item}</span>
+ 928 |                                           </li>
+ 929 |                                         ))}
+ 930 |                                       </ol>
+ 931 |                                     </div>
+ 932 |                                   ) : msg.speakerName === "insight" ? (
+ 933 |                                     <div className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+ 934 |                                       {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
+ 935 |                                     </div>
+ 936 |                                   ) : (
+ 937 |                                     <div className={`w-full text-neutral-100 text-sm leading-relaxed ${isEchoHouseMode && msg.speakerName ? 'rounded-2xl px-4 py-3 bg-neutral-900' : 'px-1 py-2'}`}>
+ 938 |                                       {isOrchestrating && msgIdx === chatMessages.length - 1 ? <StreamingText text={msg.text} isActive={true} /> : <MarkdownRenderer content={msg.text || ""} />}
+ 939 |                                       {msg.text && (!isOrchestrating || msgIdx !== chatMessages.length - 1) && (
+ 940 |                                         <div className="flex items-center gap-3 mt-4 text-neutral-500 select-none">
+ 941 |                                           <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedMsgId(msg.id); setTimeout(() => setCopiedMsgId(null), 2000); }} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
+ 942 |                                             {copiedMsgId === msg.id ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400 font-medium">Copied</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>}
+ 943 |                                           </button>
+ 944 |                                           {!isEchoHouseMode && msgIdx === chatMessages.length - 1 && !isOrchestrating && (
+ 945 |                                             <button onClick={handleRegenerate} className="flex items-center gap-1.5 text-[11px] hover:text-neutral-200 transition-colors cursor-pointer p-1 rounded-md hover:bg-neutral-800">
+ 946 |                                               <RefreshCw className="w-3.5 h-3.5" />
+ 947 |                                               <span>Regenerate</span>
+ 948 |                                             </button>
+ 949 |                                           )}
+ 950 |                                         </div>
+ 951 |                                       )}
+ 952 |                                     </div>
+ 953 |                                   )}
+ 954 |                                   {msgIdx === chatMessages.length - 1 && !isThinking && !isOrchestrating && nodes.length > 0 && (
+ 955 |                                     <div className="flex gap-3 mt-4 select-none">
+ 956 |                                       <button onClick={() => setCurrentTab("arena")} className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer max-w-max">
+ 957 |                                         <GitFork className="w-3.5 h-3.5 text-cyan-400" /><span>See Agent Flow</span>
+ 958 |                                       </button>
+ 959 |                                       {!isEchoHouseMode && (activeSession?.mode === "custom" || executionMode === "custom") && executionState === "paused" && (
+ 960 |                                         <button
+ 961 |                                           onClick={async () => {
+ 962 |                                             setExecutionState("running");
+ 963 |                                             await triggerCustomExecution();
+ 964 |                                           }}
+ 965 |                                           className="px-4 py-2 bg-white hover:bg-neutral-200 rounded-xl text-xs font-bold text-black transition-all flex items-center gap-1.5 cursor-pointer max-w-max"
+ 966 |                                         >
+ 967 |                                           Proceed
+ 968 |                                         </button>
+ 969 |                                       )}
+ 970 |                                     </div>
+ 971 |                                   )}
+ 972 |                                 </div>
+ 973 |                               )}
+ 974 |                             </motion.div>
+ 975 |                           ))
+ 976 |                         )}
+ 977 |                         {/* Live agent thinking indicator */}
+ 978 |                         {isThinking && chatMessages[chatMessages.length - 1]?.sender !== 'ai' && (
+ 979 |                           <motion.div 
+ 980 |                             initial={{ opacity: 0, y: 8 }} 
+ 981 |                             animate={{ opacity: 1, y: 0 }} 
+ 982 |                             className="flex justify-start"
+ 983 |                           >
+ 984 |                             <div className="flex items-center gap-2 px-4 py-3 bg-neutral-950 border border-[#1f1f1f] rounded-2xl max-w-[200px]">
+ 985 |                               <div className="flex gap-1">
+ 986 |                                 {[0, 1, 2].map(i => (
+ 987 |                                   <div key={i} className="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+ 988 |                                 ))}
+ 989 |                               </div>
+ 990 |                               <ThinkingText prefix="thinking" className="text-[10px] text-neutral-500 font-mono" />
+ 991 |                             </div>
+ 992 |                           </motion.div>
+ 993 |                         )}
+ 994 |                         <div ref={chatEndRef} />
+ 995 |                       </div>
+ 996 |                     )}
+ 997 |                   </div>
+ 998 |                   <div className="px-4 sm:px-6 py-4 bg-black/60 border-t border-[#141414] backdrop-blur-xl shrink-0 flex flex-col gap-2">
+ 999 |                     <div className="max-w-3xl mx-auto w-full chatgpt-input-box rounded-[24px] p-1.5 flex items-center gap-2">
+1000 |                       <button onClick={handleFileAttach} className="p-2 text-neutral-500 hover:text-neutral-300 rounded-full hover:bg-neutral-900 transition-colors shrink-0 cursor-pointer"><UploadCloud className="w-5 h-5 stroke-[1.8]" /></button>
+1001 |                       <textarea ref={textareaRef} rows={1} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!isOrchestrating && userQuery.trim()) startOrchestration(userQuery); } }} placeholder={isOrchestrating ? "Streaming..." : isEchoHouseMode ? "What is your problem in life?" : "Ask a follow-up..."} disabled={isOrchestrating} className="flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-600 focus:ring-0 px-3 py-1.5 disabled:opacity-50 resize-none max-h-40 custom-scrollbar" />
+1002 |                       <div className="flex items-center gap-2 shrink-0">
+1003 |                         <ModeSelector />
+1004 |                         {isOrchestrating ? (
+1005 |                           <button onClick={cancelOrchestration} className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-500 active:scale-95 transition-all cursor-pointer"><Square className="w-3.5 h-3.5 text-white fill-white" /></button>
+1006 |                         ) : (
+1007 |                           <button onClick={() => startOrchestration(userQuery)} disabled={!userQuery.trim() || isThinking} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-neutral-200 active:scale-95 disabled:opacity-20 disabled:scale-100 transition-all cursor-pointer"><ArrowRight className="w-4 h-4 text-black stroke-[3]" /></button>
+1008 |                         )}
+1009 |                       </div>
+1010 |                     </div>
+1011 |                   </div>
+1012 |                 </div>
+1013 |               )}
+1014 |               {currentTab === "arena" && (
+1015 |                 <div className="flex-1 relative overflow-hidden bg-[#000000] flex">
+1016 |                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-[#0d0d0d]/90 border border-[#1f1f1f] rounded-full px-4 py-2 backdrop-blur-md shadow-xl pointer-events-auto">
+1017 |                     <button onClick={() => setCurrentTab("chat")} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer font-mono"><ChevronLeft className="w-3.5 h-3.5" /> Back to Chat</button>
+1018 |                   </div>
+1019 |                   <FlowArena onProceed={() => setCurrentTab("chat")} />
+1020 |                 </div>
+1021 |               )}
+1022 |             </div>
+1023 |           )}
+1024 |         </div>
+1025 |       </main>
+1026 | 
+1027 |       {currentTab === "arena" && isConfigPanelOpen && activeNodeDetail && (
+1028 |         <div className="fixed top-0 right-0 h-full w-80 bg-[#0c0c0c]/95 border-l border-[#1f1f1f] z-40 flex flex-col justify-between shadow-2xl transition-transform duration-300 right-panel select-none">
+1029 |           <div className="p-5 border-b border-[#1f1f1f] flex justify-between items-center bg-[#0d0d0d]">
+1030 |             <h3 className="text-sm font-bold text-white uppercase tracking-wider">{activeNodeDetail.data.name}</h3>
+1031 |             <button onClick={() => { setIsConfigPanelOpen(false); setSelectedNodeId(null); }} className="text-neutral-500 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
+1032 |           </div>
+1033 |           <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
+1034 |             {activeNodeDetail.data.isEchoHouseAgent ? (
+1035 |               <>
 1036 |                 <div className="space-y-1.5">
-1037 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">
-1038 |                     {activeNodeDetail.data.echohouseRole === "self" ? "Your problem in life" : "What do they think about your situation?"}
-1039 |                   </label>
-1040 |                   <textarea
-1041 |                     value={activeNodeDetail.data.echohouseProblem}
-1042 |                     onChange={(e) => {
-1043 |                       const nameVal = activeNodeDetail.data.name || "";
-1044 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
-1045 |                       const probVal = e.target.value;
-1046 |                       updateNodeField(activeNodeDetail.id, {
-1047 |                         echohouseProblem: probVal,
-1048 |                         systemPrompt: roleVal === "self"
-1049 |                           ? "You are the user themselves, experiencing this problem from the inside."
-1050 |                           : `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
-1051 |                         objective: roleVal === "self"
-1052 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
-1053 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
-1054 |                       });
-1055 |                     }}
-1056 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[100px] resize-none leading-relaxed"
-1057 |                   />
-1058 |                 </div>
-1059 |               </>
-1060 |             ) : (
-1061 |               <>
-1062 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label><input type="text" value={activeNodeDetail.data.name} onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none" /></div>
-1063 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label><textarea value={activeNodeDetail.data.systemPrompt} onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed" /></div>
-1064 |               </>
-1065 |             )}
-1066 |           </div>
-1067 |         </div>
-1068 |       )}
-1069 | 
-1070 |       <AnimatePresence>
-1071 |         {isSecretOpen && <APIKeysModal isOpen={isSecretOpen} onClose={() => setIsSecretOpen(false)} />}
-1072 |         
-1073 |         {pendingApproval && (
-1074 |           <div className="fixed bottom-6 right-6 w-96 bg-[#0d0d0d] border border-amber-500/50 shadow-[0_0_50px_rgba(245,158,11,0.15)] rounded-2xl p-5 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300 select-none">
-1075 |             <div className="flex gap-4 items-start">
-1076 |               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 shrink-0"><Sliders className="w-5 h-5 animate-pulse" /></div>
-1077 |               <div className="flex-1 space-y-2">
-1078 |                 <h4 className="text-xs font-bold text-white">&apos;{(nodes.find(n => n.id === pendingApproval.nodeId)?.data as any)?.name}&apos; wants to use <span className="text-amber-400 font-mono">[{pendingApproval.toolName}]</span></h4>
-1079 |                 <p className="text-[10px] text-neutral-400 leading-normal">Action: <span className="text-white font-semibold">{pendingApproval.action}</span> — {pendingApproval.detail}</p>
-1080 |                 <div className="pt-3 flex gap-2">
-1081 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "approve", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Approve</button>
-1082 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "deny", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="px-4 py-2 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Deny</button>
-1083 |                 </div>
-1084 |               </div>
-1085 |             </div>
-1086 |           </div>
-1087 |         )}
-1088 |       </AnimatePresence>
-1089 |     </div>
-1090 |   );
-1091 | }
-1092 |
+1037 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label>
+1038 |                   <input
+1039 |                     type="text"
+1040 |                     value={activeNodeDetail.data.name}
+1041 |                     onChange={(e) => {
+1042 |                       const nameVal = e.target.value;
+1043 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
+1044 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
+1045 |                       updateNodeField(activeNodeDetail.id, {
+1046 |                         name: nameVal,
+1047 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+1048 |                         objective: nameVal === "You (Self)" || roleVal === "self"
+1049 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
+1050 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
+1051 |                       });
+1052 |                     }}
+1053 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none"
+1054 |                   />
+1055 |                 </div>
+1056 |                 <div className="space-y-1.5">
+1057 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Role</label>
+1058 |                   <input
+1059 |                     type="text"
+1060 |                     value={activeNodeDetail.data.echohouseRole}
+1061 |                     disabled={activeNodeDetail.data.echohouseRole === "self"}
+1062 |                     onChange={(e) => {
+1063 |                       const nameVal = activeNodeDetail.data.name || "";
+1064 |                       const roleVal = e.target.value;
+1065 |                       const probVal = activeNodeDetail.data.echohouseProblem || "";
+1066 |                       updateNodeField(activeNodeDetail.id, {
+1067 |                         echohouseRole: roleVal,
+1068 |                         tag: roleVal.toUpperCase().replace(/\s+/g, '_'),
+1069 |                         systemPrompt: `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+1070 |                         objective: `Provide perspective as ${nameVal} (${roleVal}).`
+1071 |                       });
+1072 |                     }}
+1073 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none disabled:opacity-40"
+1074 |                   />
+1075 |                 </div>
+1076 |                 <div className="space-y-1.5">
+1077 |                   <label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">
+1078 |                     {activeNodeDetail.data.echohouseRole === "self" ? "Your problem in life" : "What do they think about your situation?"}
+1079 |                   </label>
+1080 |                   <textarea
+1081 |                     value={activeNodeDetail.data.echohouseProblem}
+1082 |                     onChange={(e) => {
+1083 |                       const nameVal = activeNodeDetail.data.name || "";
+1084 |                       const roleVal = activeNodeDetail.data.echohouseRole || "";
+1085 |                       const probVal = e.target.value;
+1086 |                       updateNodeField(activeNodeDetail.id, {
+1087 |                         echohouseProblem: probVal,
+1088 |                         systemPrompt: roleVal === "self"
+1089 |                           ? "You are the user themselves, experiencing this problem from the inside."
+1090 |                           : `You are ${nameVal}, whose role in the user's life is ${roleVal}. From your perspective about their situation: ${probVal}`,
+1091 |                         objective: roleVal === "self"
+1092 |                           ? (probVal.length > 120 ? probVal.substring(0, 120) + "..." : probVal)
+1093 |                           : `Provide perspective as ${nameVal} (${roleVal}).`
+1094 |                       });
+1095 |                     }}
+1096 |                     className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[100px] resize-none leading-relaxed"
+1097 |                   />
+1098 |                 </div>
+1099 |               </>
+1100 |             ) : (
+1101 |               <>
+1102 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">Name</label><input type="text" value={activeNodeDetail.data.name} onChange={(e) => updateNodeField(activeNodeDetail.id, { name: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg px-3 py-2 text-xs text-white focus:border-neutral-500 outline-none" /></div>
+1103 |                 <div className="space-y-1.5"><label className="text-[9px] font-mono uppercase text-neutral-400 tracking-wider font-bold">System Prompt</label><textarea value={activeNodeDetail.data.systemPrompt} onChange={(e) => updateNodeField(activeNodeDetail.id, { systemPrompt: e.target.value })} className="w-full bg-[#050505] border border-[#1f1f1f] rounded-lg p-3 text-xs text-white focus:border-neutral-500 outline-none min-h-[80px] resize-none leading-relaxed" /></div>
+1104 |               </>
+1105 |             )}
+1106 |           </div>
+1107 |         </div>
+1108 |       )}
+1109 | 
+1110 |       <AnimatePresence>
+1111 |         {isSecretOpen && <APIKeysModal isOpen={isSecretOpen} onClose={() => setIsSecretOpen(false)} />}
+1112 |         
+1113 |         {pendingApproval && (
+1114 |           <div className="fixed bottom-6 right-6 w-96 bg-[#0d0d0d] border border-amber-500/50 shadow-[0_0_50px_rgba(245,158,11,0.15)] rounded-2xl p-5 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300 select-none">
+1115 |             <div className="flex gap-4 items-start">
+1116 |               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 shrink-0"><Sliders className="w-5 h-5 animate-pulse" /></div>
+1117 |               <div className="flex-1 space-y-2">
+1118 |                 <h4 className="text-xs font-bold text-white">&apos;{(nodes.find(n => n.id === pendingApproval.nodeId)?.data as any)?.name}&apos; wants to use <span className="text-amber-400 font-mono">[{pendingApproval.toolName}]</span></h4>
+1119 |                 <p className="text-[10px] text-neutral-400 leading-normal">Action: <span className="text-white font-semibold">{pendingApproval.action}</span> — {pendingApproval.detail}</p>
+1120 |                 <div className="pt-3 flex gap-2">
+1121 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "approve", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-bold rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Approve</button>
+1122 |                   <button onClick={() => { sendApprovalResponse(pendingApproval.nodeId, pendingApproval.toolName, "deny", pendingApproval.logId); useWorkflowStore.setState({ pendingApproval: null }); }} className="px-4 py-2 border border-[#1f1f1f] text-neutral-400 hover:text-white rounded-lg text-[10px] font-mono transition-colors cursor-pointer">Deny</button>
+1123 |                 </div>
+1124 |               </div>
+1125 |             </div>
+1126 |           </div>
+1127 |         )}
+1128 |       </AnimatePresence>
+1129 |     </div>
+1130 |   );
+1131 | }
+1132 |
 ```
 
 ### File: `Frontend/components/edges/CustomEdge.tsx`

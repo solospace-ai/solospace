@@ -263,6 +263,22 @@ function SolospaceContent() {
   };
 
   const beginEchoHouseSimulation = () => {
+    const titleText = `Echohouse: ${echoSituation}`;
+    const truncatedTitle = titleText.length > 50 ? titleText.substring(0, 50) + "..." : titleText;
+    const activeId = useWorkflowStore.getState().activeSessionId;
+    
+    useWorkflowStore.setState((state) => {
+      const updatedSessions = { ...state.sessions };
+      if (activeId && updatedSessions[activeId]) {
+        updatedSessions[activeId] = {
+          ...updatedSessions[activeId],
+          title: truncatedTitle,
+          prompt: echoSituation
+        };
+      }
+      return { sessions: updatedSessions };
+    });
+
     const selfMember = echoCast.find(m => m.is_self || m.role === "self");
     const selfNode = {
       id: "self-node",
@@ -339,6 +355,24 @@ function SolospaceContent() {
     if (!promptText.trim()) return;
 
     if (isEchoHouseMode) {
+      const activeId = useWorkflowStore.getState().activeSessionId;
+      const currentSession = activeId ? sessions[activeId] : null;
+      if (currentSession && (currentSession.title === "EchoHouse Simulation" || currentSession.title === "New Session" || !currentSession.title)) {
+        const titleText = `Echohouse: ${promptText}`;
+        const truncatedTitle = titleText.length > 50 ? titleText.substring(0, 50) + "..." : titleText;
+        useWorkflowStore.setState((state) => {
+          const updatedSessions = { ...state.sessions };
+          if (activeId && updatedSessions[activeId]) {
+            updatedSessions[activeId] = {
+              ...updatedSessions[activeId],
+              title: truncatedTitle,
+              prompt: promptText
+            };
+          }
+          return { sessions: updatedSessions };
+        });
+      }
+
       const userMsgId = Date.now().toString();
       const userMsg: ChatMessage = {
         id: userMsgId,
@@ -579,7 +613,13 @@ function SolospaceContent() {
               <div className="flex items-center gap-1.5 px-3"><History className="w-3.5 h-3.5 text-neutral-600" /><span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest font-mono">Recents</span></div>
               <div className="space-y-1 max-h-[220px] overflow-y-auto custom-scrollbar">
                 {Object.values(sessions).length === 0 ? <span className="text-[10px] text-neutral-600 italic px-3 block pt-1">No chats yet.</span> : (
-                  Object.values(sessions).reverse().map((s) => (
+                  Object.values(sessions)
+                    .sort((a, b) => {
+                      const aTime = parseInt(a.id.replace(/\D/g, ''), 10) || 0;
+                      const bTime = parseInt(b.id.replace(/\D/g, ''), 10) || 0;
+                      return bTime - aTime;
+                    })
+                    .map((s) => (
                     <div key={s.id} className="group/session flex items-center justify-between px-2 py-1 rounded-md hover:bg-neutral-900 transition-colors">
                       <button disabled={isLoadingSession} onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); setIsLoadingSession(true); try { await loadSessionFromDb(s.id); setWorkspaceState("active"); setCurrentTab("chat"); } catch (err) { console.error(err); } finally { setIsLoadingSession(false); } } }} className={`text-left text-xs truncate font-medium flex-1 cursor-pointer transition-colors ${activeSessionId === s.id ? "text-white font-bold" : "text-neutral-500 hover:text-white"}`} title={s.prompt}>{s.mode === 'echohouse' ? `${s.title} [Echo]` : s.title}</button>
                       <button onClick={async (e) => { if (isSidebarExpanded) { e.stopPropagation(); if (confirm(`Delete "${s.title}"?`)) await deleteSessionFromDb(s.id); } }} className="opacity-0 group-hover/session:opacity-100 p-1 text-neutral-600 hover:text-rose-400 rounded transition-opacity cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
